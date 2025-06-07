@@ -145,3 +145,74 @@ export async function createAttachment(file) {
     return Promise.reject(response);
   }
 }
+
+// --- BEGIN GIT INTEGRATION API CALLS ---
+
+export async function getGitInfo() {
+  try {
+    const response = await api.get("api/git/info");
+    return response.data;
+  } catch (error) {
+    return Promise.reject(error);
+  }
+}
+
+export async function getGitStatus() {
+  try {
+    const response = await api.get("api/git/status");
+    return response.data;
+  } catch (error) {
+    return Promise.reject(error);
+  }
+}
+
+export async function gitAddAll() {
+  try {
+    const response = await api.post("api/git/add_all");
+    return response.data;
+  } catch (error) {
+    return Promise.reject(error);
+  }
+}
+
+export async function gitCommit(message) {
+  try {
+    const response = await api.post("api/git/commit", { message });
+    return response.data;
+  } catch (error) {
+    return Promise.reject(error);
+  }
+}
+
+export async function getGitLog(limit = 10, page = 1) {
+  try {
+    const response = await api.get("api/git/log", {
+      params: { limit, page },
+    });
+    return response.data;
+  } catch (error) {
+    return Promise.reject(error);
+  }
+}
+
+export async function gitPull(params = {}) {
+  // params: { remote, branch, rebase, autostash }
+  try {
+    const response = await api.post("api/git/pull", null, { params }); // Send params as query parameters
+    return response.data;
+  } catch (error) {
+    return Promise.reject(error);
+  }
+}
+
+export async function gitPush(params = {}) {
+  // params: { remote, branch, force }
+  try {
+    const response = await api.post("api/git/push", null, { params }); // Send params as query parameters
+    return response.data;
+  } catch (error) {
+    return Promise.reject(error);
+  }
+}
+
+// --- END GIT INTEGRATION API CALLS ---
