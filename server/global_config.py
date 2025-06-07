@@ -15,6 +15,7 @@ class GlobalConfig:
         self.quick_access_sort: str = self._quick_access_sort()
         self.quick_access_limit: int = self._quick_access_limit()
         self.path_prefix: str = self._load_path_prefix()
+        self.flatnotes_git_enabled: bool = self._load_flatnotes_git_enabled()
 
     def load_auth(self):
         if self.auth_type in (AuthType.NONE, AuthType.READ_ONLY):
@@ -101,6 +102,11 @@ class GlobalConfig:
             sys.exit(1)
         return value
 
+    def _load_flatnotes_git_enabled(self) -> bool:
+        key = "FLATNOTES_GIT_ENABLED"
+        value = get_env(key, mandatory=False, default=False, cast_bool=True)
+        logger.info(f"Git integration feature flag (FLATNOTES_GIT_ENABLED): {value}")
+        return value
 
 class AuthType(str, Enum):
     NONE = "none"
@@ -116,3 +122,4 @@ class GlobalConfigResponseModel(CustomBaseModel):
     quick_access_term: str
     quick_access_sort: str
     quick_access_limit: int
+    flatnotes_git_enabled: bool

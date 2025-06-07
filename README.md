@@ -5,6 +5,13 @@
   <img alt="Docker Pulls" src="https://img.shields.io/docker/pulls/dullage/flatnotes?style=for-the-badge">
 </p>
 
+> [!WARNING]
+> **This is a forked version of `flatnotes` with added Git integration features.**
+> 
+> This repository extends the original `flatnotes` to allow server-side Git operations (status, commit, push, pull) directly from the web UI. For all new features and configurations related to Git, please see the **[xxx Guide](xxx.md)**.
+> 
+> For information about core `flatnotes` features, please refer to the [official repository](https://github.com/dullage/flatnotes).
+
 A self-hosted, database-less note-taking web app that utilises a flat folder of markdown files for storage.
 
 Log into the [demo site](https://demo.flatnotes.io) and take a look around. *Note: This site resets every 15 minutes.*

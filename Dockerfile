@@ -33,14 +33,21 @@ ENV FLATNOTES_HOST=0.0.0.0
 ENV FLATNOTES_PORT=8080
 
 ENV APP_PATH=/app
-ENV FLATNOTES_PATH=/data
+ENV FLATNOTES_PATH=/data 
 
 RUN mkdir -p ${APP_PATH}
 RUN mkdir -p ${FLATNOTES_PATH}
 
-RUN apt update && apt install -y \
+# Install necessary packages:
+# - curl: For healthcheck
+# - gosu: To drop privileges from root to a specified user
+# - git: For the Git integration feature
+# - openssh-client: For git operations over SSH and for ssh-keyscan
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     gosu \
+    git \
+    openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir pipenv

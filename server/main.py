@@ -13,6 +13,7 @@ from global_config import AuthType, GlobalConfig, GlobalConfigResponseModel
 from helpers import replace_base_href
 from notes.base import BaseNotes
 from notes.models import Note, NoteCreate, NoteUpdate, SearchResult
+from logger import logger 
 
 global_config = GlobalConfig()
 auth: BaseAuth = global_config.load_auth()
@@ -183,6 +184,7 @@ def get_config():
         quick_access_term=global_config.quick_access_term,
         quick_access_sort=global_config.quick_access_sort,
         quick_access_limit=global_config.quick_access_limit,
+        flatnotes_git_enabled=global_config.flatnotes_git_enabled # Add the flag here
     )
 
 
@@ -252,6 +254,29 @@ def healthcheck() -> str:
 # endregion
 
 app.include_router(router, prefix=global_config.path_prefix)
+
+if global_config.flatnotes_git_enabled:
+    try:
+        from git_integration.router import router as git_router
+        from git_integration.config import GIT_ENABLED as GIT_MODULE_ENABLED
+        
+        if GIT_MODULE_ENABLED: 
+            app.include_router(
+                git_router,
+                prefix=f"{global_config.path_prefix}/api/git", 
+                tags=["git"] 
+            )
+            logger.info("Git integration API enabled and routes included.")
+        else:
+            logger.warning("FLATNOTES_GIT_ENABLED is true, but Git module internal GIT_ENABLED is false. Git API routes NOT included.")
+
+    except ImportError as e:
+        logger.error(f"Failed to import Git integration router. Git API will not be available. Error: {e}")
+    except Exception as e:
+        logger.error(f"An unexpected error occurred while trying to include Git integration router: {e}", exc_info=True)
+else:
+    logger.info("FLATNOTES_GIT_ENABLED is false. Git integration API routes NOT included.")
+
 app.mount(
     global_config.path_prefix,
     StaticFiles(directory="client/dist"),
