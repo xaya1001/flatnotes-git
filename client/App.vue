@@ -4,6 +4,7 @@
     class="container mx-auto flex h-screen flex-col px-2 py-4 print:max-w-full"
   >
     <PrimeToast />
+    <ConfirmDialog />
     <SearchModal v-model="isSearchModalVisible" />   
     <template v-if="isConfigLoaded">
       <NavBar
@@ -12,11 +13,14 @@
         :class="{ 'print:hidden': route.name == 'note' }"
         :hide-logo="!showNavBarLogo"
         @toggleSearchModal="toggleSearchModal"
-        @toggleGitPanel="handleToggleGitPanel"
       />
       <RouterView />
 
       <!-- GIT PANEL INTEGRATION -->
+      <GitStatusIndicator 
+        v-if="gitIntegrationEnabled" 
+        @toggle-panel="handleToggleGitPanel" 
+      />
       <div v-if="isGitPanelVisible && gitIntegrationEnabled" 
            class="fixed bottom-0 right-0 mb-4 mr-4 z-40 w-full max-w-md md:max-w-lg max-h-[70vh] overflow-y-auto">
         <GitPanel @close="isGitPanelVisible = false" />
@@ -39,6 +43,7 @@ import { RouterView, useRoute } from "vue-router";
 
 import { apiErrorHandler, getConfig } from "./api.js";
 import PrimeToast from "./components/PrimeToast.vue";
+import ConfirmDialog from 'primevue/confirmdialog';
 import { useGlobalStore } from "./globalStore.js";
 import { loadTheme } from "./helpers.js";
 import NavBar from "./partials/NavBar.vue";
@@ -46,6 +51,7 @@ import SearchModal from "./partials/SearchModal.vue";
 import { loadStoredToken } from "./tokenStorage.js";
 import LoadingIndicator from "./components/LoadingIndicator.vue";
 import GitPanel from "./components/GitPanel.vue";
+import GitStatusIndicator from "./components/GitStatusIndicator.vue";
 import router from "./router.js";
 
 const globalStore = useGlobalStore();
