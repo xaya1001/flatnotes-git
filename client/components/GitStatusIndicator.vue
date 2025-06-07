@@ -2,7 +2,7 @@
 <template>
   <div 
     v-if="gitIntegrationEnabled && !error"
-    class="fixed bottom-4 right-4 z-50 flex items-center p-2 rounded-full shadow-lg cursor-pointer bg-theme-background-elevated hover:bg-theme-border transition-colors duration-200"
+    class="fixed top-5 right-5 z-50 flex items-center p-2 rounded-full shadow-lg cursor-pointer bg-theme-background-elevated hover:bg-theme-border transition-colors duration-200"
     @click="$emit('toggle-panel')"
     :title="tooltipText"
   >

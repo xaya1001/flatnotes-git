@@ -22,6 +22,11 @@ from .git_models import (
     GitStatusSummaryResponse
 )
 from .exceptions import GitCommandError
+from datetime import datetime
+from pydantic import BaseModel
+
+class AutoSyncState(BaseModel):
+    paused: bool
 
 # Initialize dependencies for auth
 # This needs to be done carefully as global_config instance is in main.py
@@ -117,6 +122,33 @@ async def commit_git_changes(commit_request: GitCommitRequest = Body(...)):
     except Exception as e:
         logger.error(f"Unexpected API Error committing changes: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="An unexpected error occurred while committing changes.")
+
+@router.post(
+    "/sync",
+    response_model=GitCommandResponse,
+    dependencies=common_deps,
+    summary="Sync Workspace (Add, Commit, Pull, Push)"
+)
+async def sync_workspace(commit_request: GitCommitRequest = Body(...)):
+    """
+    Performs a full synchronization cycle: stages all changes, commits them with the
+    provided message, pulls from the remote, and then pushes.
+    """
+    try:
+        if not commit_request.message:
+            # Use a default message if none is provided for sync
+            commit_message = f"[flatnotes]: sync by user action at [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]"
+        else:
+            commit_message = commit_request.message
+            
+        stdout, stderr = git_utils.sync_workspace(commit_message=commit_message)
+        return GitCommandResponse(message="Workspace synchronized successfully.", stdout=stdout, stderr=stderr)
+    except GitCommandError as e:
+        logger.error(f"API Error during workspace sync: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        logger.error(f"Unexpected API Error during workspace sync: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="An unexpected error occurred while syncing the workspace.")
 
 @router.post(
     "/pull",
@@ -287,3 +319,35 @@ async def get_git_status_summary():
     except GitCommandError as e:
         logger.error(f"API Error getting Git status summary: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get(
+    "/auto-sync/state",
+    response_model=AutoSyncState,
+    dependencies=common_deps,
+    summary="Get Auto-Sync Pause State"
+)
+async def get_auto_sync_state():
+    """Gets the current pause state of the scheduled auto-sync."""
+    return AutoSyncState(paused=git_config.is_auto_sync_paused())
+
+@router.post(
+    "/auto-sync/pause",
+    response_model=AutoSyncState,
+    dependencies=common_deps,
+    summary="Pause Auto-Sync"
+)
+async def set_pause_auto_sync():
+    """Temporarily pauses the scheduled auto-sync feature."""
+    git_config.pause_auto_sync()
+    return AutoSyncState(paused=True)
+
+@router.post(
+    "/auto-sync/resume",
+    response_model=AutoSyncState,
+    dependencies=common_deps,
+    summary="Resume Auto-Sync"
+)
+async def set_resume_auto_sync():
+    """Resumes the paused scheduled auto-sync feature."""
+    git_config.resume_auto_sync()
+    return AutoSyncState(paused=False)

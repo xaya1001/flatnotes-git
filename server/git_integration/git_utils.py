@@ -238,3 +238,70 @@ def get_status_summary() -> Dict[str, Any]:
     changed_files.update(untracked_stdout.splitlines())
     
     return {"current_branch": branch, "files_changed_count": len(changed_files)}
+
+def sync_workspace(commit_message: str) -> Tuple[str, str]:
+    """
+    Performs a full sync cycle: add, commit, pull, and push.
+    Handles errors gracefully to prevent pushing in a bad state.
+    """
+    logger.info("Starting workspace sync...")
+    
+    # 1. Add all changes
+    try:
+        add_stdout, add_stderr = add_all_changes()
+        logger.info("Sync: All changes added.")
+    except GitCommandError as e:
+        logger.error(f"Sync failed at 'add' stage: {e}")
+        raise GitCommandError("Sync failed: Could not stage changes.", stderr=e.stderr) from e
+
+    # 2. Commit (only if there are staged changes)
+    try:
+        # Check if there's anything to commit before trying
+        staged_files_stdout, _ = execute_git_command(["diff", "--cached", "--name-only"], check=False)
+        if not staged_files_stdout.strip():
+            logger.info("Sync: No changes to commit.")
+            commit_stdout = "No changes to commit."
+            commit_stderr = ""
+        else:
+            commit_stdout, commit_stderr = commit_changes(commit_message)
+            logger.info("Sync: Changes committed.")
+    except GitCommandError as e:
+        logger.error(f"Sync failed at 'commit' stage: {e}")
+        raise GitCommandError("Sync failed: Could not commit changes.", stderr=e.stderr) from e
+
+    # 3. Pull from remote
+    try:
+        pull_stdout, pull_stderr = pull_remote_changes() # Uses defaults
+        logger.info("Sync: Pull from remote successful.")
+    except GitCommandError as e:
+        logger.error(f"Sync failed at 'pull' stage: {e}")
+        # This is a critical failure, we must not proceed to push.
+        raise GitCommandError(
+            "Sync failed: Could not pull remote changes. Please resolve conflicts or issues manually.",
+            stderr=e.stderr
+        ) from e
+
+    # 4. Push to remote
+    try:
+        push_stdout, push_stderr = push_local_changes() # Uses defaults
+        logger.info("Sync: Push to remote successful.")
+    except GitCommandError as e:
+        logger.error(f"Sync failed at 'push' stage: {e}")
+        raise GitCommandError("Sync failed: Could not push local changes.", stderr=e.stderr) from e
+
+    # 5. Consolidate results for a clean response
+    full_stdout = (
+        f"Add Output:\n{add_stdout}\n\n"
+        f"Commit Output:\n{commit_stdout}\n\n"
+        f"Pull Output:\n{pull_stdout}\n\n"
+        f"Push Output:\n{push_stdout}"
+    )
+    full_stderr = (
+        f"Add Stderr:\n{add_stderr}\n\n"
+        f"Commit Stderr:\n{commit_stderr}\n\n"
+        f"Pull Stderr:\n{pull_stderr}\n\n"
+        f"Push Stderr:\n{push_stderr}"
+    )
+    
+    logger.info("Workspace sync completed successfully.")
+    return full_stdout, full_stderr

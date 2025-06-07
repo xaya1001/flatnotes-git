@@ -16,6 +16,7 @@ class GlobalConfig:
         self.quick_access_limit: int = self._quick_access_limit()
         self.path_prefix: str = self._load_path_prefix()
         self.flatnotes_git_enabled: bool = self._load_flatnotes_git_enabled()
+        self.flatnotes_git_auto_sync_interval: int = self._load_flatnotes_git_auto_sync_interval()
 
     def load_auth(self):
         if self.auth_type in (AuthType.NONE, AuthType.READ_ONLY):
@@ -108,6 +109,13 @@ class GlobalConfig:
         logger.info(f"Git integration feature flag (FLATNOTES_GIT_ENABLED): {value}")
         return value
 
+    def _load_flatnotes_git_auto_sync_interval(self) -> int:
+        key = "FLATNOTES_GIT_AUTO_SYNC_INTERVAL"
+        if not self.flatnotes_git_enabled:
+            return 0
+        value = get_env(key, mandatory=False, default=0, cast_int=True)
+        return value
+
 class AuthType(str, Enum):
     NONE = "none"
     READ_ONLY = "read_only"
@@ -123,3 +131,4 @@ class GlobalConfigResponseModel(CustomBaseModel):
     quick_access_sort: str
     quick_access_limit: int
     flatnotes_git_enabled: bool
+    flatnotes_git_auto_sync_interval: int

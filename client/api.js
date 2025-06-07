@@ -259,4 +259,40 @@ export async function getGitStatusSummary() {
     return Promise.reject(error);
   }
 }
+
+export async function gitSyncWorkspace(message) {
+  try {
+    const response = await api.post("api/git/sync", { message });
+    return response.data;
+  } catch (error) {
+    return Promise.reject(error);
+  }
+}
+
+export async function getAutoSyncState() {
+  try {
+    const response = await api.get("api/git/auto-sync/state");
+    return response.data;
+  } catch (error) {
+    return Promise.reject(error);
+  }
+}
+
+export async function pauseAutoSync() {
+  try {
+    const response = await api.post("api/git/auto-sync/pause");
+    return response.data;
+  } catch (error) {
+    return Promise.reject(error);
+  }
+}
+
+export async function resumeAutoSync() {
+  try {
+    const response = await api.post("api/git/auto-sync/resume");
+    return response.data;
+  } catch (error) {
+    return Promise.reject(error);
+  }
+}
 // --- END GIT INTEGRATION API CALLS ---
