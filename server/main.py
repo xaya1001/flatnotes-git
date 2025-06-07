@@ -1,5 +1,9 @@
 from typing import List, Literal
 
+from contextlib import asynccontextmanager
+from datetime import datetime
+from apscheduler.schedulers.background import BackgroundScheduler
+
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -20,10 +24,79 @@ auth: BaseAuth = global_config.load_auth()
 note_storage: BaseNotes = global_config.load_note_storage()
 attachment_storage: BaseAttachments = global_config.load_attachment_storage()
 auth_deps = [Depends(auth.authenticate)] if auth else []
+
+# --- BEGIN: Import git modules conditionally ---
+if global_config.flatnotes_git_enabled:
+    try:
+        from git_integration import git_utils, config as git_config
+        from git_integration.router import router as git_router
+    except ImportError as e:
+        git_utils = None
+        git_config = None
+        git_router = None
+        logger.error(f"Failed to import Git integration modules. Git features will be disabled. Error: {e}")
+else:
+    git_utils = None
+    git_config = None
+    git_router = None
+# --- END: Import git modules conditionally ---
+
+
+# --- BEGIN: FastAPI Lifespan Events for Automation ---
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup logic
+    logger.info("Application starting up...")
+    
+    if git_config and git_config.GIT_ENABLED:
+        # 1. Auto-pull on startup
+        if git_config.GIT_AUTO_PULL_ON_START:
+            logger.info("Performing auto-pull on startup...")
+            try:
+                stdout, stderr = git_utils.pull_remote_changes()
+                logger.info(f"Auto-pull successful. Stdout: {stdout}")
+                if stderr:
+                    logger.warning(f"Auto-pull completed with warnings. Stderr: {stderr}")
+            except Exception as e:
+                logger.error(f"Auto-pull on startup failed: {e}", exc_info=True)
+        
+        # 2. Scheduled auto-sync
+        if git_config.GIT_AUTO_SYNC_INTERVAL > 0:
+            logger.info(f"Initializing scheduled auto-sync for every {git_config.GIT_AUTO_SYNC_INTERVAL} minutes.")
+            scheduler = BackgroundScheduler(daemon=True)
+            
+            def scheduled_sync_job():
+                if git_config.is_auto_sync_paused():
+                    logger.info("Scheduled git sync is paused, skipping execution.")
+                    return
+                logger.info("Executing scheduled git sync...")
+                try:
+                    commit_message = f"[flatnotes]: automatic sync at [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]"
+                    stdout, stderr = git_utils.sync_workspace(commit_message)
+                    logger.info(f"Scheduled sync successful. Stdout: {stdout}")
+                    if stderr:
+                        logger.warning(f"Scheduled sync completed with warnings. Stderr: {stderr}")
+                except Exception as e:
+                    logger.error(f"Scheduled git sync failed: {e}", exc_info=True)
+
+            scheduler.add_job(
+                scheduled_sync_job,
+                'interval',
+                minutes=git_config.GIT_AUTO_SYNC_INTERVAL
+            )
+            scheduler.start()
+            logger.info("Scheduler started.")
+
+    yield
+    # Shutdown logic (if any needed in the future)
+    logger.info("Application shutting down...")
+# --- END: FastAPI Lifespan Events for Automation ---
+
 router = APIRouter()
 app = FastAPI(
     docs_url=global_config.path_prefix + "/docs",
     openapi_url=global_config.path_prefix + "/openapi.json",
+    lifespan=lifespan  # Use the new lifespan context manager
 )
 replace_base_href("client/dist/index.html", global_config.path_prefix)
 
@@ -184,7 +257,8 @@ def get_config():
         quick_access_term=global_config.quick_access_term,
         quick_access_sort=global_config.quick_access_sort,
         quick_access_limit=global_config.quick_access_limit,
-        flatnotes_git_enabled=global_config.flatnotes_git_enabled # Add the flag here
+        flatnotes_git_enabled=global_config.flatnotes_git_enabled,
+        flatnotes_git_auto_sync_interval=global_config.flatnotes_git_auto_sync_interval
     )
 
 
@@ -255,27 +329,19 @@ def healthcheck() -> str:
 
 app.include_router(router, prefix=global_config.path_prefix)
 
-if global_config.flatnotes_git_enabled:
-    try:
-        from git_integration.router import router as git_router
-        from git_integration.config import GIT_ENABLED as GIT_MODULE_ENABLED
-        
-        if GIT_MODULE_ENABLED: 
-            app.include_router(
-                git_router,
-                prefix=f"{global_config.path_prefix}/api/git", 
-                tags=["git"] 
-            )
-            logger.info("Git integration API enabled and routes included.")
-        else:
-            logger.warning("FLATNOTES_GIT_ENABLED is true, but Git module internal GIT_ENABLED is false. Git API routes NOT included.")
-
-    except ImportError as e:
-        logger.error(f"Failed to import Git integration router. Git API will not be available. Error: {e}")
-    except Exception as e:
-        logger.error(f"An unexpected error occurred while trying to include Git integration router: {e}", exc_info=True)
+# --- BEGIN: Include Git Router Conditionally ---
+if global_config.flatnotes_git_enabled and git_router:
+    app.include_router(
+        git_router,
+        prefix=f"{global_config.path_prefix}/api/git", 
+        tags=["git"] 
+    )
+    logger.info("Git integration API enabled and routes included.")
+elif global_config.flatnotes_git_enabled and not git_router:
+     logger.warning("FLATNOTES_GIT_ENABLED is true, but the Git router module could not be imported. Git API routes NOT included.")
 else:
     logger.info("FLATNOTES_GIT_ENABLED is false. Git integration API routes NOT included.")
+# --- END: Include Git Router Conditionally ---
 
 app.mount(
     global_config.path_prefix,

@@ -21,9 +21,15 @@
         v-if="gitIntegrationEnabled" 
         @toggle-panel="handleToggleGitPanel" 
       />
-      <div v-if="isGitPanelVisible && gitIntegrationEnabled" 
-           class="fixed bottom-0 right-0 mb-4 mr-4 z-40 w-full max-w-md md:max-w-lg max-h-[70vh] overflow-y-auto">
-        <GitPanel @close="isGitPanelVisible = false" />
+
+      <div 
+        v-if="isGitPanelVisible && gitIntegrationEnabled"
+        @click.self="isGitPanelVisible = false"
+        class="fixed inset-0 z-40"
+      >
+        <div class="absolute top-20 right-5 w-full max-w-md md:max-w-lg max-h-[80vh] overflow-y-auto">
+          <GitPanel @close="isGitPanelVisible = false" />
+        </div>
       </div>
     </template>
     
