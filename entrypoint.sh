@@ -6,6 +6,29 @@
 
 set -e
 
+if [ -n "$FLATNOTES_GIT_SSH_COMMAND" ] && echo "$FLATNOTES_GIT_SSH_COMMAND" | grep -q -- "-i "; then
+    SSH_KEY_PATH=$(echo "$FLATNOTES_GIT_SSH_COMMAND" | sed -n 's/.*-i \([^ ]*\).*/\1/p')
+    USER_HOME="/home/appuser"
+
+    echo "Setting up Git and SSH..."
+    mkdir -p "$USER_HOME/.ssh"
+    
+    if [ -f "$SSH_KEY_PATH" ]; then
+        cp "$SSH_KEY_PATH" "$USER_HOME/.ssh/id_git"
+        chown -R ${PUID}:${PGID} "$USER_HOME"
+        chmod 700 "$USER_HOME/.ssh"
+        chmod 600 "$USER_HOME/.ssh/id_git"
+        
+        ${EXEC_TOOL} ${PUID}:${PGID} git config --global core.sshCommand "ssh -i $USER_HOME/.ssh/id_git -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+        ${EXEC_TOOL} ${PUID}:${PGID} git config --global --add safe.directory ${FLATNOTES_PATH}
+        ${EXEC_TOOL} ${PUID}:${PGID} git config --global pull.rebase false
+
+        echo "Git and SSH setup complete."
+    else
+        echo "Warning: SSH key specified in FLATNOTES_GIT_SSH_COMMAND not found at '$SSH_KEY_PATH'."
+    fi
+fi
+
 echo "\
 ======================================
 ======== Welcome to flatnotes ========

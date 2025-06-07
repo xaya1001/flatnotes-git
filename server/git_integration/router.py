@@ -17,7 +17,9 @@ from .git_models import (
     GitLogEntry,
     GitPullParams, # For Depends
     GitPushParams, # For Depends
-    GitRepositoryInfoResponse
+    GitRepositoryInfoResponse,
+    GitFileOperationRequest,
+    GitStatusSummaryResponse
 )
 from .exceptions import GitCommandError
 
@@ -236,3 +238,52 @@ async def get_git_integration_info():
         git_enabled=git_config.GIT_ENABLED,
         repo_path_is_git_dir=is_repo_valid_git_dir
     )
+@router.post("/stage_file", response_model=GitCommandResponse, dependencies=common_deps)
+async def stage_file(request: GitFileOperationRequest):
+    """Stages a single file."""
+    try:
+        stdout, stderr = git_utils.add_file(request.filepath)
+        return GitCommandResponse(message=f"File '{request.filepath}' staged.", stdout=stdout, stderr=stderr)
+    except GitCommandError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/unstage_file", response_model=GitCommandResponse, dependencies=common_deps)
+async def unstage_file(request: GitFileOperationRequest):
+    """Unstages a single file."""
+    try:
+        stdout, stderr = git_utils.unstage_file(request.filepath)
+        return GitCommandResponse(message=f"File '{request.filepath}' unstaged.", stdout=stdout, stderr=stderr)
+    except GitCommandError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/discard_file", response_model=GitCommandResponse, dependencies=common_deps)
+async def discard_file(request: GitFileOperationRequest):
+    """Discards changes for a single file."""
+    try:
+        stdout, stderr = git_utils.discard_file_changes(request.filepath)
+        return GitCommandResponse(message=f"Changes for '{request.filepath}' discarded.", stdout=stdout, stderr=stderr)
+    except GitCommandError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/discard_all", response_model=GitCommandResponse, dependencies=common_deps)
+async def discard_all_changes():
+    """Discards all unstaged changes."""
+    try:
+        stdout, stderr = git_utils.discard_all_changes()
+        return GitCommandResponse(message="All unstaged changes have been discarded.", stdout=stdout, stderr=stderr)
+    except GitCommandError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+@router.get(
+    "/status-summary",
+    response_model=GitStatusSummaryResponse,
+    dependencies=common_deps,
+    summary="Get a lightweight Git status summary"
+)
+async def get_git_status_summary():
+    """Retrieves a quick summary of Git status, like current branch and number of changes."""
+    try:
+        summary_data = git_utils.get_status_summary()
+        return GitStatusSummaryResponse(**summary_data)
+    except GitCommandError as e:
+        logger.error(f"API Error getting Git status summary: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

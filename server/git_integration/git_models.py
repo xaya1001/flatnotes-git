@@ -69,3 +69,10 @@ class GitRepositoryInfoResponse(BaseModel):
     configured_default_branch: str
     git_enabled: bool
     repo_path_is_git_dir: bool # Indicates if FLATNOTES_PATH is a valid .git repo
+
+class GitFileOperationRequest(BaseModel):
+    filepath: str = Field(..., description="The path of the file to operate on.")
+
+class GitStatusSummaryResponse(BaseModel):
+    current_branch: Optional[str]
+    files_changed_count: int

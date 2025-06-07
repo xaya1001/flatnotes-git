@@ -215,4 +215,48 @@ export async function gitPush(params = {}) {
   }
 }
 
+export async function gitStageFile(filepath) {
+  try {
+    const response = await api.post("api/git/stage_file", { filepath });
+    return response.data;
+  } catch (error) {
+    return Promise.reject(error);
+  }
+}
+
+export async function gitUnstageFile(filepath) {
+  try {
+    const response = await api.post("api/git/unstage_file", { filepath });
+    return response.data;
+  } catch (error) {
+    return Promise.reject(error);
+  }
+}
+
+export async function gitDiscardFile(filepath) {
+  try {
+    const response = await api.post("api/git/discard_file", { filepath });
+    return response.data;
+  } catch (error) {
+    return Promise.reject(error);
+  }
+}
+
+export async function gitDiscardAll() {
+  try {
+    const response = await api.post("api/git/discard_all");
+    return response.data;
+  } catch (error) {
+    return Promise.reject(error);
+  }
+}
+
+export async function getGitStatusSummary() {
+  try {
+    const response = await api.get("api/git/status-summary");
+    return response.data;
+  } catch (error) {
+    return Promise.reject(error);
+  }
+}
 // --- END GIT INTEGRATION API CALLS ---

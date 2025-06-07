@@ -29,7 +29,6 @@ import {
   mdilNoteMultiple,
   mdilPlusCircle,
 } from "@mdi/light-js";
-import { mdiGit } from "@mdi/js";
 import { computed, ref } from "vue";
 import { RouterLink, useRouter } from "vue-router";
 
@@ -49,9 +48,9 @@ defineProps({
   hideLogo: Boolean,
 });
 
-const emit = defineEmits(["toggleSearchModal", "toggleGitPanel"]);
+const emit = defineEmits(["toggleSearchModal"]);
 
-const menuItems = [
+const menuItems = computed(() => [ 
   {
     label: "Search",
     icon: mdilMagnify,
@@ -71,28 +70,21 @@ const menuItems = [
       }),
   },
   {
-    label: "Git Sync",
-    icon: mdiGit,
-    command: () => emit("toggleGitPanel"),
-    // 使用函数来动态决定可见性，当 globalStore.config 加载并包含 flatnotesGitEnabled=true 时，它就会显示
-    visible: () => globalStore.config.value?.flatnotesGitEnabled === true,
-  },
-  {
     label: "Toggle Theme",
     icon: mdilMonitor,
     command: toggleTheme,
   },
   {
     separator: true,
-    visible: () => showLogOutButtonIsVisible(),
+    visible: showLogOutButtonIsVisible(),
   },
   {
     label: "Log Out",
     icon: mdilLogout,
     command: logOut,
-    visible: () => showLogOutButtonIsVisible(),
+    visible: showLogOutButtonIsVisible(),
   },
-];
+]);
 
 const showNewButton = computed(() => {
   return globalStore.config.value?.authType !== authTypes.readOnly;
