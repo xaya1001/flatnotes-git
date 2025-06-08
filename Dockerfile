@@ -38,7 +38,7 @@ ENV FLATNOTES_PATH=/data
 RUN mkdir -p ${APP_PATH}
 RUN mkdir -p ${FLATNOTES_PATH}
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt update && apt install -y \
     curl \
     gosu \
     git \

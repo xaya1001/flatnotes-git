@@ -1,353 +1,356 @@
+# server/git_integration/router.py
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Body
-from typing import Optional
+from typing import Optional, List
 
 from auth.base import BaseAuth
 from global_config import GlobalConfig
 from logger import logger
 
 from . import git_utils
-from . import config as git_config 
+from . import config as git_config
 from .exceptions import GitCommandError
 from .git_models import (
     GitCommandResponse,
     GitStatusResponse,
-    GitFileStatusItem, # For constructing response within router if needed
     GitCommitRequest,
     GitLogResponse,
-    GitLogEntry,
-    GitPullParams, # For Depends
-    GitPushParams, # For Depends
-    GitRepositoryInfoResponse,
+    GitPullParams,
+    GitPushParams,
     GitFileOperationRequest,
-    GitStatusSummaryResponse
+    GitStatusSummaryResponse,
 )
-from .exceptions import GitCommandError
+from .log_handler import add_git_log, get_all_logs, LogLevel, LogEntry
 from datetime import datetime
 from pydantic import BaseModel
+
 
 class AutoSyncState(BaseModel):
     paused: bool
 
-# Initialize dependencies for auth
-# This needs to be done carefully as global_config instance is in main.py
-# We can pass auth_deps from main.py when including the router,
-# or re-initialize parts of it here if necessary.
-# For simplicity and to adhere to the plan, we'll assume auth_deps is correctly imported/passed.
-# One way to get auth_deps:
+
 main_global_config = GlobalConfig()
-auth: Optional[BaseAuth] = main_global_config.load_auth() # Potentially re-loads auth
+auth: Optional[BaseAuth] = main_global_config.load_auth()
 auth_deps = [Depends(auth.authenticate)] if auth else []
-# A better way might be to pass auth_deps when including the router in main.py,
-# but let's proceed with this for now and refine if it causes issues.
 
 router = APIRouter()
 
+
 def check_git_enabled():
-    """Dependency to check if Git integration is enabled."""
     if not git_config.GIT_ENABLED:
         raise HTTPException(
-            status_code=503, # Service Unavailable
-            detail="Git integration is not enabled on the server."
+            status_code=503, detail="Git integration is not enabled on the server."
         )
-    # Additionally, check if the repo path is a valid git directory before most operations.
-    # This is now also done inside execute_git_command, but an early check here is good.
     try:
-        if not git_config.GIT_REPO_PATH or not git_utils.os.path.isdir(git_config.GIT_REPO_PATH):
-             raise HTTPException(status_code=500, detail=f"Git repository path '{git_config.GIT_REPO_PATH}' is not configured or not a directory.")
-        
-        # Check if it's a .git directory (basic check)
-        # More thorough check is inside execute_git_command
-        # git_utils.execute_git_command(["rev-parse", "--is-inside-work-tree"], check=True)
+        if not git_config.GIT_REPO_PATH or not git_utils.os.path.isdir(
+            git_config.GIT_REPO_PATH
+        ):
+            raise HTTPException(
+                status_code=500,
+                detail=f"Git repository path '{git_config.GIT_REPO_PATH}' is not configured or not a directory.",
+            )
     except GitCommandError as e:
         logger.error(f"Git repo check failed: {e.message} - {e.stderr}")
-        raise HTTPException(status_code=500, detail=f"The configured notes directory is not a valid Git repository: {e.stderr or e.message}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"The configured notes directory is not a valid Git repository: {e.stderr or e.message}",
+        )
 
 
 common_deps = auth_deps + [Depends(check_git_enabled)]
+
+
+@router.get(
+    "/activity-log",
+    response_model=List[LogEntry],
+    dependencies=common_deps,
+    summary="Get Git Activity Log",
+)
+async def get_git_activity_log():
+    """Retrieves the most recent Git-related activity logs from the server."""
+    return get_all_logs()
+
 
 @router.get(
     "/status",
     response_model=GitStatusResponse,
     dependencies=common_deps,
-    summary="Get Git Repository Status"
+    summary="Get Git Repository Status",
 )
 async def get_git_status():
-    """Retrieves the status of the Git repository, including changed files and current branch."""
     try:
-        status_data = git_utils.get_status() # This now returns a dict
+        status_data = git_utils.get_status()
         return GitStatusResponse(**status_data)
     except GitCommandError as e:
         logger.error(f"API Error getting Git status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        logger.error(f"Unexpected API Error getting Git status: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="An unexpected error occurred while fetching Git status.")
+
 
 @router.post(
     "/add_all",
     response_model=GitCommandResponse,
     dependencies=common_deps,
-    summary="Stage All Changes"
+    summary="Stage All Changes",
 )
 async def add_all_git_changes():
-    """Adds all new, modified, and deleted files to the Git staging area ('git add -A')."""
     try:
         stdout, stderr = git_utils.add_all_changes()
-        return GitCommandResponse(message="All changes added to staging.", stdout=stdout, stderr=stderr)
+        message = "All changes added to staging."
+        add_git_log(LogLevel.SUCCESS, message, details=stdout or stderr)
+        return GitCommandResponse(message=message, stdout=stdout, stderr=stderr)
     except GitCommandError as e:
-        logger.error(f"API Error adding all changes: {e}")
+        add_git_log(LogLevel.ERROR, "Failed to stage all changes.", details=str(e))
         raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        logger.error(f"Unexpected API Error adding all changes: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="An unexpected error occurred while staging changes.")
+
+
+@router.post(
+    "/unstage_all",
+    response_model=GitCommandResponse,
+    dependencies=common_deps,
+    summary="Unstage All Changes",
+)
+async def unstage_all_git_changes():
+    """Unstages all currently staged files."""
+    try:
+        stdout, stderr = git_utils.unstage_all_files()
+        message = "All staged changes have been unstaged."
+        add_git_log(LogLevel.SUCCESS, message, details=stdout or stderr)
+        return GitCommandResponse(message=message, stdout=stdout, stderr=stderr)
+    except GitCommandError as e:
+        add_git_log(LogLevel.ERROR, "Failed to unstage all changes.", details=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/stage_file", response_model=GitCommandResponse, dependencies=common_deps)
+async def stage_file(request: GitFileOperationRequest):
+    try:
+        stdout, stderr = git_utils.add_file(request.filepath)
+        message = f"File '{request.filepath}' staged."
+        add_git_log(LogLevel.SUCCESS, message, details=stdout or stderr)
+        return GitCommandResponse(message=message, stdout=stdout, stderr=stderr)
+    except GitCommandError as e:
+        add_git_log(
+            LogLevel.ERROR,
+            f"Failed to stage file '{request.filepath}'.",
+            details=str(e),
+        )
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/unstage_file", response_model=GitCommandResponse, dependencies=common_deps
+)
+async def unstage_file(request: GitFileOperationRequest):
+    try:
+        stdout, stderr = git_utils.unstage_file(request.filepath)
+        message = f"File '{request.filepath}' unstaged."
+        add_git_log(LogLevel.SUCCESS, message, details=stdout or stderr)
+        return GitCommandResponse(message=message, stdout=stdout, stderr=stderr)
+    except GitCommandError as e:
+        add_git_log(
+            LogLevel.ERROR,
+            f"Failed to unstage file '{request.filepath}'.",
+            details=str(e),
+        )
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/discard_file", response_model=GitCommandResponse, dependencies=common_deps
+)
+async def discard_file(request: GitFileOperationRequest):
+    try:
+        stdout, stderr = git_utils.discard_file_changes(request.filepath)
+        message = f"Changes for '{request.filepath}' discarded."
+        add_git_log(LogLevel.SUCCESS, message, details=stdout or stderr)
+        return GitCommandResponse(message=message, stdout=stdout, stderr=stderr)
+    except GitCommandError as e:
+        add_git_log(
+            LogLevel.ERROR,
+            f"Failed to discard changes for '{request.filepath}'.",
+            details=str(e),
+        )
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/discard_all", response_model=GitCommandResponse, dependencies=common_deps
+)
+async def discard_all_changes():
+    try:
+        stdout, stderr = git_utils.discard_all_changes()
+        message = "All unstaged changes have been discarded."
+        add_git_log(LogLevel.SUCCESS, message, details=stdout or stderr)
+        return GitCommandResponse(message=message, stdout=stdout, stderr=stderr)
+    except GitCommandError as e:
+        add_git_log(LogLevel.ERROR, "Failed to discard all changes.", details=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.post(
     "/commit",
     response_model=GitCommandResponse,
     dependencies=common_deps,
-    summary="Commit Staged Changes"
+    summary="Commit Staged Changes",
 )
 async def commit_git_changes(commit_request: GitCommitRequest = Body(...)):
-    """Commits previously staged changes with the provided message."""
     try:
         stdout, stderr = git_utils.commit_changes(message=commit_request.message)
         if "No changes staged for commit" in stdout:
-             return GitCommandResponse(message=stdout, stdout=stdout, stderr=stderr)
-        return GitCommandResponse(message="Changes committed successfully.", stdout=stdout, stderr=stderr)
-    except ValueError as e: # For empty commit message
+            add_git_log(LogLevel.INFO, "Commit: No changes staged.")
+            return GitCommandResponse(message=stdout, stdout=stdout, stderr=stderr)
+
+        message = "Changes committed successfully."
+        add_git_log(
+            LogLevel.SUCCESS,
+            message,
+            details=f'Message: "{commit_request.message}"\n---\n{stdout or stderr}',
+        )
+        return GitCommandResponse(message=message, stdout=stdout, stderr=stderr)
+    except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except GitCommandError as e:
-        logger.error(f"API Error committing changes: {e}")
+        add_git_log(LogLevel.ERROR, "Commit: Failed.", details=str(e))
         raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        logger.error(f"Unexpected API Error committing changes: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="An unexpected error occurred while committing changes.")
+
 
 @router.post(
     "/sync",
     response_model=GitCommandResponse,
     dependencies=common_deps,
-    summary="Sync Workspace (Add, Commit, Pull, Push)"
+    summary="Sync Workspace (Add, Commit, Pull, Push)",
 )
 async def sync_workspace(commit_request: GitCommitRequest = Body(...)):
-    """
-    Performs a full synchronization cycle: stages all changes, commits them with the
-    provided message, pulls from the remote, and then pushes.
-    """
     try:
-        if not commit_request.message:
-            # Use a default message if none is provided for sync
-            commit_message = f"[flatnotes]: sync by user action at [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]"
-        else:
-            commit_message = commit_request.message
-            
+        commit_message = (
+            commit_request.message
+            or f"chore: sync at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+
         stdout, stderr = git_utils.sync_workspace(commit_message=commit_message)
-        return GitCommandResponse(message="Workspace synchronized successfully.", stdout=stdout, stderr=stderr)
+        message = "Workspace synchronized successfully."
+        # The sync_workspace function is complex, so we log its final output as success.
+        # The function itself will raise an error on failure, which is caught below.
+        add_git_log(LogLevel.SUCCESS, message, details=stdout)
+        return GitCommandResponse(message=message, stdout=stdout, stderr=stderr)
     except GitCommandError as e:
-        logger.error(f"API Error during workspace sync: {e}")
+        # The error from sync_workspace is already very descriptive.
+        add_git_log(LogLevel.ERROR, "Sync: Failed.", details=str(e))
         raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        logger.error(f"Unexpected API Error during workspace sync: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="An unexpected error occurred while syncing the workspace.")
+
 
 @router.post(
     "/pull",
     response_model=GitCommandResponse,
     dependencies=common_deps,
-    summary="Pull Remote Changes"
+    summary="Pull Remote Changes",
 )
 async def pull_git_changes(params: GitPullParams = Depends()):
-    """
-    Pulls changes from the remote repository.
-    Uses configured defaults if specific remote/branch are not provided.
-    """
     try:
         stdout, stderr = git_utils.pull_remote_changes(
             remote=params.remote,
             branch=params.branch,
             rebase=params.rebase,
-            autostash=params.autostash
+            autostash=params.autostash,
         )
-        return GitCommandResponse(message="Pull operation completed.", stdout=stdout, stderr=stderr)
-    except GitCommandError as e:
-        logger.error(f"API Error pulling changes: {e}")
-        # Check for specific common non-fatal git pull messages
+        message = "Pull operation completed."
+
         if "Already up to date." in stdout or "Already up to date." in stderr:
-             return GitCommandResponse(message="Repository is already up to date.", stdout=stdout, stderr=stderr)
+            add_git_log(LogLevel.INFO, "Pull: Already up to date.")
+        elif stderr:
+            add_git_log(LogLevel.WARN, "Pull: Completed with warnings.", details=stderr)
+        else:
+            add_git_log(LogLevel.SUCCESS, message, details=stdout)
+
+        return GitCommandResponse(message=message, stdout=stdout, stderr=stderr)
+    except GitCommandError as e:
+        add_git_log(LogLevel.ERROR, "Pull: Failed.", details=str(e))
         raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        logger.error(f"Unexpected API Error pulling changes: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="An unexpected error occurred while pulling changes.")
 
 
 @router.post(
     "/push",
     response_model=GitCommandResponse,
     dependencies=common_deps,
-    summary="Push Local Changes"
+    summary="Push Local Changes",
 )
 async def push_git_changes(params: GitPushParams = Depends()):
-    """
-    Pushes local commits to the remote repository.
-    Uses configured defaults if specific remote/branch are not provided.
-    """
     try:
         stdout, stderr = git_utils.push_local_changes(
-            remote=params.remote,
-            branch=params.branch,
-            force=params.force
+            remote=params.remote, branch=params.branch, force=params.force
         )
-        return GitCommandResponse(message="Push operation completed.", stdout=stdout, stderr=stderr)
-    except GitCommandError as e:
-        logger.error(f"API Error pushing changes: {e}")
-        # Check for specific common non-fatal git push messages
+        message = "Push operation completed."
+
         if "Everything up-to-date" in stdout or "Everything up-to-date" in stderr:
-             return GitCommandResponse(message="Everything is up-to-date. Nothing to push.", stdout=stdout, stderr=stderr)
+            add_git_log(LogLevel.INFO, "Push: Everything up-to-date.")
+        elif stderr:
+            add_git_log(LogLevel.WARN, "Push: Completed with warnings.", details=stderr)
+        else:
+            add_git_log(LogLevel.SUCCESS, message, details=stdout)
+
+        return GitCommandResponse(message=message, stdout=stdout, stderr=stderr)
+    except GitCommandError as e:
+        add_git_log(LogLevel.ERROR, "Push: Failed.", details=str(e))
         raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        logger.error(f"Unexpected API Error pushing changes: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="An unexpected error occurred while pushing changes.")
+
 
 @router.get(
     "/log",
     response_model=GitLogResponse,
     dependencies=common_deps,
-    summary="Get Commit Log"
+    summary="Get Commit Log",
 )
-async def get_git_log(
-    limit: int = Query(10, ge=1, le=100, description="Number of log entries per page."),
-    page: int = Query(1, ge=1, description="Page number for pagination.")
-):
-    """Retrieves the commit history of the Git repository with pagination."""
+async def get_git_log(limit: int = Query(10, ge=1, le=100), page: int = Query(1, ge=1)):
     try:
         log_entries_data = git_utils.get_commit_log(limit=limit, page=page)
-        # Convert list of dicts to list of GitLogEntry model instances
-        log_entries_models = [GitLogEntry(**entry) for entry in log_entries_data]
-        return GitLogResponse(log=log_entries_models, page=page, limit=limit)
-    except GitCommandError as e:
-        logger.error(f"API Error getting Git log: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        logger.error(f"Unexpected API Error getting Git log: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="An unexpected error occurred while fetching Git log.")
-
-@router.get(
-    "/info",
-    response_model=GitRepositoryInfoResponse,
-    dependencies=auth_deps, # Git specific check_git_enabled is not strictly needed if GIT_ENABLED is false, this endpoint should reflect that.
-    summary="Get Git Integration Info"
-)
-async def get_git_integration_info():
-    """Provides information about the Git integration status and configuration."""
-    is_repo_valid_git_dir = False
-    if git_config.GIT_ENABLED and git_config.GIT_REPO_PATH and git_utils.os.path.isdir(git_config.GIT_REPO_PATH):
-        try:
-            # A lightweight check if it's a git repo
-            stdout, _ = git_utils.execute_git_command(["rev-parse", "--is-inside-work-tree"], check=False)
-            if stdout.strip() == "true":
-                is_repo_valid_git_dir = True
-        except GitCommandError: # Catches if git command fails (e.g. not a repo) or git not found
-            is_repo_valid_git_dir = False
-        except FileNotFoundError: # Git not installed
-            is_repo_valid_git_dir = False
-
-
-    current_branch = None
-    remote_url = None
-    if git_config.GIT_ENABLED and is_repo_valid_git_dir:
-        try:
-            current_branch = git_utils.get_current_branch()
-            remote_url = git_utils.get_remote_url(git_config.GIT_REMOTE_NAME)
-        except GitCommandError as e:
-            logger.warning(f"Could not fetch full git info during /info endpoint: {e.message}")
-        # FileNotFoundError will be caught by the outer check
-
-    return GitRepositoryInfoResponse(
-        current_branch=current_branch,
-        configured_remote_name=git_config.GIT_REMOTE_NAME,
-        configured_remote_url=remote_url,
-        configured_default_branch=git_config.GIT_DEFAULT_BRANCH,
-        git_enabled=git_config.GIT_ENABLED,
-        repo_path_is_git_dir=is_repo_valid_git_dir
-    )
-@router.post("/stage_file", response_model=GitCommandResponse, dependencies=common_deps)
-async def stage_file(request: GitFileOperationRequest):
-    """Stages a single file."""
-    try:
-        stdout, stderr = git_utils.add_file(request.filepath)
-        return GitCommandResponse(message=f"File '{request.filepath}' staged.", stdout=stdout, stderr=stderr)
+        return GitLogResponse(log=log_entries_data, page=page, limit=limit)
     except GitCommandError as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/unstage_file", response_model=GitCommandResponse, dependencies=common_deps)
-async def unstage_file(request: GitFileOperationRequest):
-    """Unstages a single file."""
-    try:
-        stdout, stderr = git_utils.unstage_file(request.filepath)
-        return GitCommandResponse(message=f"File '{request.filepath}' unstaged.", stdout=stdout, stderr=stderr)
-    except GitCommandError as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/discard_file", response_model=GitCommandResponse, dependencies=common_deps)
-async def discard_file(request: GitFileOperationRequest):
-    """Discards changes for a single file."""
-    try:
-        stdout, stderr = git_utils.discard_file_changes(request.filepath)
-        return GitCommandResponse(message=f"Changes for '{request.filepath}' discarded.", stdout=stdout, stderr=stderr)
-    except GitCommandError as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.post("/discard_all", response_model=GitCommandResponse, dependencies=common_deps)
-async def discard_all_changes():
-    """Discards all unstaged changes."""
-    try:
-        stdout, stderr = git_utils.discard_all_changes()
-        return GitCommandResponse(message="All unstaged changes have been discarded.", stdout=stdout, stderr=stderr)
-    except GitCommandError as e:
-        raise HTTPException(status_code=500, detail=str(e))
 @router.get(
     "/status-summary",
     response_model=GitStatusSummaryResponse,
     dependencies=common_deps,
-    summary="Get a lightweight Git status summary"
+    summary="Get a lightweight Git status summary",
 )
 async def get_git_status_summary():
-    """Retrieves a quick summary of Git status, like current branch and number of changes."""
     try:
         summary_data = git_utils.get_status_summary()
         return GitStatusSummaryResponse(**summary_data)
     except GitCommandError as e:
-        logger.error(f"API Error getting Git status summary: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.get(
     "/auto-sync/state",
     response_model=AutoSyncState,
     dependencies=common_deps,
-    summary="Get Auto-Sync Pause State"
+    summary="Get Auto-Sync Pause State",
 )
 async def get_auto_sync_state():
-    """Gets the current pause state of the scheduled auto-sync."""
     return AutoSyncState(paused=git_config.is_auto_sync_paused())
+
 
 @router.post(
     "/auto-sync/pause",
     response_model=AutoSyncState,
     dependencies=common_deps,
-    summary="Pause Auto-Sync"
+    summary="Pause Auto-Sync",
 )
 async def set_pause_auto_sync():
-    """Temporarily pauses the scheduled auto-sync feature."""
     git_config.pause_auto_sync()
+    add_git_log(LogLevel.INFO, "Auto-sync: Paused by user.")
     return AutoSyncState(paused=True)
+
 
 @router.post(
     "/auto-sync/resume",
     response_model=AutoSyncState,
     dependencies=common_deps,
-    summary="Resume Auto-Sync"
+    summary="Resume Auto-Sync",
 )
 async def set_resume_auto_sync():
-    """Resumes the paused scheduled auto-sync feature."""
     git_config.resume_auto_sync()
+    add_git_log(LogLevel.INFO, "Auto-sync: Resumed by user.")
     return AutoSyncState(paused=False)

@@ -17,7 +17,7 @@ from global_config import AuthType, GlobalConfig, GlobalConfigResponseModel
 from helpers import replace_base_href
 from notes.base import BaseNotes
 from notes.models import Note, NoteCreate, NoteUpdate, SearchResult
-from logger import logger 
+from logger import logger
 
 global_config = GlobalConfig()
 auth: BaseAuth = global_config.load_auth()
@@ -30,15 +30,24 @@ if global_config.flatnotes_git_enabled:
     try:
         from git_integration import git_utils, config as git_config
         from git_integration.router import router as git_router
+
+        # Import the new log handler
+        from git_integration.log_handler import add_git_log, LogLevel
     except ImportError as e:
         git_utils = None
         git_config = None
         git_router = None
-        logger.error(f"Failed to import Git integration modules. Git features will be disabled. Error: {e}")
+        add_git_log = None
+        LogLevel = None
+        logger.error(
+            f"Failed to import Git integration modules. Git features will be disabled. Error: {e}"
+        )
 else:
     git_utils = None
     git_config = None
     git_router = None
+    add_git_log = None
+    LogLevel = None
 # --- END: Import git modules conditionally ---
 
 
@@ -47,56 +56,110 @@ else:
 async def lifespan(app: FastAPI):
     # Startup logic
     logger.info("Application starting up...")
-    
-    if git_config and git_config.GIT_ENABLED:
+
+    if git_config and git_config.GIT_ENABLED and add_git_log:
+        add_git_log(LogLevel.INFO, "Application starting up. Git integration enabled.")
         # 1. Auto-pull on startup
         if git_config.GIT_AUTO_PULL_ON_START:
             logger.info("Performing auto-pull on startup...")
+            add_git_log(LogLevel.INFO, "Auto-pull on startup: Initiated.")
             try:
                 stdout, stderr = git_utils.pull_remote_changes()
                 logger.info(f"Auto-pull successful. Stdout: {stdout}")
                 if stderr:
-                    logger.warning(f"Auto-pull completed with warnings. Stderr: {stderr}")
+                    logger.warning(
+                        f"Auto-pull completed with warnings. Stderr: {stderr}"
+                    )
+                    add_git_log(
+                        LogLevel.WARN,
+                        "Auto-pull on startup: Completed with warnings.",
+                        details=stderr,
+                    )
+                else:
+                    add_git_log(
+                        LogLevel.SUCCESS,
+                        "Auto-pull on startup: Successful.",
+                        details=stdout,
+                    )
             except Exception as e:
                 logger.error(f"Auto-pull on startup failed: {e}", exc_info=True)
-        
+                add_git_log(
+                    LogLevel.ERROR, "Auto-pull on startup: Failed.", details=str(e)
+                )
+
         # 2. Scheduled auto-sync
         if git_config.GIT_AUTO_SYNC_INTERVAL > 0:
-            logger.info(f"Initializing scheduled auto-sync for every {git_config.GIT_AUTO_SYNC_INTERVAL} minutes.")
+            logger.info(
+                f"Initializing scheduled auto-sync for every {git_config.GIT_AUTO_SYNC_INTERVAL} minutes."
+            )
+            add_git_log(
+                LogLevel.INFO,
+                f"Scheduled auto-sync: Initializing for every {git_config.GIT_AUTO_SYNC_INTERVAL} minutes.",
+            )
             scheduler = BackgroundScheduler(daemon=True)
-            
+
             def scheduled_sync_job():
                 if git_config.is_auto_sync_paused():
-                    logger.info("Scheduled git sync is paused, skipping execution.")
+                    # No need to log every skipped run, it would be too noisy.
+                    # logger.info("Scheduled git sync is paused, skipping execution.")
                     return
+
                 logger.info("Executing scheduled git sync...")
+                add_git_log(LogLevel.INFO, "Scheduled auto-sync: Task started.")
                 try:
-                    commit_message = f"[flatnotes]: automatic sync at [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}]"
+                    commit_message = f"chore: automatic sync at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
                     stdout, stderr = git_utils.sync_workspace(commit_message)
                     logger.info(f"Scheduled sync successful. Stdout: {stdout}")
-                    if stderr:
-                        logger.warning(f"Scheduled sync completed with warnings. Stderr: {stderr}")
+                    if (
+                        "No changes to commit" in stdout
+                        and "Everything up-to-date" in stderr
+                    ):
+                        add_git_log(
+                            LogLevel.INFO, "Scheduled auto-sync: No changes detected."
+                        )
+                    elif stderr:
+                        logger.warning(
+                            f"Scheduled sync completed with warnings. Stderr: {stderr}"
+                        )
+                        add_git_log(
+                            LogLevel.WARN,
+                            "Scheduled auto-sync: Completed with warnings.",
+                            details=stderr,
+                        )
+                    else:
+                        add_git_log(
+                            LogLevel.SUCCESS,
+                            "Scheduled auto-sync: Successful.",
+                            details=stdout,
+                        )
                 except Exception as e:
                     logger.error(f"Scheduled git sync failed: {e}", exc_info=True)
+                    add_git_log(
+                        LogLevel.ERROR, "Scheduled auto-sync: Failed.", details=str(e)
+                    )
 
             scheduler.add_job(
                 scheduled_sync_job,
-                'interval',
-                minutes=git_config.GIT_AUTO_SYNC_INTERVAL
+                "interval",
+                minutes=git_config.GIT_AUTO_SYNC_INTERVAL,
             )
             scheduler.start()
             logger.info("Scheduler started.")
 
     yield
     # Shutdown logic (if any needed in the future)
+    if git_config and git_config.GIT_ENABLED and add_git_log:
+        add_git_log(LogLevel.INFO, "Application shutting down.")
     logger.info("Application shutting down...")
+
+
 # --- END: FastAPI Lifespan Events for Automation ---
 
 router = APIRouter()
 app = FastAPI(
     docs_url=global_config.path_prefix + "/docs",
     openapi_url=global_config.path_prefix + "/openapi.json",
-    lifespan=lifespan  # Use the new lifespan context manager
+    lifespan=lifespan,  # Use the new lifespan context manager
 )
 replace_base_href("client/dist/index.html", global_config.path_prefix)
 
@@ -124,9 +187,7 @@ if global_config.auth_type not in [AuthType.NONE, AuthType.READ_ONLY]:
         try:
             return auth.login(data)
         except ValueError:
-            raise HTTPException(
-                status_code=401, detail=api_messages.login_failed
-            )
+            raise HTTPException(status_code=401, detail=api_messages.login_failed)
 
 
 # endregion
@@ -144,9 +205,7 @@ def get_note(title: str):
     try:
         return note_storage.get(title)
     except ValueError:
-        raise HTTPException(
-            status_code=400, detail=api_messages.invalid_note_title
-        )
+        raise HTTPException(status_code=400, detail=api_messages.invalid_note_title)
     except FileNotFoundError:
         raise HTTPException(404, api_messages.note_not_found)
 
@@ -169,9 +228,7 @@ if global_config.auth_type != AuthType.READ_ONLY:
                 detail=api_messages.invalid_note_title,
             )
         except FileExistsError:
-            raise HTTPException(
-                status_code=409, detail=api_messages.note_exists
-            )
+            raise HTTPException(status_code=409, detail=api_messages.note_exists)
 
     # Update Note
     @router.patch(
@@ -188,9 +245,7 @@ if global_config.auth_type != AuthType.READ_ONLY:
                 detail=api_messages.invalid_note_title,
             )
         except FileExistsError:
-            raise HTTPException(
-                status_code=409, detail=api_messages.note_exists
-            )
+            raise HTTPException(status_code=409, detail=api_messages.note_exists)
         except FileNotFoundError:
             raise HTTPException(404, api_messages.note_not_found)
 
@@ -258,7 +313,7 @@ def get_config():
         quick_access_sort=global_config.quick_access_sort,
         quick_access_limit=global_config.quick_access_limit,
         flatnotes_git_enabled=global_config.flatnotes_git_enabled,
-        flatnotes_git_auto_sync_interval=global_config.flatnotes_git_auto_sync_interval
+        flatnotes_git_auto_sync_interval=global_config.flatnotes_git_auto_sync_interval,
     )
 
 
@@ -288,9 +343,7 @@ def get_attachment(filename: str):
             detail=api_messages.invalid_attachment_filename,
         )
     except FileNotFoundError:
-        raise HTTPException(
-            status_code=404, detail=api_messages.attachment_not_found
-        )
+        raise HTTPException(status_code=404, detail=api_messages.attachment_not_found)
 
 
 if global_config.auth_type != AuthType.READ_ONLY:
@@ -332,15 +385,17 @@ app.include_router(router, prefix=global_config.path_prefix)
 # --- BEGIN: Include Git Router Conditionally ---
 if global_config.flatnotes_git_enabled and git_router:
     app.include_router(
-        git_router,
-        prefix=f"{global_config.path_prefix}/api/git", 
-        tags=["git"] 
+        git_router, prefix=f"{global_config.path_prefix}/api/git", tags=["git"]
     )
     logger.info("Git integration API enabled and routes included.")
 elif global_config.flatnotes_git_enabled and not git_router:
-     logger.warning("FLATNOTES_GIT_ENABLED is true, but the Git router module could not be imported. Git API routes NOT included.")
+    logger.warning(
+        "FLATNOTES_GIT_ENABLED is true, but the Git router module could not be imported. Git API routes NOT included."
+    )
 else:
-    logger.info("FLATNOTES_GIT_ENABLED is false. Git integration API routes NOT included.")
+    logger.info(
+        "FLATNOTES_GIT_ENABLED is false. Git integration API routes NOT included."
+    )
 # --- END: Include Git Router Conditionally ---
 
 app.mount(
