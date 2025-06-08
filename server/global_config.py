@@ -16,7 +16,46 @@ class GlobalConfig:
         self.quick_access_limit: int = self._quick_access_limit()
         self.path_prefix: str = self._load_path_prefix()
         self.flatnotes_git_enabled: bool = self._load_flatnotes_git_enabled()
-        self.flatnotes_git_auto_sync_interval: int = self._load_flatnotes_git_auto_sync_interval()
+        self.flatnotes_git_auto_sync_interval: int = (
+            self._load_flatnotes_git_auto_sync_interval()
+        )
+
+        # --- S3/R2 Configuration Loading ---
+        self.attachment_storage_provider: str = self._load_attachment_storage_provider()
+        self.s3_endpoint_url: str = get_env(
+            "FLATNOTES_S3_ENDPOINT_URL", mandatory=False
+        )
+        self.s3_access_key_id: str = get_env(
+            "FLATNOTES_S3_ACCESS_KEY_ID", mandatory=False
+        )
+        self.s3_secret_access_key: str = get_env(
+            "FLATNOTES_S3_SECRET_ACCESS_KEY", mandatory=False
+        )
+        self.s3_bucket_name: str = get_env("FLATNOTES_S3_BUCKET_NAME", mandatory=False)
+        self.s3_region: str = get_env("FLATNOTES_S3_REGION", mandatory=False)
+        self.s3_path_prefix: str = get_env(
+            "FLATNOTES_S3_PATH_PREFIX", mandatory=False, default=""
+        )
+        self.s3_public_url_base: str = get_env(
+            "FLATNOTES_S3_PUBLIC_URL_BASE", mandatory=False
+        )
+
+        # --- Frontend Image Processing Config ---
+        self.frontend_image_compression_enabled: bool = get_env(
+            "FLATNOTES_FRONTEND_IMAGE_COMPRESSION_ENABLED",
+            mandatory=False,
+            default=True,
+            cast_bool=True,
+        )
+        self.frontend_image_compression_quality: float = self._load_float_env(
+            "FLATNOTES_FRONTEND_IMAGE_COMPRESSION_QUALITY", 0.8, 0.1, 1.0
+        )
+        self.frontend_image_max_width: int = get_env(
+            "FLATNOTES_FRONTEND_IMAGE_MAX_WIDTH",
+            mandatory=False,
+            default=1920,
+            cast_int=True,
+        )
 
     def load_auth(self):
         if self.auth_type in (AuthType.NONE, AuthType.READ_ONLY):
@@ -32,15 +71,34 @@ class GlobalConfig:
         return FileSystemNotes()
 
     def load_attachment_storage(self):
+        """
+        Factory method to load the configured attachment storage provider.
+        The decision is now solely based on the provider environment variable.
+        """
+        if self.attachment_storage_provider.lower() == "s3":
+            # If 's3' is chosen, we attempt to load it.
+            # If it fails due to missing config, it will raise an error during initialization,
+            # which is the desired behavior to alert the user of a misconfiguration.
+            try:
+                from attachments.s3 import S3Attachments
+
+                logger.info("Attachment storage provider: S3/R2")
+                return S3Attachments()
+            except (ValueError, ImportError) as e:
+                logger.error(
+                    f"Failed to initialize S3 provider: {e}. Please check your configuration. Application will exit."
+                )
+                sys.exit(1)  # Exit gracefully if S3 is chosen but misconfigured.
+
+        # Default to filesystem if provider is 'filesystem' or any other value.
         from attachments.file_system import FileSystemAttachments
 
+        logger.info("Attachment storage provider: Filesystem")
         return FileSystemAttachments()
 
     def _load_auth_type(self):
         key = "FLATNOTES_AUTH_TYPE"
-        auth_type = get_env(
-            key, mandatory=False, default=AuthType.PASSWORD.value
-        )
+        auth_type = get_env(key, mandatory=False, default=AuthType.PASSWORD.value)
         try:
             auth_type = AuthType(auth_type.lower())
         except ValueError:
@@ -116,6 +174,36 @@ class GlobalConfig:
         value = get_env(key, mandatory=False, default=0, cast_int=True)
         return value
 
+    def _load_attachment_storage_provider(self) -> str:
+        key = "FLATNOTES_ATTACHMENT_STORAGE_PROVIDER"
+        value = get_env(key, mandatory=False, default="filesystem")
+        valid_values = ["filesystem", "s3"]
+        if value.lower() not in valid_values:
+            logger.error(
+                f"Invalid value '{value}' for {key}. Must be one of: {', '.join(valid_values)}. "
+                "Defaulting to 'filesystem'."
+            )
+            return "filesystem"
+        return value
+
+    def _load_float_env(
+        self, key: str, default: float, min_val: float, max_val: float
+    ) -> float:
+        value_str = get_env(key, mandatory=False, default=str(default))
+        try:
+            value = float(value_str)
+            if not (min_val <= value <= max_val):
+                logger.warning(
+                    f"Value for {key} ({value}) is outside the valid range [{min_val}, {max_val}]. "
+                    f"Using default value: {default}"
+                )
+                return default
+            return value
+        except (ValueError, TypeError):
+            logger.warning(f"Invalid value for {key}. Using default value: {default}")
+            return default
+
+
 class AuthType(str, Enum):
     NONE = "none"
     READ_ONLY = "read_only"
@@ -132,3 +220,6 @@ class GlobalConfigResponseModel(CustomBaseModel):
     quick_access_limit: int
     flatnotes_git_enabled: bool
     flatnotes_git_auto_sync_interval: int
+    frontend_image_compression_enabled: bool
+    frontend_image_compression_quality: float
+    frontend_image_max_width: int

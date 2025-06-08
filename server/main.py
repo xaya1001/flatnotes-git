@@ -314,6 +314,9 @@ def get_config():
         quick_access_limit=global_config.quick_access_limit,
         flatnotes_git_enabled=global_config.flatnotes_git_enabled,
         flatnotes_git_auto_sync_interval=global_config.flatnotes_git_auto_sync_interval,
+        frontend_image_compression_enabled=global_config.frontend_image_compression_enabled,
+        frontend_image_compression_quality=global_config.frontend_image_compression_quality,
+        frontend_image_max_width=global_config.frontend_image_max_width,
     )
 
 
@@ -344,6 +347,8 @@ def get_attachment(filename: str):
         )
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=api_messages.attachment_not_found)
+    except NotImplementedError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 if global_config.auth_type != AuthType.READ_ONLY:
