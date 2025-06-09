@@ -19,6 +19,7 @@ from .git_models import (
     GitPushParams,
     GitFileOperationRequest,
     GitStatusSummaryResponse,
+    GitFileStatusItem,
 )
 from .log_handler import add_git_log, get_all_logs, LogLevel, LogEntry
 from datetime import datetime
@@ -354,3 +355,26 @@ async def set_resume_auto_sync():
     git_config.resume_auto_sync()
     add_git_log(LogLevel.INFO, "Auto-sync: Resumed by user.")
     return AutoSyncState(paused=False)
+
+
+@router.get(
+    "/commits/{commit_hash}/files",
+    response_model=List[GitFileStatusItem],
+    dependencies=common_deps,
+    summary="Get Files for a Specific Commit",
+)
+async def get_commit_files(commit_hash: str):
+    try:
+        # A = Added, M = Modified, D = Deleted.
+        raw_files = git_utils.get_files_in_commit(commit_hash)
+
+        response_files = []
+        for f in raw_files:
+            response_files.append(
+                GitFileStatusItem(
+                    path=f["path"], index_status=f["status"], work_tree_status=" "
+                )
+            )
+        return response_files
+    except GitCommandError as e:
+        raise HTTPException(status_code=500, detail=str(e))

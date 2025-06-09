@@ -417,3 +417,34 @@ def sync_workspace(commit_message: str) -> Tuple[str, str]:
 
     logger.info("Workspace sync completed successfully.")
     return full_stdout, full_stderr
+
+
+def get_files_in_commit(commit_hash: str) -> List[Dict[str, str]]:
+    """
+    Gets the list of files and their statuses for a specific commit hash.
+    This version uses 'git log' which is the correct tool for this job.
+    """
+    command = [
+        "log",
+        "-1",
+        "--no-renames",
+        "--name-status",
+        '--pretty=format:""',
+        commit_hash,
+    ]
+    try:
+        stdout, _ = execute_git_command(command)
+    except GitCommandError as e:
+        logger.error(f"Could not get files for commit {commit_hash}: {e}")
+        return []
+
+    changed_files = []
+    # The output of this log command is just the file list, which is what we need.
+    for line in stdout.strip().split("\n"):
+        if not line:
+            continue
+        parts = line.split("\t")
+        if len(parts) == 2:
+            status, filepath = parts[0], parts[1]
+            changed_files.append({"status": status, "path": filepath})
+    return changed_files

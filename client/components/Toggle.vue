@@ -7,9 +7,7 @@
       type="mdi"
       :path="isOn ? mdiToggleSwitch : mdiToggleSwitchOff"
       :class="{ 'text-theme-brand': isOn, 'text-theme-text-very-muted': !isOn }"
-      width="auto"
-      height="1em"
-      viewBox="2 7 20 10"
+      :size="32"
     ></SvgIcon>
   </button>
 </template>
