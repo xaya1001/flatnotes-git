@@ -1,18 +1,18 @@
-import * as constants from './constants.js';
+import * as constants from "./constants.js";
 
-import { Note, SearchResult } from './classes.js';
+import { Note, SearchResult } from "./classes.js";
 
-import axios from 'axios';
-import { getStoredToken } from './tokenStorage.js';
-import { getToastOptions } from './helpers.js';
-import router from './router.js';
+import axios from "axios";
+import { getStoredToken } from "./tokenStorage.js";
+import { getToastOptions } from "./helpers.js";
+import router from "./router.js";
 
 const api = axios.create();
 
 api.interceptors.request.use(
   // If the request is not for the token endpoint, add the token to the headers.
   function (config) {
-    if (config.url !== 'api/token') {
+    if (config.url !== "api/token") {
       const token = getStoredToken();
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
@@ -22,31 +22,31 @@ api.interceptors.request.use(
   },
   function (error) {
     return Promise.reject(error);
-  }
+  },
 );
 
 export function apiErrorHandler(error, toast) {
   if (error.response?.status === 401) {
     const redirectPath = router.currentRoute.value.fullPath;
     router.push({
-      name: 'login',
-      query: { [constants.params.redirect]: redirectPath }
+      name: "login",
+      query: { [constants.params.redirect]: redirectPath },
     });
   } else {
     console.error(error);
     toast.add(
       getToastOptions(
-        'Unknown error communicating with the server. Please try again.',
-        'Unknown Error',
-        'error'
-      )
+        "Unknown error communicating with the server. Please try again.",
+        "Unknown Error",
+        "error",
+      ),
     );
   }
 }
 
 export async function getConfig() {
   try {
-    const response = await api.get('api/config');
+    const response = await api.get("api/config");
     return response.data;
   } catch (error) {
     return Promise.reject(error);
@@ -55,9 +55,9 @@ export async function getConfig() {
 
 export async function getToken(username, password, totp) {
   try {
-    const response = await api.post('api/token', {
+    const response = await api.post("api/token", {
       username: username,
-      password: totp ? password + totp : password
+      password: totp ? password + totp : password,
     });
     return response.data.access_token;
   } catch (response) {
@@ -67,13 +67,13 @@ export async function getToken(username, password, totp) {
 
 export async function getNotes(term, sort, order, limit) {
   try {
-    const response = await api.get('api/search', {
+    const response = await api.get("api/search", {
       params: {
         term: term,
         sort: sort,
         order: order,
-        limit: limit
-      }
+        limit: limit,
+      },
     });
     return response.data.map((note) => new SearchResult(note));
   } catch (response) {
@@ -83,9 +83,9 @@ export async function getNotes(term, sort, order, limit) {
 
 export async function createNote(title, content) {
   try {
-    const response = await api.post('api/notes', {
+    const response = await api.post("api/notes", {
       title: title,
-      content: content
+      content: content,
     });
     return new Note(response.data);
   } catch (response) {
@@ -106,7 +106,7 @@ export async function updateNote(title, newTitle, newContent) {
   try {
     const response = await api.patch(`api/notes/${encodeURIComponent(title)}`, {
       newTitle: newTitle,
-      newContent: newContent
+      newContent: newContent,
     });
     return new Note(response.data);
   } catch (response) {
@@ -124,7 +124,7 @@ export async function deleteNote(title) {
 
 export async function getTags() {
   try {
-    const response = await api.get('api/tags');
+    const response = await api.get("api/tags");
     return response.data;
   } catch (response) {
     return Promise.reject(response);
@@ -134,11 +134,11 @@ export async function getTags() {
 export async function createAttachment(file) {
   try {
     const formData = new FormData();
-    formData.append('file', file);
-    const response = await api.post('api/attachments', formData, {
+    formData.append("file", file);
+    const response = await api.post("api/attachments", formData, {
       headers: {
-        'Content-Type': 'multipart/form-data'
-      }
+        "Content-Type": "multipart/form-data",
+      },
     });
     return response.data;
   } catch (response) {
@@ -150,7 +150,7 @@ export async function createAttachment(file) {
 
 export async function getGitStatus() {
   try {
-    const response = await api.get('api/git/status');
+    const response = await api.get("api/git/status");
     return response.data;
   } catch (error) {
     return Promise.reject(error);
@@ -159,7 +159,7 @@ export async function getGitStatus() {
 
 export async function gitAddAll() {
   try {
-    const response = await api.post('api/git/add_all');
+    const response = await api.post("api/git/add_all");
     return response.data;
   } catch (error) {
     return Promise.reject(error);
@@ -168,7 +168,7 @@ export async function gitAddAll() {
 
 export async function gitUnstageAll() {
   try {
-    const response = await api.post('api/git/unstage_all');
+    const response = await api.post("api/git/unstage_all");
     return response.data;
   } catch (error) {
     return Promise.reject(error);
@@ -177,7 +177,7 @@ export async function gitUnstageAll() {
 
 export async function gitCommit(message) {
   try {
-    const response = await api.post('api/git/commit', { message });
+    const response = await api.post("api/git/commit", { message });
     return response.data;
   } catch (error) {
     return Promise.reject(error);
@@ -186,8 +186,8 @@ export async function gitCommit(message) {
 
 export async function getGitLog(limit = 10, page = 1) {
   try {
-    const response = await api.get('api/git/log', {
-      params: { limit, page }
+    const response = await api.get("api/git/log", {
+      params: { limit, page },
     });
     return response.data;
   } catch (error) {
@@ -197,7 +197,7 @@ export async function getGitLog(limit = 10, page = 1) {
 
 export async function gitPull(params = {}) {
   try {
-    const response = await api.post('api/git/pull', null, { params });
+    const response = await api.post("api/git/pull", null, { params });
     return response.data;
   } catch (error) {
     return Promise.reject(error);
@@ -206,7 +206,7 @@ export async function gitPull(params = {}) {
 
 export async function gitPush(params = {}) {
   try {
-    const response = await api.post('api/git/push', null, { params });
+    const response = await api.post("api/git/push", null, { params });
     return response.data;
   } catch (error) {
     return Promise.reject(error);
@@ -215,7 +215,7 @@ export async function gitPush(params = {}) {
 
 export async function gitStageFile(filepath) {
   try {
-    const response = await api.post('api/git/stage_file', { filepath });
+    const response = await api.post("api/git/stage_file", { filepath });
     return response.data;
   } catch (error) {
     return Promise.reject(error);
@@ -224,7 +224,7 @@ export async function gitStageFile(filepath) {
 
 export async function gitUnstageFile(filepath) {
   try {
-    const response = await api.post('api/git/unstage_file', { filepath });
+    const response = await api.post("api/git/unstage_file", { filepath });
     return response.data;
   } catch (error) {
     return Promise.reject(error);
@@ -233,7 +233,7 @@ export async function gitUnstageFile(filepath) {
 
 export async function gitDiscardFile(filepath) {
   try {
-    const response = await api.post('api/git/discard_file', { filepath });
+    const response = await api.post("api/git/discard_file", { filepath });
     return response.data;
   } catch (error) {
     return Promise.reject(error);
@@ -242,7 +242,7 @@ export async function gitDiscardFile(filepath) {
 
 export async function gitDiscardAll() {
   try {
-    const response = await api.post('api/git/discard_all');
+    const response = await api.post("api/git/discard_all");
     return response.data;
   } catch (error) {
     return Promise.reject(error);
@@ -251,7 +251,7 @@ export async function gitDiscardAll() {
 
 export async function getGitStatusSummary() {
   try {
-    const response = await api.get('api/git/status-summary');
+    const response = await api.get("api/git/status-summary");
     return response.data;
   } catch (error) {
     return Promise.reject(error);
@@ -260,7 +260,7 @@ export async function getGitStatusSummary() {
 
 export async function gitSyncWorkspace(message) {
   try {
-    const response = await api.post('api/git/sync', { message });
+    const response = await api.post("api/git/sync", { message });
     return response.data;
   } catch (error) {
     return Promise.reject(error);
@@ -269,7 +269,7 @@ export async function gitSyncWorkspace(message) {
 
 export async function getAutoSyncState() {
   try {
-    const response = await api.get('api/git/auto-sync/state');
+    const response = await api.get("api/git/auto-sync/state");
     return response.data;
   } catch (error) {
     return Promise.reject(error);
@@ -278,7 +278,7 @@ export async function getAutoSyncState() {
 
 export async function pauseAutoSync() {
   try {
-    const response = await api.post('api/git/auto-sync/pause');
+    const response = await api.post("api/git/auto-sync/pause");
     return response.data;
   } catch (error) {
     return Promise.reject(error);
@@ -287,7 +287,7 @@ export async function pauseAutoSync() {
 
 export async function resumeAutoSync() {
   try {
-    const response = await api.post('api/git/auto-sync/resume');
+    const response = await api.post("api/git/auto-sync/resume");
     return response.data;
   } catch (error) {
     return Promise.reject(error);
@@ -296,7 +296,16 @@ export async function resumeAutoSync() {
 
 export async function getGitActivityLog() {
   try {
-    const response = await api.get('api/git/activity-log');
+    const response = await api.get("api/git/activity-log");
+    return response.data;
+  } catch (error) {
+    return Promise.reject(error);
+  }
+}
+
+export async function getGitCommitFiles(commitHash) {
+  try {
+    const response = await api.get(`api/git/commits/${commitHash}/files`);
     return response.data;
   } catch (error) {
     return Promise.reject(error);
