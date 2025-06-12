@@ -1,29 +1,31 @@
 # server/git_integration/router.py
+from datetime import datetime
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Body
-from typing import Optional, List
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from git.exc import GitCommandError
+from pydantic import BaseModel
 
 from auth.base import BaseAuth
 from global_config import GlobalConfig
 from logger import logger
 
-from . import git_utils
 from . import config as git_config
-from .exceptions import GitCommandError
+from . import git_utils
 from .git_models import (
     GitCommandResponse,
-    GitStatusResponse,
     GitCommitRequest,
+    GitFileOperationRequest,
+    GitFileStatusItem,
     GitLogResponse,
     GitPullParams,
     GitPushParams,
-    GitFileOperationRequest,
+    GitStatusResponse,
     GitStatusSummaryResponse,
-    GitFileStatusItem,
+    BranchListResponse,
+    SwitchBranchRequest,
 )
-from .log_handler import add_git_log, get_all_logs, LogLevel, LogEntry
-from datetime import datetime
-from pydantic import BaseModel
+from .log_handler import LogEntry, LogLevel, add_git_log, get_all_logs
 
 
 class AutoSyncState(BaseModel):
@@ -33,28 +35,31 @@ class AutoSyncState(BaseModel):
 main_global_config = GlobalConfig()
 auth: Optional[BaseAuth] = main_global_config.load_auth()
 auth_deps = [Depends(auth.authenticate)] if auth else []
-
 router = APIRouter()
 
 
+def handle_git_error(e: GitCommandError, action_name: str):
+    """Centralized error handler for GitPython exceptions."""
+    error_details = e.stderr or str(e)
+    logger.error(f"API Error during '{action_name}': {error_details}")
+    add_git_log(LogLevel.ERROR, f"Failed: {action_name}", details=error_details)
+    raise HTTPException(status_code=500, detail=error_details)
+
+
 def check_git_enabled():
+    """Dependency to check if Git is enabled and the repo is valid."""
     if not git_config.GIT_ENABLED:
         raise HTTPException(
             status_code=503, detail="Git integration is not enabled on the server."
         )
     try:
-        if not git_config.GIT_REPO_PATH or not git_utils.os.path.isdir(
-            git_config.GIT_REPO_PATH
-        ):
-            raise HTTPException(
-                status_code=500,
-                detail=f"Git repository path '{git_config.GIT_REPO_PATH}' is not configured or not a directory.",
-            )
+        git_utils._check_repo()
     except GitCommandError as e:
-        logger.error(f"Git repo check failed: {e.message} - {e.stderr}")
+        error_details = e.stderr or str(e)
+        logger.error(f"Git repo check failed: {error_details}")
         raise HTTPException(
             status_code=500,
-            detail=f"The configured notes directory is not a valid Git repository: {e.stderr or e.message}",
+            detail=f"The configured notes directory is not a valid Git repository: {error_details}",
         )
 
 
@@ -83,8 +88,7 @@ async def get_git_status():
         status_data = git_utils.get_status()
         return GitStatusResponse(**status_data)
     except GitCommandError as e:
-        logger.error(f"API Error getting Git status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        handle_git_error(e, "Get Status")
 
 
 @router.post(
@@ -100,8 +104,7 @@ async def add_all_git_changes():
         add_git_log(LogLevel.SUCCESS, message, details=stdout or stderr)
         return GitCommandResponse(message=message, stdout=stdout, stderr=stderr)
     except GitCommandError as e:
-        add_git_log(LogLevel.ERROR, "Failed to stage all changes.", details=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        handle_git_error(e, "Stage All")
 
 
 @router.post(
@@ -111,15 +114,13 @@ async def add_all_git_changes():
     summary="Unstage All Changes",
 )
 async def unstage_all_git_changes():
-    """Unstages all currently staged files."""
     try:
         stdout, stderr = git_utils.unstage_all_files()
         message = "All staged changes have been unstaged."
         add_git_log(LogLevel.SUCCESS, message, details=stdout or stderr)
         return GitCommandResponse(message=message, stdout=stdout, stderr=stderr)
     except GitCommandError as e:
-        add_git_log(LogLevel.ERROR, "Failed to unstage all changes.", details=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        handle_git_error(e, "Unstage All")
 
 
 @router.post("/stage_file", response_model=GitCommandResponse, dependencies=common_deps)
@@ -130,12 +131,7 @@ async def stage_file(request: GitFileOperationRequest):
         add_git_log(LogLevel.SUCCESS, message, details=stdout or stderr)
         return GitCommandResponse(message=message, stdout=stdout, stderr=stderr)
     except GitCommandError as e:
-        add_git_log(
-            LogLevel.ERROR,
-            f"Failed to stage file '{request.filepath}'.",
-            details=str(e),
-        )
-        raise HTTPException(status_code=500, detail=str(e))
+        handle_git_error(e, f"Stage File '{request.filepath}'")
 
 
 @router.post(
@@ -148,12 +144,7 @@ async def unstage_file(request: GitFileOperationRequest):
         add_git_log(LogLevel.SUCCESS, message, details=stdout or stderr)
         return GitCommandResponse(message=message, stdout=stdout, stderr=stderr)
     except GitCommandError as e:
-        add_git_log(
-            LogLevel.ERROR,
-            f"Failed to unstage file '{request.filepath}'.",
-            details=str(e),
-        )
-        raise HTTPException(status_code=500, detail=str(e))
+        handle_git_error(e, f"Unstage File '{request.filepath}'")
 
 
 @router.post(
@@ -166,12 +157,9 @@ async def discard_file(request: GitFileOperationRequest):
         add_git_log(LogLevel.SUCCESS, message, details=stdout or stderr)
         return GitCommandResponse(message=message, stdout=stdout, stderr=stderr)
     except GitCommandError as e:
-        add_git_log(
-            LogLevel.ERROR,
-            f"Failed to discard changes for '{request.filepath}'.",
-            details=str(e),
-        )
-        raise HTTPException(status_code=500, detail=str(e))
+        handle_git_error(e, f"Discard File '{request.filepath}'")
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 @router.post(
@@ -184,8 +172,7 @@ async def discard_all_changes():
         add_git_log(LogLevel.SUCCESS, message, details=stdout or stderr)
         return GitCommandResponse(message=message, stdout=stdout, stderr=stderr)
     except GitCommandError as e:
-        add_git_log(LogLevel.ERROR, "Failed to discard all changes.", details=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        handle_git_error(e, "Discard All")
 
 
 @router.post(
@@ -200,7 +187,6 @@ async def commit_git_changes(commit_request: GitCommitRequest = Body(...)):
         if "No changes staged for commit" in stdout:
             add_git_log(LogLevel.INFO, "Commit: No changes staged.")
             return GitCommandResponse(message=stdout, stdout=stdout, stderr=stderr)
-
         message = "Changes committed successfully."
         add_git_log(
             LogLevel.SUCCESS,
@@ -211,8 +197,7 @@ async def commit_git_changes(commit_request: GitCommitRequest = Body(...)):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except GitCommandError as e:
-        add_git_log(LogLevel.ERROR, "Commit: Failed.", details=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        handle_git_error(e, "Commit")
 
 
 @router.post(
@@ -227,17 +212,12 @@ async def sync_workspace(commit_request: GitCommitRequest = Body(...)):
             commit_request.message
             or f"chore: sync at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         )
-
         stdout, stderr = git_utils.sync_workspace(commit_message=commit_message)
         message = "Workspace synchronized successfully."
-        # The sync_workspace function is complex, so we log its final output as success.
-        # The function itself will raise an error on failure, which is caught below.
         add_git_log(LogLevel.SUCCESS, message, details=stdout)
         return GitCommandResponse(message=message, stdout=stdout, stderr=stderr)
     except GitCommandError as e:
-        # The error from sync_workspace is already very descriptive.
-        add_git_log(LogLevel.ERROR, "Sync: Failed.", details=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        handle_git_error(e, "Sync Workspace")
 
 
 @router.post(
@@ -255,18 +235,13 @@ async def pull_git_changes(params: GitPullParams = Depends()):
             autostash=params.autostash,
         )
         message = "Pull operation completed."
-
-        if "Already up to date." in stdout or "Already up to date." in stderr:
+        if "Already up to date" in stdout:
             add_git_log(LogLevel.INFO, "Pull: Already up to date.")
-        elif stderr:
-            add_git_log(LogLevel.WARN, "Pull: Completed with warnings.", details=stderr)
         else:
             add_git_log(LogLevel.SUCCESS, message, details=stdout)
-
         return GitCommandResponse(message=message, stdout=stdout, stderr=stderr)
     except GitCommandError as e:
-        add_git_log(LogLevel.ERROR, "Pull: Failed.", details=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        handle_git_error(e, "Pull")
 
 
 @router.post(
@@ -281,18 +256,13 @@ async def push_git_changes(params: GitPushParams = Depends()):
             remote=params.remote, branch=params.branch, force=params.force
         )
         message = "Push operation completed."
-
-        if "Everything up-to-date" in stdout or "Everything up-to-date" in stderr:
+        if "Everything up-to-date" in stdout:
             add_git_log(LogLevel.INFO, "Push: Everything up-to-date.")
-        elif stderr:
-            add_git_log(LogLevel.WARN, "Push: Completed with warnings.", details=stderr)
         else:
             add_git_log(LogLevel.SUCCESS, message, details=stdout)
-
         return GitCommandResponse(message=message, stdout=stdout, stderr=stderr)
     except GitCommandError as e:
-        add_git_log(LogLevel.ERROR, "Push: Failed.", details=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        handle_git_error(e, "Push")
 
 
 @router.get(
@@ -306,7 +276,7 @@ async def get_git_log(limit: int = Query(10, ge=1, le=100), page: int = Query(1,
         log_entries_data = git_utils.get_commit_log(limit=limit, page=page)
         return GitLogResponse(log=log_entries_data, page=page, limit=limit)
     except GitCommandError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        handle_git_error(e, "Get Log")
 
 
 @router.get(
@@ -320,7 +290,7 @@ async def get_git_status_summary():
         summary_data = git_utils.get_status_summary()
         return GitStatusSummaryResponse(**summary_data)
     except GitCommandError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        handle_git_error(e, "Get Status Summary")
 
 
 @router.get(
@@ -365,9 +335,7 @@ async def set_resume_auto_sync():
 )
 async def get_commit_files(commit_hash: str):
     try:
-        # A = Added, M = Modified, D = Deleted.
         raw_files = git_utils.get_files_in_commit(commit_hash)
-
         response_files = []
         for f in raw_files:
             response_files.append(
@@ -377,4 +345,36 @@ async def get_commit_files(commit_hash: str):
             )
         return response_files
     except GitCommandError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        handle_git_error(e, f"Get Files for Commit {commit_hash[:7]}")
+
+
+@router.get(
+    "/branches",
+    response_model=BranchListResponse,
+    dependencies=common_deps,
+    summary="List all available branches",
+)
+async def get_branches():
+    """Retrieves a list of all local and remote branches."""
+    try:
+        branch_data = git_utils.list_branches()
+        return BranchListResponse(**branch_data)
+    except GitCommandError as e:
+        handle_git_error(e, "List Branches")
+
+
+@router.post(
+    "/branches/switch",
+    response_model=GitCommandResponse,
+    dependencies=common_deps,
+    summary="Switch to a different branch",
+)
+async def switch_to_branch(request: SwitchBranchRequest):
+    """Checks out the specified branch."""
+    try:
+        stdout, stderr = git_utils.switch_branch(request.branch_name)
+        message = f"Successfully switched to branch '{request.branch_name}'."
+        add_git_log(LogLevel.SUCCESS, message, details=stdout or stderr)
+        return GitCommandResponse(message=message, stdout=stdout, stderr=stderr)
+    except GitCommandError as e:
+        handle_git_error(e, f"Switch Branch to '{request.branch_name}'")

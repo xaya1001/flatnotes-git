@@ -119,12 +119,12 @@
 </style>
 
 <script setup>
-import { mdiNoteOffOutline } from '@mdi/js';
-import { mdilContentSave, mdilDelete } from '@mdi/light-js';
-import Mousetrap from 'mousetrap';
-import { useToast } from 'primevue/usetoast';
-import { computed, nextTick, onMounted, ref, watch } from 'vue';
-import { useRouter } from 'vue-router';
+import { mdiNoteOffOutline } from "@mdi/js";
+import { mdilContentSave, mdilDelete } from "@mdi/light-js";
+import Mousetrap from "mousetrap";
+import { useToast } from "primevue/usetoast";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { useRouter } from "vue-router";
 
 import {
   apiErrorHandler,
@@ -132,26 +132,26 @@ import {
   createNote,
   deleteNote,
   getNote,
-  updateNote
-} from '../api.js';
-import { Note } from '../classes.js';
-import ConfirmModal from '../components/ConfirmModal.vue';
-import CustomButton from '../components/CustomButton.vue';
-import LoadingIndicator from '../components/LoadingIndicator.vue';
-import Toggle from '../components/Toggle.vue';
-import ToastEditor from '../components/toastui/ToastEditor.vue';
-import ToastViewer from '../components/toastui/ToastViewer.vue';
-import { authTypes } from '../constants.js';
-import { useGlobalStore } from '../globalStore.js';
-import { getToastOptions } from '../helpers.js';
-import Compressor from 'compressorjs';
+  updateNote,
+} from "../api.js";
+import { Note } from "../classes.js";
+import ConfirmModal from "../components/ConfirmModal.vue";
+import CustomButton from "../components/CustomButton.vue";
+import LoadingIndicator from "../components/LoadingIndicator.vue";
+import Toggle from "../components/Toggle.vue";
+import ToastEditor from "../components/toastui/ToastEditor.vue";
+import ToastViewer from "../components/toastui/ToastViewer.vue";
+import { authTypes } from "../constants.js";
+import { useGlobalStore } from "../globalStore.js";
+import { getToastOptions } from "../helpers.js";
+import Compressor from "compressorjs";
 
 const props = defineProps({
-  title: String
+  title: String,
 });
 
 const canModify = computed(
-  () => globalStore.config.authType != authTypes.readOnly
+  () => globalStore.config.authType != authTypes.readOnly,
 );
 let contentChangedTimeout = null;
 const editMode = ref(false);
@@ -184,14 +184,14 @@ function init() {
       })
       .catch((error) => {
         if (error.response?.status === 404) {
-          loadingIndicator.value.setFailed('Note not found', mdiNoteOffOutline);
+          loadingIndicator.value.setFailed("Note not found", mdiNoteOffOutline);
         } else {
           loadingIndicator.value.setFailed();
           apiErrorHandler(error, toast);
         }
       });
   } else {
-    newTitle.value = '';
+    newTitle.value = "";
     note.value = new Note();
     // Set the editMode to false to close any existing editors.
     // This ensures the editor is cleanly reinitialised in an empty state.
@@ -241,8 +241,8 @@ function deleteHandler() {
 function deleteConfirmedHandler() {
   deleteNote(note.value.title)
     .then(() => {
-      toast.add(getToastOptions('Note deleted ✓', 'Success', 'success'));
-      router.push({ name: 'home' });
+      toast.add(getToastOptions("Note deleted ✓", "Success", "success"));
+      router.push({ name: "home" });
     })
     .catch((error) => {
       apiErrorHandler(error, toast);
@@ -257,14 +257,14 @@ function saveHandler(close = false) {
   // Empty Title Validation
   if (!newTitle.value) {
     toast.add(
-      getToastOptions('Cannot save note without a title.', 'Invalid', 'error')
+      getToastOptions("Cannot save note without a title.", "Invalid", "error"),
     );
     return;
   }
 
   // Invalid Character Validation
   if (reservedFilenameCharacters.test(newTitle.value)) {
-    badFilenameToast('Title');
+    badFilenameToast("Title");
     return;
   }
 
@@ -284,8 +284,8 @@ function saveNew(newTitle, newContent, close = false) {
       note.value = data;
       router
         .push({
-          name: 'note',
-          params: { title: note.value.title }
+          name: "note",
+          params: { title: note.value.title },
         })
         .then(() => {
           // Wait for the route to be updated before setting edit mode to false
@@ -307,7 +307,7 @@ function saveExisting(newTitle, newContent, close = false) {
     .then((data) => {
       clearDraft();
       note.value = data;
-      router.replace({ name: 'note', params: { title: note.value.title } });
+      router.replace({ name: "note", params: { title: note.value.title } });
       noteSaveSuccess(close);
     })
     .catch(noteSaveFailure);
@@ -317,13 +317,13 @@ function noteSaveFailure(error) {
   if (error.response?.status === 409) {
     toast.add(
       getToastOptions(
-        'A note with this title already exists. Please try again with a new title.',
-        'Duplicate',
-        'error'
-      )
+        "A note with this title already exists. Please try again with a new title.",
+        "Duplicate",
+        "error",
+      ),
     );
   } else if (error.response?.status === 413) {
-    entityTooLargeToast('note');
+    entityTooLargeToast("note");
   } else {
     apiErrorHandler(error, toast);
   }
@@ -335,7 +335,7 @@ function noteSaveSuccess(close = false) {
     closeNote();
   }
   setBeforeUnloadConfirmation(false);
-  toast.add(getToastOptions('Note saved successfully ✓', 'Success', 'success'));
+  toast.add(getToastOptions("Note saved successfully ✓", "Success", "success"));
 }
 
 // Note Closure
@@ -351,105 +351,113 @@ function closeNote() {
   clearDraft();
   editMode.value = false;
   if (isNewNote.value) {
-    router.push({ name: 'home' });
+    router.push({ name: "home" });
   } else {
     editMode.value = false;
   }
 }
 
 // Image Upload
-function addImageBlobHook(file, callback) {
-  const config = globalStore.config.value;
-
-  if (config && config.frontendImageCompressionEnabled) {
-    const options = {
-      quality: config.frontendImageCompressionQuality,
-      maxWidth: config.frontendImageMaxWidth,
-      // Note: height is auto-calculated to preserve aspect ratio.
-      mimeType: file.type,
-      success(compressedResult) {
-        toast.add(
-          getToastOptions(
-            `Image compressed: ${Math.round(file.size / 1024)}KB -> ${Math.round(compressedResult.size / 1024)}KB`,
-            'Info',
-            'info'
-          )
-        );
-        uploadAndInsert(compressedResult, callback);
-      },
-      error(err) {
-        console.error('Image compression failed:', err.message);
-        toast.add(
-          getToastOptions(
-            'Image compression failed, uploading original file.',
-            'Warning',
-            'warn'
-          )
-        );
-        uploadAndInsert(file, callback);
-      }
-    };
-    new Compressor(file, options);
-  } else {
-    uploadAndInsert(file, callback);
-  }
-}
-
 function uploadAndInsert(fileToUpload, callback) {
   const altTextInputValue = document.getElementById(
-    'toastuiAltTextInput'
+    "toastuiAltTextInput",
   )?.value;
 
-  // Upload the image then use the callback to insert the URL into the editor
-  postAttachment(file).then(function (data) {
+  postAttachment(fileToUpload).then(function (data) {
     if (data) {
-      // If the user has entered an alt text, use it. Otherwise, use the filename returned by the API.
       const altText = altTextInputValue ? altTextInputValue : data.filename;
       callback(data.url, altText);
     }
   });
 }
 
-function postAttachment(file) {
-  // Invalid Character Validation
-  if (reservedFilenameCharacters.test(file.name)) {
-    badFilenameToast('Title');
-    return;
+function postAttachment(fileToUpload) {
+  if (!fileToUpload) {
+    toast.add(
+      getToastOptions("No file provided for upload.", "Error", "error"),
+    );
+    return Promise.reject("No file provided");
   }
 
-  // Uploading Toast
-  toast.add(getToastOptions('Uploading attachment...'));
+  if (reservedFilenameCharacters.test(fileToUpload.name)) {
+    badFilenameToast("Filename");
+    return Promise.reject("Invalid filename");
+  }
 
-  // Upload the attachment
-  return createAttachment(file)
+  toast.add(getToastOptions("Uploading attachment..."));
+
+  return createAttachment(fileToUpload)
     .then((data) => {
-      // Success Toast
       toast.add(
         getToastOptions(
-          'Attachment uploaded successfully ✓',
-          'Success',
-          'success'
-        )
+          "Attachment uploaded successfully ✓",
+          "Success",
+          "success",
+        ),
       );
       return data;
     })
     .catch((error) => {
       if (error.response?.status === 409) {
-        // Note: The current implementation will append a datetime to the filename if it already exists.
-        // Error Toast
         toast.add(
           getToastOptions(
-            'An attachment with this filename already exists.',
-            'Duplicate',
-            'error'
-          )
+            "An attachment with this filename already exists.",
+            "Duplicate",
+            "error",
+          ),
         );
       } else if (error.response?.status == 413) {
-        entityTooLargeToast('attachment');
+        entityTooLargeToast("attachment");
       } else {
-        apiErrorHandler(error, toast);
+        console.error("Attachment upload error:", error);
+        toast.add(
+          getToastOptions(
+            error.response?.data?.detail || "Failed to upload attachment.",
+            "Upload Error",
+            "error",
+          ),
+        );
       }
+      return Promise.reject(error);
     });
+}
+
+function addImageBlobHook(file, callback) {
+  if (!file) return;
+
+  const config = globalStore.config.value;
+
+  if (config && config.frontendImageCompressionEnabled) {
+    const options = {
+      quality: config.frontendImageCompressionQuality,
+      maxWidth: config.frontendImageMaxWidth,
+      mimeType: file.type,
+      success(compressedResult) {
+        toast.add(
+          getToastOptions(
+            `Image compressed: ${Math.round(file.size / 1024)}KB -> ${Math.round(compressedResult.size / 1024)}KB`,
+            "Info",
+            "info",
+          ),
+        );
+        uploadAndInsert(compressedResult, callback);
+      },
+      error(err) {
+        console.error("Image compression failed:", err.message);
+        toast.add(
+          getToastOptions(
+            "Image compression failed, uploading original file.",
+            "Warning",
+            "warn",
+          ),
+        );
+        uploadAndInsert(file, callback);
+      },
+    };
+    new Compressor(file, options);
+  } else {
+    uploadAndInsert(file, callback);
+  }
 }
 
 // Content Change Watcher
@@ -494,7 +502,7 @@ function loadDraft() {
 
 // Keyboard Shortcuts
 // 'e' to edit
-Mousetrap.bind('e', () => {
+Mousetrap.bind("e", () => {
   if (editMode.value === false && canModify.value) {
     editHandler();
   }
@@ -502,11 +510,11 @@ Mousetrap.bind('e', () => {
 
 function keydownHandler(event) {
   // Ctrl + Enter to save
-  if ((event.ctrlKey || event.metaKey) && event.key == 'Enter') {
+  if ((event.ctrlKey || event.metaKey) && event.key == "Enter") {
     saveHandler((close = false));
   }
   // Escape to exit edit mode
-  if (event.key == 'Escape') {
+  if (event.key == "Escape") {
     closeHandler();
   }
 }
@@ -516,9 +524,9 @@ function entityTooLargeToast(entityName) {
   toast.add(
     getToastOptions(
       `This ${entityName} is too large. Please try again with a smaller ${entityName} or adjust your server configuration.`,
-      'Failure',
-      'error'
-    )
+      "Failure",
+      "error",
+    ),
   );
 }
 
@@ -527,8 +535,8 @@ function badFilenameToast(entityName) {
     getToastOptions(
       'Due to filename restrictions, the following characters are not allowed: <>:"/\\|?*',
       `Invalid ${entityName}`,
-      'error'
-    )
+      "error",
+    ),
   );
 }
 
@@ -545,14 +553,14 @@ function setBeforeUnloadConfirmation(enable = true) {
 function saveDefaultEditorMode() {
   const isWysiwygMode = toastEditor.value.isWysiwygMode();
   localStorage.setItem(
-    'defaultEditorMode',
-    isWysiwygMode ? 'wysiwyg' : 'markdown'
+    "defaultEditorMode",
+    isWysiwygMode ? "wysiwyg" : "markdown",
   );
 }
 
 function loadDefaultEditorMode() {
-  const defaultWysiwygMode = localStorage.getItem('defaultEditorMode');
-  return defaultWysiwygMode || 'markdown';
+  const defaultWysiwygMode = localStorage.getItem("defaultEditorMode");
+  return defaultWysiwygMode || "markdown";
 }
 
 function isContentChanged() {
