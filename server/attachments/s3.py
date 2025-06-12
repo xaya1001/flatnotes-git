@@ -1,111 +1,123 @@
-# server/attachments/s3.py
+# attachments/s3.py
 
-import os
-import uuid
+import io
+from typing import TYPE_CHECKING
+from uuid import uuid4
+
 import boto3
-from botocore.exceptions import ClientError
-from fastapi import UploadFile, HTTPException
-from fastapi.responses import FileResponse
+from botocore.client import Config
+from botocore.exceptions import ClientError, NoCredentialsError
+from fastapi import UploadFile
+from fastapi.responses import RedirectResponse
 
-from server.logger import logger
-from server.global_config import GlobalConfig
+# Use TYPE_CHECKING to avoid circular import at runtime
+if TYPE_CHECKING:
+    from global_config import GlobalConfig
+
+from helpers import is_valid_filename
+from logger import logger
 
 from .base import BaseAttachments
 from .models import AttachmentCreateResponse
 
 
 class S3Attachments(BaseAttachments):
-    """
-    Manages attachments by uploading them to an S3-compatible storage service.
-    """
-
-    def __init__(self):
-        config = GlobalConfig()
+    def __init__(self, config: "GlobalConfig"):
         self.bucket_name = config.s3_bucket_name
-        self.endpoint_url = config.s3_endpoint_url
-        self.region = config.s3_region
-        self.access_key = config.s3_access_key_id
-        self.secret_key = config.s3_secret_access_key
-        self.path_prefix = (
-            config.s3_path_prefix.strip("/") + "/" if config.s3_path_prefix else ""
-        )
+        self.path_prefix = config.s3_path_prefix.strip("/")
         self.public_url_base = (
-            config.s3_public_url_base.strip("/") if config.s3_public_url_base else None
+            config.s3_public_url_base.rstrip("/") if config.s3_public_url_base else None
         )
+        self.presigned_url_expiration = config.s3_presigned_url_expiration
 
-        # Basic configuration validation
-        if not all([self.access_key, self.secret_key, self.bucket_name]):
+        if not all(
+            [
+                config.s3_access_key_id,
+                config.s3_secret_access_key,
+                self.bucket_name,
+                config.s3_region,
+            ]
+        ):
             raise ValueError(
-                "S3 provider is missing required configuration (ACCESS_KEY, SECRET_KEY, BUCKET_NAME)."
+                "S3 provider is selected, but one or more required S3 environment variables are missing (e.g. key, secret, bucket, region)."
             )
 
-        logger.info(f"Initializing S3Attachments for bucket '{self.bucket_name}'")
         try:
             self.s3_client = boto3.client(
                 "s3",
-                endpoint_url=self.endpoint_url,
-                aws_access_key_id=self.access_key,
-                aws_secret_access_key=self.secret_key,
-                region_name=self.region,
+                endpoint_url=config.s3_endpoint_url,
+                aws_access_key_id=config.s3_access_key_id,
+                aws_secret_access_key=config.s3_secret_access_key,
+                region_name=config.s3_region,
+                config=Config(signature_version="s3v4"),
             )
-        except Exception as e:
-            logger.error(f"Failed to initialize S3 client: {e}")
-            raise
-
-    def create(self, file: UploadFile) -> AttachmentCreateResponse:
-        """Uploads a file to S3 and returns its public URL."""
-        # Sanitize filename for safety, although UUID makes it less critical
-        safe_filename = os.path.basename(file.filename)
-        # Generate a unique key to prevent any possible overwrites
-        s3_key = f"{self.path_prefix}{uuid.uuid4()}-{safe_filename}"
-
-        logger.info(f"Uploading '{safe_filename}' to S3 with key '{s3_key}'")
-
-        try:
-            self.s3_client.upload_fileobj(
-                file.file,
-                self.bucket_name,
-                s3_key,
-                ExtraArgs={"ContentType": file.content_type},
-            )
+            # Verify bucket exists and we have access
+            self.s3_client.head_bucket(Bucket=self.bucket_name)
+        except NoCredentialsError as e:
+            raise ValueError(f"S3 credentials not available: {e}")
         except ClientError as e:
             error_code = e.response.get("Error", {}).get("Code")
-            logger.error(f"S3 Upload Failed. Code: {error_code}. Details: {e}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"S3 Upload Failed: {error_code or 'Unknown error'}",
+            raise ValueError(f"S3 client error ({error_code}): {e}")
+
+    def _get_object_key(self, filename: str) -> str:
+        """Constructs the full S3 object key."""
+        return f"{self.path_prefix}/{filename}" if self.path_prefix else filename
+
+    def create(self, file: UploadFile) -> AttachmentCreateResponse:
+        is_valid_filename(file.filename)
+
+        # Generate a unique key to prevent overwrites
+        unique_filename = f"{uuid4().hex}-{file.filename}"
+        object_key = self._get_object_key(unique_filename)
+
+        try:
+            # Use file.read() which is async-compatible, instead of file.file
+            file_content = file.file.read()
+            self.s3_client.upload_fileobj(
+                io.BytesIO(file_content),
+                self.bucket_name,
+                object_key,
+                ExtraArgs={"ContentType": file.content_type},
             )
-        except Exception as e:
-            logger.error(f"An unexpected error occurred during S3 upload: {e}")
-            raise HTTPException(
-                status_code=500, detail="An unexpected error occurred during upload."
+            logger.info(
+                f"Successfully uploaded '{file.filename}' to S3 bucket '{self.bucket_name}' as '{object_key}'"
             )
+        except ClientError as e:
+            logger.error(f"Failed to upload to S3: {e}")
+            # Do not use FileExistsError. This is an I/O failure.
+            raise IOError(f"Failed to upload file to S3 storage: {e}")
 
-        public_url = self._get_public_url(s3_key)
-        logger.info(f"Upload successful. Public URL: {public_url}")
-
-        return AttachmentCreateResponse(filename=safe_filename, url=public_url)
-
-    def get(self, filename: str) -> FileResponse:
-        """Direct download from server is not supported for S3. Files are accessed via public URL."""
-        logger.warning(
-            f"Attempted to call get() on S3 attachment '{filename}'. This is not supported."
-        )
-        raise NotImplementedError(
-            "Direct download for S3 attachments is not supported. Use the public URL provided on creation."
-        )
-
-    def _get_public_url(self, key: str) -> str:
-        """Constructs the public URL for a given S3 key."""
-        # Custom domain/R2 public URL base has highest priority
+        # Construct the URL based on whether a public base URL is provided
         if self.public_url_base:
-            return f"{self.public_url_base}/{key}"
+            url = f"{self.public_url_base}/{object_key}"
+        else:
+            # Fallback to the endpoint URL if no public base is set
+            endpoint_url = self.s3_client.meta.endpoint_url
+            url = f"{endpoint_url}/{self.bucket_name}/{object_key}"
 
-        # URL for S3-compatible services with a custom endpoint (like R2, MinIO)
-        if self.endpoint_url:
-            # Assumes virtual-hosted-style is not the default for custom endpoints,
-            # builds path-style URL which is common for R2 public access.
-            return f"{self.endpoint_url}/{self.bucket_name}/{key}"
+        return AttachmentCreateResponse(filename=unique_filename, url=url)
 
-        # Standard AWS S3 virtual-hosted-style URL
-        return f"https://{self.bucket_name}.s3.{self.region}.amazonaws.com/{key}"
+    def get(self, filename: str):
+        is_valid_filename(filename)
+        object_key = self._get_object_key(filename)
+
+        # If a public URL base is defined, we assume files are publicly accessible and redirect directly.
+        if self.public_url_base:
+            return RedirectResponse(url=f"{self.public_url_base}/{object_key}")
+
+        # Otherwise, generate a secure presigned URL for temporary access.
+        try:
+            url = self.s3_client.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": self.bucket_name, "Key": object_key},
+                ExpiresIn=self.presigned_url_expiration,
+            )
+            return RedirectResponse(url=url)
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "NoSuchKey":
+                raise FileNotFoundError(
+                    "The specified attachment cannot be found in S3."
+                )
+            else:
+                logger.error(f"Error generating presigned URL from S3: {e}")
+                raise IOError(f"Could not retrieve file from S3: {e}")

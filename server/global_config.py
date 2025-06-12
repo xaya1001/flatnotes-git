@@ -5,6 +5,11 @@ from helpers import CustomBaseModel, get_env
 from logger import logger
 
 
+class StorageProviderType(str, Enum):
+    FILESYSTEM = "filesystem"
+    S3 = "s3"
+
+
 class GlobalConfig:
     def __init__(self) -> None:
         logger.debug("Loading global config...")
@@ -15,13 +20,30 @@ class GlobalConfig:
         self.quick_access_sort: str = self._quick_access_sort()
         self.quick_access_limit: int = self._quick_access_limit()
         self.path_prefix: str = self._load_path_prefix()
-        self.flatnotes_git_enabled: bool = self._load_flatnotes_git_enabled()
+
+        self.flatnotes_git_enabled: bool = get_env(
+            "FLATNOTES_GIT_ENABLED", mandatory=False, default=False, cast_bool=True
+        )
         self.flatnotes_git_auto_sync_interval: int = (
-            self._load_flatnotes_git_auto_sync_interval()
+            get_env(
+                "FLATNOTES_GIT_AUTO_SYNC_INTERVAL",
+                mandatory=False,
+                default=0,
+                cast_int=True,
+            )
+            if self.flatnotes_git_enabled
+            else 0
+        )
+        self.flatnotes_git_auto_pull_on_start: bool = get_env(
+            "FLATNOTES_GIT_AUTO_PULL_ON_START",
+            mandatory=False,
+            default=False,
+            cast_bool=True,
         )
 
-        # --- S3/R2 Configuration Loading ---
-        self.attachment_storage_provider: str = self._load_attachment_storage_provider()
+        self.attachment_storage_provider: StorageProviderType = (
+            self._load_attachment_storage_provider()
+        )
         self.s3_endpoint_url: str = get_env(
             "FLATNOTES_S3_ENDPOINT_URL", mandatory=False
         )
@@ -39,8 +61,13 @@ class GlobalConfig:
         self.s3_public_url_base: str = get_env(
             "FLATNOTES_S3_PUBLIC_URL_BASE", mandatory=False
         )
+        self.s3_presigned_url_expiration: int = get_env(
+            "FLATNOTES_S3_PRESIGNED_URL_EXPIRATION",
+            mandatory=False,
+            default=3600,
+            cast_int=True,
+        )
 
-        # --- Frontend Image Processing Config ---
         self.frontend_image_compression_enabled: bool = get_env(
             "FLATNOTES_FRONTEND_IMAGE_COMPRESSION_ENABLED",
             mandatory=False,
@@ -71,26 +98,19 @@ class GlobalConfig:
         return FileSystemNotes()
 
     def load_attachment_storage(self):
-        """
-        Factory method to load the configured attachment storage provider.
-        The decision is now solely based on the provider environment variable.
-        """
-        if self.attachment_storage_provider.lower() == "s3":
-            # If 's3' is chosen, we attempt to load it.
-            # If it fails due to missing config, it will raise an error during initialization,
-            # which is the desired behavior to alert the user of a misconfiguration.
+        if self.attachment_storage_provider == StorageProviderType.S3:
             try:
                 from attachments.s3 import S3Attachments
 
                 logger.info("Attachment storage provider: S3/R2")
-                return S3Attachments()
+                return S3Attachments(self)
             except (ValueError, ImportError) as e:
                 logger.error(
-                    f"Failed to initialize S3 provider: {e}. Please check your configuration. Application will exit."
+                    f"Failed to initialize S3 provider: {e}. Application will exit."
                 )
-                sys.exit(1)  # Exit gracefully if S3 is chosen but misconfigured.
+                sys.exit(1)
 
-        # Default to filesystem if provider is 'filesystem' or any other value.
+        # Default to filesystem
         from attachments.file_system import FileSystemAttachments
 
         logger.info("Attachment storage provider: Filesystem")
@@ -98,7 +118,9 @@ class GlobalConfig:
 
     def _load_auth_type(self):
         key = "FLATNOTES_AUTH_TYPE"
-        auth_type = get_env(key, mandatory=False, default=AuthType.PASSWORD.value)
+        auth_type = get_env(
+            key, mandatory=False, default=AuthType.PASSWORD.value
+        )
         try:
             auth_type = AuthType(auth_type.lower())
         except ValueError:
@@ -161,30 +183,18 @@ class GlobalConfig:
             sys.exit(1)
         return value
 
-    def _load_flatnotes_git_enabled(self) -> bool:
-        key = "FLATNOTES_GIT_ENABLED"
-        value = get_env(key, mandatory=False, default=False, cast_bool=True)
-        logger.info(f"Git integration feature flag (FLATNOTES_GIT_ENABLED): {value}")
-        return value
-
-    def _load_flatnotes_git_auto_sync_interval(self) -> int:
-        key = "FLATNOTES_GIT_AUTO_SYNC_INTERVAL"
-        if not self.flatnotes_git_enabled:
-            return 0
-        value = get_env(key, mandatory=False, default=0, cast_int=True)
-        return value
-
-    def _load_attachment_storage_provider(self) -> str:
+    def _load_attachment_storage_provider(self) -> StorageProviderType:
         key = "FLATNOTES_ATTACHMENT_STORAGE_PROVIDER"
-        value = get_env(key, mandatory=False, default="filesystem")
-        valid_values = ["filesystem", "s3"]
-        if value.lower() not in valid_values:
+        value = get_env(key, mandatory=False, default="filesystem").lower()
+        try:
+            return StorageProviderType(value)
+        except ValueError:
             logger.error(
-                f"Invalid value '{value}' for {key}. Must be one of: {', '.join(valid_values)}. "
-                "Defaulting to 'filesystem'."
+                f"Invalid value '{value}' for {key}. Must be one of: "
+                + ", ".join([p.value for p in StorageProviderType])
+                + "."
             )
-            return "filesystem"
-        return value
+            sys.exit(1)
 
     def _load_float_env(
         self, key: str, default: float, min_val: float, max_val: float
@@ -194,14 +204,15 @@ class GlobalConfig:
             value = float(value_str)
             if not (min_val <= value <= max_val):
                 logger.warning(
-                    f"Value for {key} ({value}) is outside the valid range [{min_val}, {max_val}]. "
-                    f"Using default value: {default}"
+                    f"Value for {key} ({value}) is outside the valid range [{min_val}, {max_val}]. Using default value: {default}"
                 )
                 return default
             return value
         except (ValueError, TypeError):
             logger.warning(f"Invalid value for {key}. Using default value: {default}")
             return default
+
+    # --- END: CORRECTED ADDITIONS ---
 
 
 class AuthType(str, Enum):

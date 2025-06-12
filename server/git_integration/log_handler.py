@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from threading import Lock
 from typing import Deque, List, Optional
+
 from pydantic import BaseModel  # <--- 1. Import BaseModel
 
 # Configuration
