@@ -1,27 +1,25 @@
-<!-- client/components/GitPanel/GitActionsTab.vue -->
+<!-- client/git-integration/components/tabs/GitActionsTab.vue -->
 <template>
   <div class="flex h-full flex-col p-4">
     <div class="min-h-0 flex-grow overflow-y-auto">
       <!-- Standard Actions -->
       <div class="grid grid-cols-2 gap-3">
         <button
-          @click="store.handlePull"
-          :disabled="store.isActionLoading"
+          @click="actionsStore.handlePull"
+          :disabled="actionsStore.isActionLoading"
           class="rounded bg-theme-background p-2 text-sm font-semibold hover:bg-theme-border disabled:opacity-50"
         >
           Pull
         </button>
         <button
-          @click="store.handlePush"
-          :disabled="store.isActionLoading"
+          @click="actionsStore.handlePush"
+          :disabled="actionsStore.isActionLoading"
           class="rounded bg-theme-background p-2 text-sm font-semibold hover:bg-theme-border disabled:opacity-50"
         >
           Push
         </button>
       </div>
-
       <hr class="my-4 border-theme-border" />
-
       <!-- Automation Status -->
       <div>
         <h4 class="mb-2 text-sm font-semibold">Automation Status</h4>
@@ -32,10 +30,10 @@
             <span>Automatic Sync</span>
             <Toggle
               v-if="globalConfig.flatnotesGitAutoSyncInterval > 0"
-              :isOn="!store.isAutoSyncPaused"
-              :label="store.isAutoSyncPaused ? 'Paused' : 'Enabled'"
-              @click="store.toggleAutoSyncPause"
-              :disabled="store.isActionLoading"
+              :isOn="!actionsStore.isAutoSyncPaused"
+              :label="actionsStore.isAutoSyncPaused ? 'Paused' : 'Enabled'"
+              @click="actionsStore.toggleAutoSyncPause"
+              :disabled="actionsStore.isActionLoading"
             />
             <span
               v-else
@@ -51,7 +49,7 @@
             <strong>{{ globalConfig.flatnotesGitAutoSyncInterval }}</strong>
             minutes.
             <span
-              v-if="store.isAutoSyncPaused"
+              v-if="actionsStore.isAutoSyncPaused"
               class="font-semibold text-yellow-600 dark:text-yellow-400"
               >(Currently Paused)</span
             >
@@ -63,17 +61,18 @@
           </div>
         </div>
       </div>
-
       <hr class="my-4 border-theme-border" />
-
       <!-- Danger Zone -->
       <div>
         <h4 class="mb-1 text-sm font-semibold text-theme-danger">
           Danger Zone
         </h4>
         <button
-          @click="store.handleDiscardAll"
-          :disabled="store.isActionLoading || store.unstagedFiles.length === 0"
+          @click="actionsStore.handleDiscardAll"
+          :disabled="
+            actionsStore.isActionLoading ||
+            statusStore.unstagedFiles.length === 0
+          "
           class="w-full rounded border border-theme-danger p-2 text-sm font-semibold text-theme-danger hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
         >
           Discard All Unstaged Changes...
@@ -82,14 +81,15 @@
     </div>
   </div>
 </template>
-
 <script setup>
 import { computed } from "vue";
-import Toggle from "../Toggle.vue";
-import { useGitStore } from "../../gitStore";
-import { useGlobalStore } from "../../globalStore";
+import Toggle from "../../../components/Toggle.vue";
+import { useActionsStore } from "../../stores/actionsStore";
+import { useStatusStore } from "../../stores/statusStore";
+import { useGlobalStore } from "../../../globalStore";
 
-const store = useGitStore();
+const actionsStore = useActionsStore();
+const statusStore = useStatusStore();
 const globalStore = useGlobalStore();
 const globalConfig = computed(() => globalStore.config.value);
 </script>

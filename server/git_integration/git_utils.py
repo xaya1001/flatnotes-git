@@ -89,9 +89,14 @@ def get_status() -> Dict[str, Any]:
     _check_repo()
     all_files = {}
 
+    # Helper to safely get the path from a diff object
+    def get_path(diff):
+        return diff.b_path or diff.a_path
+
+    # Staged changes (Index vs. HEAD)
     for diff in repo.index.diff("HEAD"):
         status = diff.change_type
-        filepath = diff.a_path
+        filepath = get_path(diff)
         original_path = diff.rename_from if diff.renamed else None
         all_files[filepath] = {
             "path": filepath,
@@ -100,9 +105,10 @@ def get_status() -> Dict[str, Any]:
             "original_path": original_path,
         }
 
+    # Unstaged changes (Working Tree vs. Index)
     for diff in repo.index.diff(None):
         status = diff.change_type
-        filepath = diff.a_path
+        filepath = get_path(diff)
         original_path = diff.rename_from if diff.renamed else None
         if filepath in all_files:
             all_files[filepath]["work_tree_status"] = status
@@ -114,6 +120,7 @@ def get_status() -> Dict[str, Any]:
                 "original_path": original_path,
             }
 
+    # Untracked files
     for filepath in repo.untracked_files:
         all_files[filepath] = {
             "path": filepath,
@@ -259,11 +266,18 @@ def get_commit_log(limit: int = 10, page: int = 1) -> List[Dict[str, Any]]:
 
 
 def get_current_branch() -> Optional[str]:
+    """Robustly gets the current branch name."""
     _check_repo()
     try:
-        return repo.active_branch.name
-    except TypeError:
-        return "HEAD (Detached)"
+        # This is more reliable than repo.active_branch
+        branch_name = repo.git.rev_parse("--abbrev-ref", "HEAD")
+        return branch_name if branch_name != "HEAD" else "HEAD (Detached)"
+    except GitPythonError as e:
+        # This can happen in a new repo with no commits
+        if "fatal: bad revision 'HEAD'" in e.stderr:
+            return None
+        logger.error(f"Could not determine current branch: {e.stderr}")
+        raise
 
 
 def get_remote_url(remote_name: Optional[str] = None) -> Optional[str]:
@@ -276,10 +290,15 @@ def get_remote_url(remote_name: Optional[str] = None) -> Optional[str]:
 
 def get_status_summary() -> Dict[str, Any]:
     _check_repo()
+    try:
+        # Check if there are any commits. If not, diffing against HEAD will fail.
+        repo.head.commit
+        staged_len = len(repo.index.diff("HEAD"))
+    except ValueError:  # This happens in a repo with no commits yet
+        staged_len = len(repo.index.diff(None))  # In this case, staged is everything
+
     changed_files_count = (
-        len(repo.index.diff("HEAD"))
-        + len(repo.index.diff(None))
-        + len(repo.untracked_files)
+        staged_len + len(repo.index.diff(None)) + len(repo.untracked_files)
     )
     return {
         "current_branch": get_current_branch(),
@@ -324,14 +343,15 @@ def get_files_in_commit(commit_hash: str) -> List[Dict[str, str]]:
     parent = (
         commit.parents[0]
         if commit.parents
-        else repo.tree("4b825dc642cb6eb9a060e54bf8d69288fbee4904")
+        else repo.tree("4b825dc642cb6eb9a060e54bf8d69288fbee4904")  # Empty tree
     )
-    diffs = commit.diff(parent, create_patch=False)
+    # CORRECTED: The diff should be from parent TO commit to show changes IN this commit.
+    diffs = parent.diff(commit, create_patch=False)
 
     changed_files = []
     for diff in diffs:
         status = diff.change_type
-        filepath = diff.a_path
+        filepath = diff.b_path or diff.a_path
         changed_files.append({"status": status, "path": filepath})
     return changed_files
 
@@ -355,16 +375,14 @@ def list_branches() -> Dict[str, Any]:
         )
 
     # Remote branches
-    # We need to be careful not to add duplicates if a local branch tracks a remote one.
     local_branch_names = {b.name for b in repo.branches}
     for r in repo.remotes:
         for ref in r.refs:
-            # ref.name is like 'origin/main', we want 'main'
             branch_name_part = ref.name.split("/")[-1]
             if branch_name_part not in local_branch_names:
                 all_branches.append(
                     {
-                        "name": ref.name,  # Show full remote name like 'origin/main'
+                        "name": ref.name,
                         "is_active": ref.name == active_branch_name,
                         "is_remote": True,
                     }
@@ -378,13 +396,9 @@ def switch_branch(branch_name: str) -> Tuple[str, str]:
     _check_repo()
 
     try:
-        # Check if it's a remote branch
         if "/" in branch_name:
-            # For remote branches, we need to check them out as new local tracking branches
             remote_name, remote_branch_name = branch_name.split("/", 1)
             remote = _get_remote(remote_name)
-
-            # Find the corresponding remote ref
             remote_ref = next(
                 (ref for ref in remote.refs if ref.name == branch_name), None
             )
@@ -395,14 +409,10 @@ def switch_branch(branch_name: str) -> Tuple[str, str]:
                     f"Remote branch '{branch_name}' not found.",
                     "",
                 )
-
-            # Create a local branch that tracks the remote branch
             new_local_branch = repo.create_head(remote_branch_name, remote_ref)
             new_local_branch.set_tracking_branch(remote_ref)
             new_local_branch.checkout()
-
         else:
-            # It's a local branch
             repo.heads[branch_name].checkout()
 
         return f"Switched to branch '{branch_name}'.", ""
