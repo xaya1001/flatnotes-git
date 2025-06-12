@@ -10,7 +10,7 @@
       <div class="flex items-center space-x-2">
         <h2 class="text-lg font-semibold">Git Sync</h2>
         <button
-          @click="store.refreshAll"
+          @click="refreshAll"
           class="rounded-full p-1 hover:bg-theme-border"
           title="Refresh"
         >
@@ -18,7 +18,7 @@
             type="mdi"
             :path="mdilRefresh"
             :size="20"
-            :class="{ 'animate-spin': store.isRefreshing }"
+            :class="{ 'animate-spin': isRefreshing }"
           />
         </button>
       </div>
@@ -26,11 +26,11 @@
         <button
           @click="handlePinClick"
           class="rounded-full p-1 hover:bg-theme-border"
-          :title="store.isPinned ? 'Unpin Panel' : 'Pin Panel'"
+          :title="panelUiStore.isPinned ? 'Unpin Panel' : 'Pin Panel'"
         >
           <SvgIcon
             type="mdi"
-            :path="store.isPinned ? mdilPin : mdilPinOff"
+            :path="panelUiStore.isPinned ? mdilPin : mdilPinOff"
             :size="20"
           />
         </button>
@@ -43,19 +43,17 @@
         </button>
       </div>
     </div>
-
     <!-- Confirmation Modal -->
     <ConfirmModal
-      v-model="store.isConfirmModalVisible"
-      :title="store.confirmModalProps.title"
-      :message="store.confirmModalProps.message"
-      :confirmButtonText="store.confirmModalProps.confirmButtonText"
-      :confirmButtonStyle="store.confirmModalProps.confirmButtonStyle"
-      @confirm="() => store.resolveConfirmation(true)"
-      @cancel="() => store.resolveConfirmation(false)"
-      @reject="() => store.resolveConfirmation(false)"
+      v-model="panelUiStore.isConfirmModalVisible"
+      :title="panelUiStore.confirmModalProps.title"
+      :message="panelUiStore.confirmModalProps.message"
+      :confirmButtonText="panelUiStore.confirmModalProps.confirmButtonText"
+      :confirmButtonStyle="panelUiStore.confirmModalProps.confirmButtonStyle"
+      @confirm="() => panelUiStore.resolveConfirmation(true)"
+      @cancel="() => panelUiStore.resolveConfirmation(false)"
+      @reject="() => panelUiStore.resolveConfirmation(false)"
     />
-
     <!-- TabView orchestrating the smart tabs -->
     <TabView
       class="flex min-h-0 flex-grow flex-col"
@@ -67,21 +65,18 @@
       >
         <GitChangesTab />
       </TabPanel>
-
       <TabPanel
         header="History"
         :pt="{ content: { class: 'p-0 flex flex-col h-full' } }"
       >
         <GitHistoryTab />
       </TabPanel>
-
       <TabPanel
         header="Actions"
         :pt="{ content: { class: 'p-0 flex flex-col h-full' } }"
       >
         <GitActionsTab />
       </TabPanel>
-
       <TabPanel
         header="Log"
         :pt="{ content: { class: 'p-0 flex flex-col h-full' } }"
@@ -91,11 +86,14 @@
     </TabView>
   </div>
 </template>
-
 <script setup>
-import { computed, onMounted, onUnmounted } from "vue";
-import { useGlobalStore } from "../globalStore";
-import { useGitStore } from "../gitStore";
+import { computed, onMounted, onUnmounted, ref } from "vue";
+import { useGlobalStore } from "../../globalStore";
+import { usePanelUiStore } from "../stores/panelUiStore";
+import { useStatusStore } from "../stores/statusStore";
+import { useHistoryStore } from "../stores/historyStore";
+import { useActionsStore } from "../stores/actionsStore";
+import { useLogStore } from "../stores/logStore";
 
 // Icons
 import SvgIcon from "@jamescoyle/vue-icon";
@@ -103,39 +101,70 @@ import { mdilRefresh, mdilPin, mdilPinOff } from "@mdi/light-js";
 import { mdiClose } from "@mdi/js";
 
 // PrimeVue & Custom Components
-import ConfirmModal from "./ConfirmModal.vue";
+import ConfirmModal from "../../components/ConfirmModal.vue";
 import TabView from "primevue/tabview";
 import TabPanel from "primevue/tabpanel";
-import GitChangesTab from "./GitPanel/GitChangesTab.vue";
-import GitHistoryTab from "./GitPanel/GitHistoryTab.vue";
-import GitActionsTab from "./GitPanel/GitActionsTab.vue";
-import GitLogTab from "./GitPanel/GitLogTab.vue";
+import GitChangesTab from "./tabs/GitChangesTab.vue";
+import GitHistoryTab from "./tabs/GitHistoryTab.vue";
+import GitActionsTab from "./tabs/GitActionsTab.vue";
+import GitLogTab from "./tabs/GitLogTab.vue";
 
 const emit = defineEmits(["close", "pin-toggled"]);
 
+// Stores
 const globalStore = useGlobalStore();
-const store = useGitStore();
+const panelUiStore = usePanelUiStore();
+const statusStore = useStatusStore();
+const historyStore = useHistoryStore();
+const actionsStore = useActionsStore();
+const logStore = useLogStore();
+
+const isRefreshing = ref(false);
 
 const gitIntegrationEnabled = computed(
   () => globalStore.config.value?.flatnotesGitEnabled,
 );
 
 function handlePinClick() {
-  store.togglePin();
-  emit("pin-toggled", store.isPinned);
+  panelUiStore.togglePin();
+  emit("pin-toggled", panelUiStore.isPinned);
+}
+
+async function refreshAll() {
+  isRefreshing.value = true;
+  const pendingLogId = logStore.addPendingLog("Refreshing all data...");
+  await Promise.all([
+    statusStore.fetchStatus(),
+    historyStore.fetchGitLog(),
+    logStore.fetchActivityLog(),
+    statusStore.fetchStatusSummary(),
+  ]);
+  logStore.updateLog(pendingLogId, {
+    level: "success",
+    message: "All data refreshed.",
+    details: null,
+  });
+  isRefreshing.value = false;
 }
 
 onMounted(() => {
   if (gitIntegrationEnabled.value) {
-    store.initialize();
+    statusStore.initialize();
+    logStore.initialize();
+    historyStore.fetchGitLog();
+    if (globalStore.config.value?.flatnotesGitAutoSyncInterval > 0) {
+      actionsStore.fetchAutoSyncState();
+    }
   }
 });
 
 onUnmounted(() => {
-  store.cleanup();
+  if (gitIntegrationEnabled.value) {
+    statusStore.cleanup();
+    logStore.cleanup();
+  }
 });
 </script>
-
 <style scoped>
 .git-panel {
   height: 85vh;

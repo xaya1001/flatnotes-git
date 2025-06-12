@@ -3,28 +3,29 @@
     <!-- Commit & Sync Area (Fixed Size) -->
     <div class="mb-4 flex-shrink-0">
       <textarea
-        v-model="store.commitMessage"
-        placeholder="Commit Message"
+        v-model="statusStore.commitMessage"
+        placeholder="Commit Message (use {{date}} and {{numFiles}})"
         rows="3"
         class="w-full rounded border bg-theme-background p-2 text-sm focus:border-theme-brand focus:ring-theme-brand"
       ></textarea>
       <div class="mt-1 flex space-x-2">
         <button
-          @click="store.handleCommit"
+          @click="actionsStore.handleCommit"
           :disabled="
-            store.isActionLoading ||
-            store.stagedFiles.length === 0 ||
-            !store.commitMessage.trim()
+            actionsStore.isActionLoading ||
+            statusStore.stagedFiles.length === 0 ||
+            !statusStore.commitMessage.trim()
           "
           class="w-1/2 rounded bg-theme-background p-2 text-sm font-semibold hover:bg-theme-border disabled:cursor-not-allowed disabled:opacity-50"
         >
           Commit Staged
         </button>
         <button
-          @click="store.handleSync"
+          @click="actionsStore.handleSync"
           :disabled="
-            store.isActionLoading ||
-            (store.stagedFiles.length === 0 && store.unstagedFiles.length === 0)
+            actionsStore.isActionLoading ||
+            (statusStore.stagedFiles.length === 0 &&
+              statusStore.unstagedFiles.length === 0)
           "
           class="w-1/2 rounded bg-theme-brand p-2 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
         >
@@ -32,28 +33,30 @@
         </button>
       </div>
     </div>
-
     <!-- Scrollable content area -->
     <div class="min-h-0 flex-grow overflow-y-auto">
       <!-- Staged Files -->
       <div class="mb-4">
         <div class="mb-2 ml-1 flex items-center justify-between">
           <h3 class="text-sm font-semibold">
-            Staged Changes ({{ store.stagedFiles.length }})
+            Staged Changes ({{ statusStore.stagedFiles.length }})
           </h3>
           <button
-            @click="store.handleUnstageAll"
-            :disabled="store.isActionLoading || store.stagedFiles.length === 0"
+            @click="actionsStore.handleUnstageAll"
+            :disabled="
+              actionsStore.isActionLoading ||
+              statusStore.stagedFiles.length === 0
+            "
             class="text-xs font-semibold text-theme-text-muted hover:text-theme-text disabled:opacity-50"
           >
             Unstage All
           </button>
         </div>
-        <div v-if="store.stagedFiles.length > 0">
+        <div v-if="statusStore.stagedFiles.length > 0">
           <DataTable
-            :value="store.stagedFiles"
+            :value="statusStore.stagedFiles"
             size="small"
-            :loading="store.isActionLoading"
+            :loading="statusStore.isLoading"
             :tableStyle="{ 'table-layout': 'fixed', width: '100%' }"
           >
             <Column
@@ -77,15 +80,15 @@
                 <div class="flex items-center justify-center space-x-2">
                   <button
                     v-if="slotProps.data.path.endsWith('.md')"
-                    @click="store.openNoteInEditor(slotProps.data.path)"
+                    @click="statusStore.openNoteInEditor(slotProps.data.path)"
                     class="p-1 text-theme-text-muted hover:text-theme-text"
                     title="Open File"
                   >
                     <SvgIcon type="mdi" :path="mdilFile" :size="16" />
                   </button>
                   <button
-                    @click="store.handleUnstageFile(slotProps.data.path)"
-                    :disabled="store.isActionLoading"
+                    @click="actionsStore.handleUnstageFile(slotProps.data.path)"
+                    :disabled="actionsStore.isActionLoading"
                     class="p-1 text-2xl font-light leading-none text-theme-text-muted hover:text-theme-text"
                     title="Unstage"
                   >
@@ -100,28 +103,28 @@
           No staged changes.
         </p>
       </div>
-
       <!-- Unstaged Files -->
       <div>
         <div class="mb-2 ml-1 flex items-center justify-between">
           <h3 class="text-sm font-semibold">
-            Changes ({{ store.unstagedFiles.length }})
+            Changes ({{ statusStore.unstagedFiles.length }})
           </h3>
           <button
-            @click="store.handleStageAll"
+            @click="actionsStore.handleStageAll"
             :disabled="
-              store.isActionLoading || store.unstagedFiles.length === 0
+              actionsStore.isActionLoading ||
+              statusStore.unstagedFiles.length === 0
             "
             class="text-xs font-semibold text-theme-text-muted hover:text-theme-text disabled:opacity-50"
           >
             Stage All
           </button>
         </div>
-        <div v-if="store.unstagedFiles.length > 0">
+        <div v-if="statusStore.unstagedFiles.length > 0">
           <DataTable
-            :value="store.unstagedFiles"
+            :value="statusStore.unstagedFiles"
             size="small"
-            :loading="store.isActionLoading"
+            :loading="statusStore.isLoading"
             :tableStyle="{ 'table-layout': 'fixed', width: '100%' }"
           >
             <Column
@@ -147,23 +150,23 @@
                 <div class="flex items-center justify-center space-x-2">
                   <button
                     v-if="slotProps.data.path.endsWith('.md')"
-                    @click="store.openNoteInEditor(slotProps.data.path)"
+                    @click="statusStore.openNoteInEditor(slotProps.data.path)"
                     class="p-1 text-theme-text-muted hover:text-theme-text"
                     title="Open File"
                   >
                     <SvgIcon type="mdi" :path="mdilFile" :size="16" />
                   </button>
                   <button
-                    @click="store.handleStageFile(slotProps.data.path)"
-                    :disabled="store.isActionLoading"
+                    @click="actionsStore.handleStageFile(slotProps.data.path)"
+                    :disabled="actionsStore.isActionLoading"
                     class="p-1 text-2xl font-light leading-none text-theme-text-muted hover:text-theme-text"
                     title="Stage"
                   >
                     +
                   </button>
                   <button
-                    @click="store.handleDiscardFile(slotProps.data.path)"
-                    :disabled="store.isActionLoading"
+                    @click="actionsStore.handleDiscardFile(slotProps.data.path)"
+                    :disabled="actionsStore.isActionLoading"
                     class="p-1"
                     title="Discard Changes"
                   >
@@ -186,15 +189,16 @@
     </div>
   </div>
 </template>
-
 <script setup>
 import DataTable from "primevue/datatable";
 import Column from "primevue/column";
 import SvgIcon from "@jamescoyle/vue-icon";
 import { mdilFile } from "@mdi/light-js";
 import { mdiClose } from "@mdi/js";
-import { useGitStore } from "../../gitStore";
+import { useStatusStore } from "../../stores/statusStore";
+import { useActionsStore } from "../../stores/actionsStore";
 import { getStatusLabel, getFileStatusClass } from "../../gitUtils";
 
-const store = useGitStore();
+const statusStore = useStatusStore();
+const actionsStore = useActionsStore();
 </script>

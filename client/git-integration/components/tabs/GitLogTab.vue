@@ -1,4 +1,4 @@
-<!-- client/components/GitPanel/GitLogTab.vue -->
+<!-- client/git-integration/components/tabs/GitLogTab.vue -->
 <template>
   <div class="flex h-full flex-col p-2">
     <!-- Filter Area -->
@@ -20,7 +20,6 @@
         {{ filter.name }}
       </button>
     </div>
-
     <!-- Scrollable Log Area -->
     <div class="min-h-0 flex-grow overflow-y-auto">
       <div v-if="filteredLogs.length > 0">
@@ -52,15 +51,13 @@
     </div>
   </div>
 </template>
-
 <script setup>
 import { ref, computed } from "vue";
-import { useLogStore } from "../../logStore";
+import { useLogStore } from "../../stores/logStore";
 import { getLogLevelBgClass, getLogLevelTextColorClass } from "../../gitUtils";
 
 const logStore = useLogStore();
 
-// Local UI state for filtering is acceptable here.
 const activeLogLevelFilter = ref("all");
 const logLevelOptions = ref([
   { name: "All", value: "all" },
