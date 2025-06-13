@@ -149,7 +149,6 @@ async function refreshAll() {
 
 onMounted(() => {
   if (gitIntegrationEnabled.value) {
-    statusStore.initialize();
     logStore.initialize();
     historyStore.fetchGitLog();
     if (globalStore.config.value?.flatnotesGitAutoSyncInterval > 0) {
