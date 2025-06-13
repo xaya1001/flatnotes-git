@@ -92,7 +92,7 @@
                     class="p-1 text-2xl font-light leading-none text-theme-text-muted hover:text-theme-text"
                     title="Unstage"
                   >
-                    −
+                    <SvgIcon type="mdi" :path="mdilMinus" :size="18" />
                   </button>
                 </div>
               </template>
@@ -162,7 +162,7 @@
                     class="p-1 text-2xl font-light leading-none text-theme-text-muted hover:text-theme-text"
                     title="Stage"
                   >
-                    +
+                    <SvgIcon type="mdi" :path="mdilPlus" :size="18" />
                   </button>
                   <button
                     @click="actionsStore.handleDiscardFile(slotProps.data.path)"
@@ -193,7 +193,7 @@
 import DataTable from "primevue/datatable";
 import Column from "primevue/column";
 import SvgIcon from "@jamescoyle/vue-icon";
-import { mdilFile } from "@mdi/light-js";
+import { mdilFile, mdilPlus, mdilMinus } from "@mdi/light-js";
 import { mdiClose } from "@mdi/js";
 import { useStatusStore } from "../../stores/statusStore";
 import { useActionsStore } from "../../stores/actionsStore";

@@ -62,6 +62,7 @@ import router from "./router.js";
 // BEGIN: Git Panel Integration Imports
 import GitPanel from "./git-integration/components/GitPanel.vue";
 import GitStatusIndicator from "./git-integration/components/GitStatusIndicator.vue";
+import { useStatusStore } from "./git-integration/stores/statusStore.js";
 import { usePanelUiStore } from "./git-integration/stores/panelUiStore.js";
 // END: Git Panel Integration Imports
 
@@ -73,7 +74,8 @@ const route = useRoute();
 const toast = useToast();
 const isConfigLoaded = ref(false);
 
-const panelUiStore = usePanelUiStore(); // Use the dedicated UI store
+const statusStore = useStatusStore();
+const panelUiStore = usePanelUiStore();
 
 const gitIntegrationEnabled = computed(
   () => globalStore.config.value?.flatnotesGitEnabled,
@@ -111,6 +113,9 @@ onMounted(() => {
       globalStore.config.value = data;
       isConfigLoaded.value = true;
       loadingIndicator.value.setLoaded();
+      if (data.flatnotesGitEnabled) {
+        statusStore.initialize();
+      }
     })
     .catch((error) => {
       apiErrorHandler(error, toast);
