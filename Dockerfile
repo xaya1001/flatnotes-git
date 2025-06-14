@@ -45,11 +45,6 @@ RUN apt update && apt install -y \
     openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
-RUN echo "appuser:x:${PUID}:${PGID}:flatnotes user:/home/appuser:/bin/sh" >> /etc/passwd && \
-    mkdir -p /home/appuser && chown ${PUID}:${PGID} /home/appuser
-
-RUN mkdir -p /etc/ssh && ssh-keyscan github.com >> /etc/ssh/ssh_known_hosts
-
 RUN pip install --no-cache-dir pipenv
 
 WORKDIR ${APP_PATH}
