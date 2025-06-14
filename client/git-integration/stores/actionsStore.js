@@ -55,7 +55,8 @@ export const useActionsStore = defineStore("git-actions", () => {
         actionName.includes("Commit") ||
         actionName.includes("Sync") ||
         actionName.includes("Pull") ||
-        actionName.includes("Discard")
+        actionName.includes("Discard") ||
+        actionName.includes("Switch") // Add branch switch to refresh history
       ) {
         await historyStore.fetchGitLog();
       }
@@ -230,6 +231,30 @@ export const useActionsStore = defineStore("git-actions", () => {
     }
   }
 
+  // --- NEW: Branch Actions ---
+  async function getBranches() {
+    try {
+      return await gitApi.getBranches();
+    } catch (error) {
+      toast.add({
+        severity: "error",
+        summary: "Error Fetching Branches",
+        detail: error.response?.data?.detail || "Could not load branches.",
+        life: 4000,
+      });
+      return { branches: [], current_branch: "Error" };
+    }
+  }
+
+  function switchBranch(branchName) {
+    performGitAction(
+      gitApi.switchBranch,
+      [branchName],
+      "Switch Branch",
+      `Switched to branch '${branchName}'.`,
+    );
+  }
+
   return {
     isActionLoading,
     isAutoSyncPaused,
@@ -245,5 +270,8 @@ export const useActionsStore = defineStore("git-actions", () => {
     handlePush,
     fetchAutoSyncState,
     toggleAutoSyncPause,
+    // NEW
+    getBranches,
+    switchBranch,
   };
 });

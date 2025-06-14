@@ -1,6 +1,5 @@
 # server/git_integration/router.py
 import asyncio
-import json
 from datetime import datetime
 from functools import lru_cache
 from typing import List, Optional
@@ -352,7 +351,8 @@ async def get_commit_files(
 @router.get("/branches", response_model=BranchListResponse)
 async def get_branches(manager: GitManager = Depends(get_git_manager)):
     try:
-        return manager.list_branches()
+        # Call the new method that fetches first
+        return manager.fetch_and_list_branches()
     except Exception as e:
         handle_git_exception(e, "List Branches")
 

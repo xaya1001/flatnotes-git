@@ -15,25 +15,7 @@
         @toggleSearchModal="toggleSearchModal"
       />
       <RouterView />
-      <!-- BEGIN: Git Panel Integration -->
-      <GitStatusIndicator
-        v-if="gitIntegrationEnabled"
-        @toggle-panel="panelUiStore.toggleVisibility"
-      />
-      <div
-        v-if="panelUiStore.isVisible && gitIntegrationEnabled"
-        @mousedown="handlePanelOverlayMouseDown"
-        @mouseup="handlePanelOverlayMouseUp"
-        class="fixed inset-0 z-40"
-      >
-        <div class="absolute right-5 top-20 w-full max-w-md md:max-w-lg">
-          <GitPanel
-            @close="panelUiStore.hidePanel"
-            @pin-toggled="panelUiStore.isPinned = $event"
-          />
-        </div>
-      </div>
-      <!-- END: Git Panel Integration -->
+      <GitSidebar v-if="gitIntegrationEnabled" />
     </template>
     <div v-else class="flex flex-grow items-center justify-center">
       <p class="text-theme-text-muted">Loading application...</p>
@@ -59,12 +41,8 @@ import { loadStoredToken } from "./tokenStorage.js";
 import LoadingIndicator from "./components/LoadingIndicator.vue";
 import router from "./router.js";
 
-// BEGIN: Git Panel Integration Imports
-import GitPanel from "./git-integration/components/GitPanel.vue";
-import GitStatusIndicator from "./git-integration/components/GitStatusIndicator.vue";
+import GitSidebar from "./git-integration/components/GitSidebar.vue";
 import { useStatusStore } from "./git-integration/stores/statusStore.js";
-import { usePanelUiStore } from "./git-integration/stores/panelUiStore.js";
-// END: Git Panel Integration Imports
 
 const globalStore = useGlobalStore();
 const isSearchModalVisible = ref(false);
@@ -75,13 +53,10 @@ const toast = useToast();
 const isConfigLoaded = ref(false);
 
 const statusStore = useStatusStore();
-const panelUiStore = usePanelUiStore();
 
 const gitIntegrationEnabled = computed(
   () => globalStore.config.value?.flatnotesGitEnabled,
 );
-
-let isMouseDownOnOverlay = false;
 
 // '/' to search
 Mousetrap.bind("/", () => {
@@ -136,20 +111,5 @@ const showNavBarLogo = computed(() => {
 
 function toggleSearchModal() {
   isSearchModalVisible.value = !isSearchModalVisible.value;
-}
-
-function handlePanelOverlayMouseDown(event) {
-  if (panelUiStore.isPinned) return;
-  if (event.target === event.currentTarget) {
-    isMouseDownOnOverlay = true;
-  }
-}
-
-function handlePanelOverlayMouseUp(event) {
-  if (panelUiStore.isPinned) return;
-  if (event.target === event.currentTarget && isMouseDownOnOverlay) {
-    panelUiStore.hidePanel();
-  }
-  isMouseDownOnOverlay = false;
 }
 </script>

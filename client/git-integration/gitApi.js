@@ -148,4 +148,23 @@ export async function getGitCommitFiles(commitHash) {
     return Promise.reject(error);
   }
 }
+
+// NEW Branch APIs
+export async function getBranches() {
+  try {
+    const response = await api.get("api/git/branches");
+    return response.data;
+  } catch (error) {
+    return Promise.reject(error);
+  }
+}
+
+export async function switchBranch(branch_name) {
+  try {
+    const response = await api.post("api/git/branches/switch", { branch_name });
+    return response.data;
+  } catch (error) {
+    return Promise.reject(error);
+  }
+}
 // --- END GIT INTEGRATION API CALLS ---

@@ -193,7 +193,8 @@ class GitManager:
             self.repo.git.reset("--hard", "ORIG_HEAD")
             raise MergeConflictError(
                 f"Conflict detected during pull. The operation was safely aborted, "
-                f"and your local files are unchanged. Please resolve conflicts manually using the command line. "
+                f"and your local files are unchanged. "
+                f"Please resolve conflicts manually using the command line. "
                 f"Details: {e.stderr}"
             ) from e
         finally:
@@ -289,29 +290,69 @@ class GitManager:
             for diff in diffs
         ]
 
+    def fetch_and_list_branches(self) -> Dict[str, Any]:
+        """
+        Fetches all remotes to update local refs and then lists all branches.
+        This ensures remote branches are visible.
+        """
+        try:
+            # Fetch from all remotes to get the latest branches
+            for remote in self.repo.remotes:
+                logger.info(f"Fetching from remote '{remote.name}'...")
+                remote.fetch(prune=True)
+            logger.info("Fetch complete.")
+        except GitPythonError as e:
+            logger.error(f"Failed to fetch remotes: {e.stderr}")
+            # We can choose to fail here or just proceed with the old data.
+            # It's better to show potentially stale data than crash.
+            # We will still log the error for diagnostics.
+            # Let's add a log entry for the user to see.
+            from .log_handler import LogLevel, add_git_log
+
+            add_git_log(LogLevel.WARN, "Could not refresh remote branches.", str(e))
+
+        # Now, call the existing list_branches method on the updated repo state
+        return self.list_branches()
+
     def list_branches(self) -> Dict[str, Any]:
         active_branch_name = self.get_current_branch()
         all_branches = []
-        local_branch_names = {b.name for b in self.repo.branches}
+        # Use a set to track branch names to avoid duplicates from remote/local
+        seen_branches = set()
 
+        # Add local branches first
         for b in self.repo.branches:
-            all_branches.append(
-                {
-                    "name": b.name,
-                    "is_active": b.name == active_branch_name,
-                    "is_remote": False,
-                }
-            )
+            if b.name not in seen_branches:
+                all_branches.append(
+                    {
+                        "name": b.name,
+                        "is_active": b.name == active_branch_name,
+                        "is_remote": False,
+                    }
+                )
+                seen_branches.add(b.name)
 
+        # Add remote branches that don't have a local counterpart
         for r in self.repo.remotes:
             for ref in r.refs:
-                remote_branch_name = ref.name.split("/", 1)[-1]
-                if remote_branch_name == "HEAD":
+                # remote_branch_name is like 'origin/main', we want just 'main' for comparison
+                # and the full 'origin/main' for display/checkout
+                branch_name_part = ref.name.split("/", 1)[-1]
+                if branch_name_part == "HEAD":
                     continue
-                if remote_branch_name not in local_branch_names:
+                if branch_name_part not in seen_branches:
                     all_branches.append(
-                        {"name": ref.name, "is_active": False, "is_remote": True}
+                        {
+                            "name": ref.name,  # Use full name like 'origin/new-feature'
+                            "is_active": False,
+                            "is_remote": True,
+                        }
                     )
+                    seen_branches.add(branch_name_part)
+
+        # Sort branches for easier reading, current branch can be handled on frontend
+        all_branches.sort(key=lambda x: (x["is_remote"], x["name"]))
+
         return {"branches": all_branches, "current_branch": active_branch_name}
 
     def switch_branch(self, branch_name: str) -> None:
