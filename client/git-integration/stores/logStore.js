@@ -3,15 +3,15 @@ import { defineStore } from "pinia";
 import { ref } from "vue";
 import { v4 as uuidv4 } from "uuid";
 import * as gitApi from "../gitApi";
+import { connectToGitEvents } from "../eventSource";
 
 /**
- * Manages the state for the Git activity log, including polling for
- * new logs from the backend.
+ * Manages the state for the Git activity log, including listening for
+ * real-time updates from the backend.
  */
 export const useLogStore = defineStore("git-log", () => {
   // -- STATE --
   const logs = ref([]);
-  let logPollInterval = null;
 
   // -- ACTIONS --
   function addLog(logData) {
@@ -50,33 +50,30 @@ export const useLogStore = defineStore("git-log", () => {
   }
 
   async function fetchActivityLog() {
+    // This can still be called manually (e.g., refresh button)
     try {
       const backendLogs = await gitApi.getGitActivityLog();
-      const existingIds = new Set(logs.value.map((log) => log.id));
-      const newLogs = backendLogs.filter((log) => !existingIds.has(log.id));
-
-      if (newLogs.length > 0) {
-        const formattedNewLogs = newLogs.map((log) => ({
-          ...log,
-          status: "completed",
-        }));
-        logs.value.push(...formattedNewLogs);
-        logs.value.sort(
-          (a, b) => new Date(b.timestamp) - new Date(a.timestamp),
-        );
-      }
+      logs.value = backendLogs.map((log) => ({ ...log, status: "completed" }));
     } catch (error) {
       console.error("Failed to fetch activity log from backend:", error);
     }
   }
 
   function initialize() {
+    // Fetch initial logs once
     fetchActivityLog();
-    logPollInterval = setInterval(fetchActivityLog, 10000);
+
+    // Subscribe to real-time updates
+    const eventSource = connectToGitEvents();
+    eventSource.addEventListener("log_update", (event) => {
+      const backendLogs = JSON.parse(event.data);
+      // Replace the entire log state with the latest from the server
+      logs.value = backendLogs.map((log) => ({ ...log, status: "completed" }));
+    });
   }
 
   function cleanup() {
-    if (logPollInterval) clearInterval(logPollInterval);
+    // Connection is managed globally.
   }
 
   return {

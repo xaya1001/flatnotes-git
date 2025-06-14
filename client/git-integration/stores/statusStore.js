@@ -4,6 +4,7 @@ import { ref, computed } from "vue";
 import { useToast } from "primevue/usetoast";
 import { useRouter } from "vue-router";
 import * as gitApi from "../gitApi";
+import { connectToGitEvents } from "../eventSource";
 
 /**
  * Manages the state related to `git status`, including staged/unstaged files,
@@ -18,7 +19,6 @@ export const useStatusStore = defineStore("git-status", () => {
   const gitStatus = ref({ files: [] });
   const commitMessage = ref("");
   const isLoading = ref(true); // For detailed status
-  let summaryPollInterval = null;
 
   // For GitStatusIndicator
   const isLoadingSummary = ref(true);
@@ -39,7 +39,8 @@ export const useStatusStore = defineStore("git-status", () => {
 
   const tooltipText = computed(() => {
     if (isLoadingSummary.value) return "Loading Git status...";
-    if (summaryError.value) return `Error: ${summaryError.value}`;
+    if (summaryError.value)
+      return `Error: ${summaryError.value}. Refresh to reconnect.`;
     if (filesChangedCount.value > 0)
       return `${filesChangedCount.value} changes detected on branch '${branchName.value}'. Click to view.`;
     return `On branch '${branchName.value}'. Synced.`;
@@ -87,14 +88,51 @@ export const useStatusStore = defineStore("git-status", () => {
   }
 
   function initialize() {
+    isLoading.value = true;
     isLoadingSummary.value = true;
-    fetchStatus();
-    fetchStatusSummary();
-    summaryPollInterval = setInterval(fetchStatusSummary, 30000);
+
+    // Fetch initial state once
+    gitApi.getGitStatus().then((data) => {
+      gitStatus.value = data;
+      branchName.value = data.current_branch || "N/A";
+      filesChangedCount.value = data.files.length;
+      isLoading.value = false;
+      isLoadingSummary.value = false;
+    });
+
+    const eventSource = connectToGitEvents();
+
+    // This listener updates the detailed file list directly
+    eventSource.addEventListener("status_update", (event) => {
+      console.log("Received full status_update event.");
+      const fullStatus = JSON.parse(event.data);
+      gitStatus.value = fullStatus;
+      isLoading.value = false;
+    });
+
+    // This listener updates the summary indicator
+    eventSource.addEventListener("summary_update", (event) => {
+      console.log("Received summary_update event.");
+      const summary = JSON.parse(event.data);
+      branchName.value = summary.current_branch || "N/A";
+      filesChangedCount.value = summary.files_changed_count;
+      summaryError.value = null;
+      isLoadingSummary.value = false;
+    });
+
+    eventSource.addEventListener("open", () => {
+      console.log("SSE connection for status updates opened.");
+      summaryError.value = null;
+    });
+
+    eventSource.addEventListener("error", () => {
+      summaryError.value = "Real-time connection lost.";
+    });
   }
 
   function cleanup() {
-    if (summaryPollInterval) clearInterval(summaryPollInterval);
+    // Cleanup is now handled globally in the eventSource module if needed,
+    // but typically the connection lives as long as the app.
   }
 
   return {
