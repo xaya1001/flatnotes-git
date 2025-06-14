@@ -3,14 +3,11 @@ import { defineStore } from "pinia";
 import { ref } from "vue";
 import { useLogStore } from "./logStore";
 
-/**
- * Manages the UI state of the GitPanel itself, such as visibility,
- * pinning, and the confirmation modal.
- */
 export const usePanelUiStore = defineStore("git-panel-ui", () => {
   // -- STATE --
-  const isVisible = ref(false);
+  const isSidebarVisible = ref(false);
   const isPinned = ref(false);
+  const width = ref(480); // Default width in pixels
 
   // Confirmation Modal State
   const isConfirmModalVisible = ref(false);
@@ -18,20 +15,24 @@ export const usePanelUiStore = defineStore("git-panel-ui", () => {
   let confirmModalResolve = null;
 
   // -- ACTIONS --
-  function showPanel() {
-    isVisible.value = true;
+  function toggleSidebar() {
+    isSidebarVisible.value = !isSidebarVisible.value;
   }
 
-  function hidePanel() {
-    isVisible.value = false;
-  }
-
-  function toggleVisibility() {
-    isVisible.value = !isVisible.value;
+  function hideSidebar() {
+    if (!isPinned.value) {
+      isSidebarVisible.value = false;
+    }
   }
 
   function togglePin() {
     isPinned.value = !isPinned.value;
+  }
+
+  function setWidth(newWidth) {
+    const minWidth = 320;
+    const maxWidth = 900;
+    width.value = Math.max(minWidth, Math.min(newWidth, maxWidth));
   }
 
   function showConfirmation(props) {
@@ -64,14 +65,15 @@ export const usePanelUiStore = defineStore("git-panel-ui", () => {
   }
 
   return {
-    isVisible,
+    isSidebarVisible,
     isPinned,
+    width,
     isConfirmModalVisible,
     confirmModalProps,
-    showPanel,
-    hidePanel,
-    toggleVisibility,
+    toggleSidebar,
+    hideSidebar,
     togglePin,
+    setWidth,
     showConfirmation,
     resolveConfirmation,
   };
