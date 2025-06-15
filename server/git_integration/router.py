@@ -1,6 +1,5 @@
 # server/git_integration/router.py
 from datetime import datetime
-from functools import lru_cache
 from typing import List, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
@@ -37,7 +36,6 @@ from .log_handler import LogEntry, LogLevel, add_git_log, get_all_logs
 
 
 # --- Dependency Injection ---
-@lru_cache()
 def get_git_manager() -> GitManager:
     if not git_config.GIT_ENABLED:
         raise HTTPException(
@@ -53,7 +51,7 @@ def get_git_manager() -> GitManager:
         )
     except RepositoryInvalidError as e:
         logger.error(f"Git repo check failed on dependency creation: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=428, detail=str(e))
 
 
 # --- Router Setup ---

@@ -1,6 +1,8 @@
 import os
 from threading import Lock
 
+import pygit2
+
 from helpers import get_env
 from logger import logger
 
@@ -45,6 +47,10 @@ GIT_AUTO_PULL_ON_START: bool = get_env(
     "FLATNOTES_GIT_AUTO_PULL_ON_START", mandatory=False, default=False, cast_bool=True
 )
 
+GIT_AUTO_INIT: bool = get_env(
+    "FLATNOTES_GIT_AUTO_INIT", mandatory=False, default=False, cast_bool=True
+)
+
 _auto_sync_paused_lock = Lock()
 _is_auto_sync_paused: bool = False
 
@@ -76,6 +82,11 @@ if GIT_ENABLED:
     if not os.path.isdir(GIT_REPO_PATH):
         logger.error(
             f"FLATNOTES_PATH (GIT_REPO_PATH) '{GIT_REPO_PATH}' is not a valid directory. Git integration functionality may fail."
+        )
+    elif not pygit2.discover_repository(GIT_REPO_PATH) and GIT_AUTO_INIT:
+        logger.warning(
+            f"No Git repository found in '{GIT_REPO_PATH}'. "
+            f"FLATNOTES_GIT_AUTO_INIT is true, attempting to initialize a new repository."
         )
     if GIT_AUTO_PULL_ON_START:
         logger.info("Auto-pull on startup is enabled.")

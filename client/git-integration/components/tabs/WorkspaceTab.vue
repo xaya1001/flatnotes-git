@@ -16,14 +16,28 @@
           <!-- Row 1: Network Actions -->
           <button
             @click="actionsStore.handlePull"
-            :disabled="actionsStore.isActionLoading"
+            :disabled="
+              actionsStore.isActionLoading || !statusStore.isTrackingUpstream
+            "
+            :title="
+              !statusStore.isTrackingUpstream
+                ? 'Current branch is not tracking a remote branch'
+                : ''
+            "
             class="rounded bg-theme-background p-2 text-sm font-semibold hover:bg-theme-border disabled:cursor-not-allowed disabled:opacity-50"
           >
             Pull
           </button>
           <button
             @click="actionsStore.handlePush"
-            :disabled="actionsStore.isActionLoading"
+            :disabled="
+              actionsStore.isActionLoading || !statusStore.isTrackingUpstream
+            "
+            :title="
+              !statusStore.isTrackingUpstream
+                ? 'Current branch is not tracking a remote branch'
+                : ''
+            "
             class="rounded bg-theme-background p-2 text-sm font-semibold hover:bg-theme-border disabled:cursor-not-allowed disabled:opacity-50"
           >
             Push
@@ -46,7 +60,13 @@
             :disabled="
               actionsStore.isActionLoading ||
               (statusStore.stagedFiles.length === 0 &&
-                statusStore.unstagedFiles.length === 0)
+                statusStore.unstagedFiles.length === 0) ||
+              !statusStore.isTrackingUpstream
+            "
+            :title="
+              !statusStore.isTrackingUpstream
+                ? 'Current branch is not tracking a remote branch'
+                : ''
             "
             class="rounded bg-theme-brand p-2 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
           >
@@ -141,8 +161,26 @@
         <div class="flex items-center space-x-2 text-sm text-theme-text-muted">
           <SvgIcon type="mdi" :path="mdilSitemap" :size="16" />
           <span>{{ statusStore.branchName || "No Branch" }}</span>
+
+          <button
+            v-if="!statusStore.isTrackingUpstream"
+            @click.stop="toggleUpstreamWarning"
+            class="ml-2"
+            title="Current branch is not tracking a remote branch. Click for details."
+          >
+            <SvgIcon
+              type="mdi"
+              :path="mdiAlertCircleOutline"
+              :size="16"
+              class="text-yellow-500"
+            />
+          </button>
+
           <div
-            v-if="statusStore.commitsBehind > 0 || statusStore.commitsAhead > 0"
+            v-if="
+              (statusStore.commitsBehind > 0 || statusStore.commitsAhead > 0) &&
+              statusStore.isTrackingUpstream
+            "
             class="flex items-center space-x-1"
           >
             <span
@@ -167,6 +205,35 @@
           <SvgIcon type="mdi" :path="mdilChevronUp" :size="20" />
         </div>
       </div>
+
+      <OverlayPanel
+        ref="upstreamWarningPanel"
+        appendTo="body"
+        :pt="{
+          root: {
+            class:
+              'bg-theme-background-elevated border border-theme-border rounded-lg shadow-xl',
+          },
+          content: { class: 'p-4' },
+        }"
+      >
+        <div class="max-w-xs text-sm">
+          <h4 class="mb-2 font-semibold text-theme-text">
+            Branch Not Tracking Remote
+          </h4>
+          <p class="text-theme-text-muted">
+            Your current branch
+            <code class="font-semibold">{{ statusStore.branchName }}</code> is
+            not connected to a remote branch. Pull, Push, and Sync are disabled.
+          </p>
+          <p class="mt-3 text-xs text-theme-text-very-muted">
+            To fix this, run the following command on your server: <br />
+            <code class="font-mono mt-1 block rounded bg-theme-background p-1.5"
+              >git push --set-upstream origin {{ statusStore.branchName }}</code
+            >
+          </p>
+        </div>
+      </OverlayPanel>
 
       <!-- Custom Branch Dropdown -->
       <div
@@ -209,6 +276,7 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted } from "vue";
+import OverlayPanel from "primevue/overlaypanel";
 import { useStatusStore } from "../../stores/statusStore";
 import { useActionsStore } from "../../stores/actionsStore";
 import FileTable from "../shared/FileTable.vue";
@@ -219,13 +287,18 @@ import {
   mdilArrowUp,
   mdilArrowDown,
 } from "@mdi/light-js";
-import { mdiCheck } from "@mdi/js";
+import { mdiCheck, mdiAlertCircleOutline } from "@mdi/js";
 
 const statusStore = useStatusStore();
 const actionsStore = useActionsStore();
 
 const isBranchMenuVisible = ref(false);
 const branchData = ref({ branches: [], current_branch: "" });
+const upstreamWarningPanel = ref();
+
+const toggleUpstreamWarning = (event) => {
+  upstreamWarningPanel.value.toggle(event);
+};
 
 const handleBranchSelect = (branch) => {
   if (!branch.is_active) {
@@ -249,8 +322,6 @@ const toggleBranchMenu = async () => {
 // Click-away to close menu
 const handleClickOutside = (event) => {
   if (isBranchMenuVisible.value) {
-    // A simple check to see if the click was inside this component.
-    // This could be made more robust with a ref on the component root.
     if (!event.target.closest(".relative")) {
       isBranchMenuVisible.value = false;
     }

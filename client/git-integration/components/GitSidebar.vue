@@ -4,6 +4,7 @@
     <!-- Sidebar Component -->
     <Sidebar
       v-model:visible="panelUiStore.isSidebarVisible"
+      @show="handleSidebarShow"
       position="right"
       :modal="!panelUiStore.isPinned"
       :dismissable="!panelUiStore.isPinned"
@@ -69,44 +70,92 @@
           </div>
         </div>
 
-        <!-- Confirmation Modal -->
-        <ConfirmModal
-          v-model="panelUiStore.isConfirmModalVisible"
-          :title="panelUiStore.confirmModalProps.title"
-          :message="panelUiStore.confirmModalProps.message"
-          :confirmButtonText="panelUiStore.confirmModalProps.confirmButtonText"
-          :confirmButtonStyle="
-            panelUiStore.confirmModalProps.confirmButtonStyle
-          "
-          @confirm="() => panelUiStore.resolveConfirmation(true)"
-          @cancel="() => panelUiStore.resolveConfirmation(false)"
-          @reject="() => panelUiStore.resolveConfirmation(false)"
-        />
-
-        <!-- Main TabView with 3 Tabs -->
-        <TabView
-          class="main-tabview flex min-h-0 flex-grow flex-col"
-          :pt="{
-            panelContainer: { class: 'flex-grow min-h-0 overflow-hidden' },
-            nav: { class: 'main-tabview-nav' },
-          }"
+        <!-- Initial Loading State -->
+        <div
+          v-if="!statusStore.isInitialLoadComplete && !statusStore.summaryError"
+          class="flex flex-grow items-center justify-center"
         >
-          <TabPanel
-            header="Workspace"
-            :pt="{ content: { class: 'p-0 flex flex-col h-full' } }"
+          <div
+            class="flex flex-col items-center space-y-2 text-theme-text-muted"
           >
-            <WorkspaceTab />
-          </TabPanel>
-          <TabPanel
-            header="History"
-            :pt="{ content: { class: 'p-0 flex flex-col h-full' } }"
+            <SvgIcon
+              type="mdi"
+              :path="mdilRefresh"
+              :size="32"
+              class="animate-spin"
+            />
+            <span>Loading Git Status...</span>
+          </div>
+        </div>
+
+        <!-- Uninitialized State View -->
+        <div
+          v-else-if="
+            statusStore.summaryError &&
+            statusStore.summaryError.includes('not initialized')
+          "
+          class="flex flex-grow flex-col items-center justify-center p-8 text-center"
+        >
+          <SvgIcon
+            type="mdi"
+            :path="mdiSourceRepository"
+            :size="48"
+            class="mb-4 text-theme-text-muted"
+          />
+          <h3 class="text-lg font-semibold">Git Repository Not Found</h3>
+          <p class="mt-2 text-sm text-theme-text-muted">
+            The notes directory is not a Git repository.
+          </p>
+          <p class="mt-4 text-xs text-theme-text-very-muted">
+            To get started, you can either initialize it manually on your
+            server, or restart Flatnotes with the environment variable
+            <code class="font-semibold">FLATNOTES_GIT_AUTO_INIT=true</code>.
+          </p>
+        </div>
+
+        <!-- Main View (for initialized repos) -->
+        <template v-else>
+          <!-- Confirmation Modal -->
+          <ConfirmModal
+            v-model="panelUiStore.isConfirmModalVisible"
+            :title="panelUiStore.confirmModalProps.title"
+            :message="panelUiStore.confirmModalProps.message"
+            :confirmButtonText="
+              panelUiStore.confirmModalProps.confirmButtonText
+            "
+            :confirmButtonStyle="
+              panelUiStore.confirmModalProps.confirmButtonStyle
+            "
+            @confirm="() => panelUiStore.resolveConfirmation(true)"
+            @cancel="() => panelUiStore.resolveConfirmation(false)"
+            @reject="() => panelUiStore.resolveConfirmation(false)"
+          />
+
+          <!-- Main TabView with 3 Tabs -->
+          <TabView
+            class="main-tabview flex min-h-0 flex-grow flex-col"
+            :pt="{
+              panelContainer: { class: 'flex-grow min-h-0 overflow-hidden' },
+              nav: { class: 'main-tabview-nav' },
+            }"
           >
-            <GitHistoryTab />
-          </TabPanel>
-          <TabPanel header="Log" :pt="{ content: { class: 'p-0 h-full' } }">
-            <GitLogTab />
-          </TabPanel>
-        </TabView>
+            <TabPanel
+              header="Workspace"
+              :pt="{ content: { class: 'p-0 flex flex-col h-full' } }"
+            >
+              <WorkspaceTab />
+            </TabPanel>
+            <TabPanel
+              header="History"
+              :pt="{ content: { class: 'p-0 flex flex-col h-full' } }"
+            >
+              <GitHistoryTab />
+            </TabPanel>
+            <TabPanel header="Log" :pt="{ content: { class: 'p-0 h-full' } }">
+              <GitLogTab />
+            </TabPanel>
+          </TabView>
+        </template>
       </div>
     </Sidebar>
 
@@ -122,6 +171,7 @@ import TabView from "primevue/tabview";
 import TabPanel from "primevue/tabpanel";
 import SvgIcon from "@jamescoyle/vue-icon";
 import { mdilRefresh, mdilPin, mdilPinOff } from "@mdi/light-js";
+import { mdiSourceRepository } from "@mdi/js";
 
 import { useGlobalStore } from "../../globalStore";
 import { usePanelUiStore } from "../stores/panelUiStore";
@@ -147,35 +197,61 @@ const logStore = useLogStore();
 const isRefreshing = ref(false);
 const globalConfig = computed(() => globalStore.config.value);
 
+function handleSidebarShow() {
+  // Always fetch summary when sidebar is shown to get the latest state
+  statusStore.fetchStatusSummary();
+}
+
 async function refreshAll() {
   isRefreshing.value = true;
   const pendingLogId = logStore.addPendingLog("Refreshing all data...");
-  await Promise.all([
-    statusStore.fetchStatus(),
-    historyStore.fetchGitLog(),
-    logStore.fetchActivityLog(),
-  ]);
-  logStore.updateLog(pendingLogId, {
-    level: "success",
-    message: "All data refreshed.",
-    details: null,
-  });
-  isRefreshing.value = false;
+  try {
+    // Re-fetch the summary first to check the state
+    await statusStore.fetchStatusSummary();
+
+    // Only fetch details if not in an uninitialized state
+    if (!statusStore.summaryError?.includes("not initialized")) {
+      await Promise.all([
+        statusStore.fetchStatus(),
+        historyStore.fetchGitLog(),
+        logStore.fetchActivityLog(),
+      ]);
+    }
+
+    logStore.updateLog(pendingLogId, {
+      level: "success",
+      message: "All data refreshed.",
+      details: null,
+    });
+  } catch (e) {
+    logStore.updateLog(pendingLogId, {
+      level: "error",
+      message: "Failed to refresh data.",
+      details: e.message,
+    });
+  } finally {
+    isRefreshing.value = false;
+  }
 }
 
 onMounted(() => {
   if (globalConfig.value?.flatnotesGitEnabled) {
     logStore.initialize();
-    historyStore.fetchGitLog();
-    if (globalConfig.value.flatnotesGitAutoSyncInterval > 0) {
-      actionsStore.fetchAutoSyncState();
-    }
+
+    // Fetch summary on mount to determine state before fetching everything else
+    statusStore.fetchStatusSummary().then(() => {
+      if (!statusStore.summaryError?.includes("not initialized")) {
+        historyStore.fetchGitLog();
+        if (globalConfig.value.flatnotesGitAutoSyncInterval > 0) {
+          actionsStore.fetchAutoSyncState();
+        }
+      }
+    });
   }
 });
 
 onUnmounted(() => {
   if (globalConfig.value?.flatnotesGitEnabled) {
-    statusStore.cleanup();
     logStore.cleanup();
   }
 });
