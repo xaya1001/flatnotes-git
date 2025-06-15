@@ -141,6 +141,27 @@
         <div class="flex items-center space-x-2 text-sm text-theme-text-muted">
           <SvgIcon type="mdi" :path="mdilSitemap" :size="16" />
           <span>{{ statusStore.branchName || "No Branch" }}</span>
+          <div
+            v-if="statusStore.commitsBehind > 0 || statusStore.commitsAhead > 0"
+            class="flex items-center space-x-1"
+          >
+            <span
+              v-if="statusStore.commitsBehind > 0"
+              class="flex items-center"
+              :title="`${statusStore.commitsBehind} commits to pull`"
+            >
+              <SvgIcon type="mdi" :path="mdilArrowDown" :size="14" />
+              <span>{{ statusStore.commitsBehind }}</span>
+            </span>
+            <span
+              v-if="statusStore.commitsAhead > 0"
+              class="flex items-center"
+              :title="`${statusStore.commitsAhead} commits to push`"
+            >
+              <SvgIcon type="mdi" :path="mdilArrowUp" :size="14" />
+              <span>{{ statusStore.commitsAhead }}</span>
+            </span>
+          </div>
         </div>
         <div class="text-sm font-semibold text-theme-text-muted">
           <SvgIcon type="mdi" :path="mdilChevronUp" :size="20" />
@@ -192,7 +213,12 @@ import { useStatusStore } from "../../stores/statusStore";
 import { useActionsStore } from "../../stores/actionsStore";
 import FileTable from "../shared/FileTable.vue";
 import SvgIcon from "@jamescoyle/vue-icon";
-import { mdilSitemap, mdilChevronUp } from "@mdi/light-js";
+import {
+  mdilSitemap,
+  mdilChevronUp,
+  mdilArrowUp,
+  mdilArrowDown,
+} from "@mdi/light-js";
 import { mdiCheck } from "@mdi/js";
 
 const statusStore = useStatusStore();

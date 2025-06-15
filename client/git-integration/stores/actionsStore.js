@@ -18,6 +18,16 @@ export const useActionsStore = defineStore("git-actions", () => {
   const isActionLoading = ref(false);
   const isAutoSyncPaused = ref(false);
 
+  // This is a new helper function for centralized refreshing
+  async function refreshAllStores() {
+    // We run them in parallel for better performance
+    await Promise.all([
+      statusStore.fetchStatus(),
+      statusStore.fetchStatusSummary(),
+      historyStore.fetchGitLog(),
+    ]);
+  }
+
   async function performGitAction(
     actionFunc,
     args,
@@ -40,17 +50,10 @@ export const useActionsStore = defineStore("git-actions", () => {
         details: response.stdout || response.message || null,
       });
 
-      await statusStore.fetchStatus();
+      // After any successful action, trigger a full refresh.
+      // This is simpler and more robust than checking actionName.
+      await refreshAllStores();
 
-      if (
-        actionName.includes("Commit") ||
-        actionName.includes("Sync") ||
-        actionName.includes("Pull") ||
-        actionName.includes("Discard") ||
-        actionName.includes("Switch")
-      ) {
-        await historyStore.fetchGitLog();
-      }
       return true;
     } catch (err) {
       const errorMessage = err.response?.data?.detail || err.message;
@@ -65,6 +68,10 @@ export const useActionsStore = defineStore("git-actions", () => {
         message: `Failed: ${actionName}`,
         details: errorMessage,
       });
+
+      // Also refresh on failure to show any resulting error state (e.g., conflicts)
+      await refreshAllStores();
+
       return false;
     } finally {
       isActionLoading.value = false;
@@ -223,6 +230,7 @@ export const useActionsStore = defineStore("git-actions", () => {
 
   async function getBranches() {
     try {
+      // Backend now fetches before listing, so this is correct.
       return await gitApi.getBranches();
     } catch (error) {
       toast.add({
@@ -244,6 +252,25 @@ export const useActionsStore = defineStore("git-actions", () => {
     );
   }
 
+  async function handleResetToRemote() {
+    const confirmed = await panelUiStore.showConfirmation({
+      title: "Confirm Hard Reset",
+      message:
+        "This will permanently delete all unpushed commits and any uncommitted changes in your workspace. This action cannot be undone. Are you sure you want to match the remote state?",
+      confirmButtonText: "Yes, Reset My Branch",
+      confirmButtonStyle: "danger",
+    });
+
+    if (confirmed) {
+      await performGitAction(
+        gitApi.gitResetToRemote,
+        [],
+        "Reset to Remote",
+        "Local branch has been reset to match the remote.",
+      );
+    }
+  }
+
   return {
     isActionLoading,
     isAutoSyncPaused,
@@ -261,5 +288,6 @@ export const useActionsStore = defineStore("git-actions", () => {
     toggleAutoSyncPause,
     getBranches,
     switchBranch,
+    handleResetToRemote,
   };
 });

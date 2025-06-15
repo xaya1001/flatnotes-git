@@ -19,8 +19,8 @@ pyotp = "==2.9.0"
 qrcode = "==8.0"
 python-multipart = "==0.0.20"
 apscheduler = "==3.11.0"
-boto3 = "*"
-gitpython = "*"
+boto3 = "==1.38.32"
+pygit2 = "==1.18.0"
 
 [requires]
 python_version = "3.11"
