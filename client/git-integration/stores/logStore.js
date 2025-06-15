@@ -3,11 +3,10 @@ import { defineStore } from "pinia";
 import { ref } from "vue";
 import { v4 as uuidv4 } from "uuid";
 import * as gitApi from "../gitApi";
-import { connectToGitEvents } from "../eventSource";
 
 /**
- * Manages the state for the Git activity log, including listening for
- * real-time updates from the backend.
+ * Manages the state for the Git activity log. It is populated by other stores
+ * and can be refreshed manually.
  */
 export const useLogStore = defineStore("git-log", () => {
   // -- STATE --
@@ -50,30 +49,27 @@ export const useLogStore = defineStore("git-log", () => {
   }
 
   async function fetchActivityLog() {
-    // This can still be called manually (e.g., refresh button)
     try {
       const backendLogs = await gitApi.getGitActivityLog();
+      // Replace the current log state with the latest from the server.
       logs.value = backendLogs.map((log) => ({ ...log, status: "completed" }));
     } catch (error) {
       console.error("Failed to fetch activity log from backend:", error);
+      addLog({
+        level: "error",
+        message: "Failed to fetch activity logs.",
+        details: error.message,
+      });
     }
   }
 
   function initialize() {
-    // Fetch initial logs once
+    // Fetch initial logs when the application loads.
     fetchActivityLog();
-
-    // Subscribe to real-time updates
-    const eventSource = connectToGitEvents();
-    eventSource.addEventListener("log_update", (event) => {
-      const backendLogs = JSON.parse(event.data);
-      // Replace the entire log state with the latest from the server
-      logs.value = backendLogs.map((log) => ({ ...log, status: "completed" }));
-    });
   }
 
   function cleanup() {
-    // Connection is managed globally.
+    // No-op. There are no connections or intervals to clear.
   }
 
   return {

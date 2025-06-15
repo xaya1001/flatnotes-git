@@ -8,23 +8,16 @@ import { useStatusStore } from "./statusStore";
 import { useHistoryStore } from "./historyStore";
 import { usePanelUiStore } from "./panelUiStore";
 
-/**
- * Manages the execution of Git actions (commit, push, pull, etc.),
- * loading states, and auto-sync controls.
- */
 export const useActionsStore = defineStore("git-actions", () => {
-  // -- DEPS --
   const toast = useToast();
   const logStore = useLogStore();
   const statusStore = useStatusStore();
   const historyStore = useHistoryStore();
   const panelUiStore = usePanelUiStore();
 
-  // -- STATE --
   const isActionLoading = ref(false);
   const isAutoSyncPaused = ref(false);
 
-  // -- PRIVATE WRAPPER --
   async function performGitAction(
     actionFunc,
     args,
@@ -47,20 +40,18 @@ export const useActionsStore = defineStore("git-actions", () => {
         details: response.stdout || response.message || null,
       });
 
-      // Refresh relevant data after any action
       await statusStore.fetchStatus();
-      await statusStore.fetchStatusSummary();
 
       if (
         actionName.includes("Commit") ||
         actionName.includes("Sync") ||
         actionName.includes("Pull") ||
         actionName.includes("Discard") ||
-        actionName.includes("Switch") // Add branch switch to refresh history
+        actionName.includes("Switch")
       ) {
         await historyStore.fetchGitLog();
       }
-      return true; // Indicate success
+      return true;
     } catch (err) {
       const errorMessage = err.response?.data?.detail || err.message;
       toast.add({
@@ -74,13 +65,12 @@ export const useActionsStore = defineStore("git-actions", () => {
         message: `Failed: ${actionName}`,
         details: errorMessage,
       });
-      return false; // Indicate failure
+      return false;
     } finally {
       isActionLoading.value = false;
     }
   }
 
-  // -- ACTIONS --
   function handleStageFile(filepath) {
     performGitAction(
       gitApi.gitStageFile,
@@ -231,7 +221,6 @@ export const useActionsStore = defineStore("git-actions", () => {
     }
   }
 
-  // --- NEW: Branch Actions ---
   async function getBranches() {
     try {
       return await gitApi.getBranches();
@@ -270,7 +259,6 @@ export const useActionsStore = defineStore("git-actions", () => {
     handlePush,
     fetchAutoSyncState,
     toggleAutoSyncPause,
-    // NEW
     getBranches,
     switchBranch,
   };

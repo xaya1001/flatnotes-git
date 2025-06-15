@@ -27,7 +27,7 @@
 import Mousetrap from "mousetrap";
 import "mousetrap/plugins/global-bind/mousetrap-global-bind";
 import { useToast } from "primevue/usetoast";
-import { computed, ref, onMounted } from "vue";
+import { computed, ref, onMounted, onUnmounted } from "vue";
 import { RouterView, useRoute } from "vue-router";
 
 import { apiErrorHandler, getConfig } from "./api.js";
@@ -45,14 +45,13 @@ import GitSidebar from "./git-integration/components/GitSidebar.vue";
 import { useStatusStore } from "./git-integration/stores/statusStore.js";
 
 const globalStore = useGlobalStore();
+const statusStore = useStatusStore();
 const isSearchModalVisible = ref(false);
 const loadingIndicator = ref();
 const navBar = ref();
 const route = useRoute();
 const toast = useToast();
 const isConfigLoaded = ref(false);
-
-const statusStore = useStatusStore();
 
 const gitIntegrationEnabled = computed(
   () => globalStore.config.value?.flatnotesGitEnabled,
@@ -83,13 +82,17 @@ Mousetrap.bindGlobal("ctrl+alt+h", () => {
 });
 
 onMounted(() => {
+  document.addEventListener("visibilitychange", handleVisibilityChange);
+
   getConfig()
     .then((data) => {
       globalStore.config.value = data;
       isConfigLoaded.value = true;
       loadingIndicator.value.setLoaded();
       if (data.flatnotesGitEnabled) {
-        statusStore.initialize();
+        statusStore.fetchStatusSummary();
+        statusStore.fetchStatus();
+        statusStore.startPolling();
       }
     })
     .catch((error) => {
@@ -100,6 +103,23 @@ onMounted(() => {
   loadStoredToken();
   loadTheme();
 });
+
+onUnmounted(() => {
+  document.removeEventListener("visibilitychange", handleVisibilityChange);
+  statusStore.stopPolling();
+});
+
+function handleVisibilityChange() {
+  if (document.hidden) {
+    statusStore.stopPolling();
+  } else {
+    if (gitIntegrationEnabled.value) {
+      statusStore.fetchStatusSummary();
+      statusStore.fetchStatus();
+      statusStore.startPolling();
+    }
+  }
+}
 
 const showNavBar = computed(() => {
   return route.name !== "login";

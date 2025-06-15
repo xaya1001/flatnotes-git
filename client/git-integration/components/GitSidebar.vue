@@ -154,7 +154,6 @@ async function refreshAll() {
     statusStore.fetchStatus(),
     historyStore.fetchGitLog(),
     logStore.fetchActivityLog(),
-    statusStore.fetchStatusSummary(),
   ]);
   logStore.updateLog(pendingLogId, {
     level: "success",

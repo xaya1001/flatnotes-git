@@ -1,6 +1,6 @@
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import List, Literal, Optional
+from typing import List, Literal
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, UploadFile
@@ -23,19 +23,19 @@ auth: BaseAuth = global_config.load_auth()
 note_storage: BaseNotes = global_config.load_note_storage()
 attachment_storage: BaseAttachments = global_config.load_attachment_storage()
 auth_deps = [Depends(auth.authenticate)] if auth else []
+router = APIRouter()
 
 # --- Scoped Git Imports and Setup ---
 git_integration_router = None
 if global_config.flatnotes_git_enabled:
     try:
         from git_integration import config as git_config
+        from git_integration.git_manager import GitManager
         from git_integration.log_handler import LogLevel, add_git_log
         from git_integration.router import (
-            broadcast_updates,
             get_git_manager,
-            router as git_integration_router,
         )
-        from git_integration.git_manager import GitManager
+        from git_integration.router import router as git_integration_router
     except ImportError as e:
         logger.error(f"FLATNOTES_GIT_ENABLED is true, but a module failed to load: {e}")
 
@@ -121,11 +121,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-router = APIRouter()
-
-
-app.include_router(router, prefix=global_config.path_prefix)
-
 # Conditionally include the Git integration router
 if git_integration_router:
     app.include_router(
@@ -165,9 +160,7 @@ if global_config.auth_type not in [AuthType.NONE, AuthType.READ_ONLY]:
         try:
             return auth.login(data)
         except ValueError:
-            raise HTTPException(
-                status_code=401, detail=api_messages.login_failed
-            )
+            raise HTTPException(status_code=401, detail=api_messages.login_failed)
 
 
 # endregion
@@ -185,9 +178,7 @@ def get_note(title: str):
     try:
         return note_storage.get(title)
     except ValueError:
-        raise HTTPException(
-            status_code=400, detail=api_messages.invalid_note_title
-        )
+        raise HTTPException(status_code=400, detail=api_messages.invalid_note_title)
     except FileNotFoundError:
         raise HTTPException(404, api_messages.note_not_found)
 
@@ -200,27 +191,17 @@ if global_config.auth_type != AuthType.READ_ONLY:
         dependencies=auth_deps,
         response_model=Note,
     )
-    async def post_note(
-        note: NoteCreate,
-        manager: Optional[GitManager] = (
-            Depends(get_git_manager) if global_config.flatnotes_git_enabled else None
-        ),
-    ):
+    def post_note(note: NoteCreate):
         """Create a new note."""
         try:
-            new_note = note_storage.create(note)
-            if global_config.flatnotes_git_enabled:
-                await broadcast_updates(manager)
-            return new_note
+            return note_storage.create(note)
         except ValueError:
             raise HTTPException(
                 status_code=400,
                 detail=api_messages.invalid_note_title,
             )
         except FileExistsError:
-            raise HTTPException(
-                status_code=409, detail=api_messages.note_exists
-            )
+            raise HTTPException(status_code=409, detail=api_messages.note_exists)
 
     # Update Note
     @router.patch(
@@ -228,27 +209,16 @@ if global_config.auth_type != AuthType.READ_ONLY:
         dependencies=auth_deps,
         response_model=Note,
     )
-    async def patch_note(
-        title: str,
-        data: NoteUpdate,
-        manager: Optional[GitManager] = (
-            Depends(get_git_manager) if global_config.flatnotes_git_enabled else None
-        ),
-    ):
+    def patch_note(title: str, data: NoteUpdate):
         try:
-            updated_note = note_storage.update(title, data)
-            if global_config.flatnotes_git_enabled:
-                await broadcast_updates(manager)
-            return updated_note
+            return note_storage.update(title, data)
         except ValueError:
             raise HTTPException(
                 status_code=400,
                 detail=api_messages.invalid_note_title,
             )
         except FileExistsError:
-            raise HTTPException(
-                status_code=409, detail=api_messages.note_exists
-            )
+            raise HTTPException(status_code=409, detail=api_messages.note_exists)
         except FileNotFoundError:
             raise HTTPException(404, api_messages.note_not_found)
 
@@ -258,16 +228,9 @@ if global_config.auth_type != AuthType.READ_ONLY:
         dependencies=auth_deps,
         response_model=None,
     )
-    async def delete_note(
-        title: str,
-        manager: Optional[GitManager] = (
-            Depends(get_git_manager) if global_config.flatnotes_git_enabled else None
-        ),
-    ):
+    def delete_note(title: str):
         try:
             note_storage.delete(title)
-            if global_config.flatnotes_git_enabled:
-                await broadcast_updates(manager)
         except ValueError:
             raise HTTPException(
                 status_code=400,
@@ -356,9 +319,7 @@ def get_attachment(filename: str):
             detail=api_messages.invalid_attachment_filename,
         )
     except FileNotFoundError:
-        raise HTTPException(
-            status_code=404, detail=api_messages.attachment_not_found
-        )
+        raise HTTPException(status_code=404, detail=api_messages.attachment_not_found)
 
 
 if global_config.auth_type != AuthType.READ_ONLY:
