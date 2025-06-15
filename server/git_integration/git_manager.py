@@ -291,10 +291,25 @@ class GitManager:
         old_head_hash = (
             str(self.repo.head.target) if not self.repo.head_is_unborn else None
         )
-        command = ["pull", remote, current_branch]
+
+        # Step 1: Explicitly fetch the specific branch from the remote.
+        # This updates the remote-tracking branch (e.g., 'origin/master') without ambiguity.
+        fetch_output = self._run_git_command(["fetch", remote, current_branch])
+
+        # Step 2: Perform rebase or merge against the specific, unambiguous remote-tracking branch.
         if rebase:
-            command.append("--rebase")
-        output = self._run_git_command(command)
+            # We rebase onto the remote-tracking branch we just fetched (e.g., 'origin/master').
+            # This is much more explicit than relying on FETCH_HEAD.
+            rebase_output = self._run_git_command(
+                ["rebase", f"{remote}/{current_branch}"]
+            )
+            output = f"{fetch_output.strip()}\n{rebase_output.strip()}"
+        else:
+            # For a non-rebase pull, we merge the fetched changes.
+            # 'FETCH_HEAD' is typically safe for merging as it defaults to the first entry.
+            merge_output = self._run_git_command(["merge", "FETCH_HEAD"])
+            output = f"{fetch_output.strip()}\n{merge_output.strip()}"
+
         changed_files = []
         if not self.repo.head_is_unborn and old_head_hash != str(self.repo.head.target):
             new_head_hash = str(self.repo.head.target)
