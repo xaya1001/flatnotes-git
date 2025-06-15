@@ -20,6 +20,8 @@ export const useStatusStore = defineStore("git-status", () => {
   const branchName = ref("");
   const filesChangedCount = ref(0);
   const pollingTimer = ref(null);
+  const commitsAhead = ref(0);
+  const commitsBehind = ref(0);
 
   // --- GETTERS ---
   const stagedFiles = computed(() =>
@@ -33,17 +35,28 @@ export const useStatusStore = defineStore("git-status", () => {
   const tooltipText = computed(() => {
     if (isLoadingSummary.value) return "Loading Git status...";
     if (summaryError.value) return `Error: ${summaryError.value}.`;
+
+    let parts = [];
+    if (commitsBehind.value > 0) parts.push(`${commitsBehind.value} to pull`);
+    if (commitsAhead.value > 0) parts.push(`${commitsAhead.value} to push`);
     if (filesChangedCount.value > 0)
-      return `${filesChangedCount.value} changes on branch '${branchName.value}'. Click to view.`;
-    return `Branch '${branchName.value}' is up to date.`;
+      parts.push(`${filesChangedCount.value} changes`);
+
+    if (parts.length === 0) {
+      return `Branch '${branchName.value}' is up to date.`;
+    }
+    return `Branch '${branchName.value}': ${parts.join(", ")}. Click to view.`;
   });
 
-  // --- INTERNAL ACTIONS ---
-  // This is now an internal helper function, not exposed outside the store.
+  // --- ACTIONS ---
   async function fetchStatus() {
     isLoading.value = true;
     try {
-      gitStatus.value = await gitApi.getGitStatus();
+      const data = await gitApi.getGitStatus();
+      gitStatus.value = data;
+      // Also update ahead/behind from the detailed status
+      commitsAhead.value = data.commits_ahead || 0;
+      commitsBehind.value = data.commits_behind || 0;
     } catch (err) {
       toast.add({
         severity: "error",
@@ -57,13 +70,14 @@ export const useStatusStore = defineStore("git-status", () => {
     }
   }
 
-  // --- PUBLIC ACTIONS ---
   async function fetchStatusSummary() {
     isLoadingSummary.value = true;
     try {
       const summary = await gitApi.getGitStatusSummary();
       branchName.value = summary.current_branch || "N/A";
       filesChangedCount.value = summary.files_changed_count;
+      commitsAhead.value = summary.commits_ahead || 0;
+      commitsBehind.value = summary.commits_behind || 0;
       summaryError.value = null;
     } catch (err) {
       summaryError.value = err.response?.data?.detail || "Connection failed";
@@ -93,10 +107,7 @@ export const useStatusStore = defineStore("git-status", () => {
     commitMessage.value = "";
   }
 
-  // This is the public API of the store.
-  // Note that _fetchStatus is NOT included.
   return {
-    // State & Getters
     gitStatus,
     commitMessage,
     isLoading,
@@ -107,7 +118,8 @@ export const useStatusStore = defineStore("git-status", () => {
     stagedFiles,
     unstagedFiles,
     tooltipText,
-    // Public Actions
+    commitsAhead,
+    commitsBehind,
     fetchStatusSummary,
     fetchStatus,
     startPolling,

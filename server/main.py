@@ -30,7 +30,7 @@ git_integration_router = None
 if global_config.flatnotes_git_enabled:
     try:
         from git_integration import config as git_config
-        from git_integration.git_manager import GitManager
+        from git_integration.git_manager import GitManager, GitManagerError
         from git_integration.log_handler import LogLevel, add_git_log
         from git_integration.router import (
             get_git_manager,
@@ -53,14 +53,25 @@ async def lifespan(app: FastAPI):
                 logger.info("Performing auto-pull on startup...")
                 add_git_log(LogLevel.INFO, "Auto-pull on startup: Initiated.")
                 try:
-                    stdout = manager.pull_remote_changes(rebase=True)
-                    logger.info(f"Auto-pull successful. Stdout: {stdout}")
+                    pull_result = manager.pull_remote_changes(rebase=True)
+                    logger.info(f"Auto-pull successful. Stdout: {pull_result}")
+
+                    # Format the pull_result dictionary into a string for logging
+                    log_details = pull_result.get("message", "Pull command executed.")
+                    changed_files = pull_result.get("changed_files", [])
+                    if changed_files:
+                        file_list_str = "\n".join(
+                            f"  - {file['change_type']}: {file['path']}"
+                            for file in changed_files
+                        )
+                        log_details += f"\n\nUpdated files ({len(changed_files)}):\n{file_list_str}"
+
                     add_git_log(
                         LogLevel.SUCCESS,
                         "Auto-pull on startup: Successful.",
-                        details=stdout,
+                        details=log_details.strip(),
                     )
-                except Exception as e:
+                except GitManagerError as e:
                     logger.error(f"Auto-pull on startup failed: {e}", exc_info=True)
                     add_git_log(
                         LogLevel.ERROR, "Auto-pull on startup: Failed.", details=str(e)
@@ -74,10 +85,13 @@ async def lifespan(app: FastAPI):
 
                 def scheduled_sync_job():
                     if git_config.is_auto_sync_paused():
+                        logger.debug("Auto-sync is paused, skipping scheduled job.")
                         return
+
                     logger.info("Executing scheduled git sync...")
                     add_git_log(LogLevel.INFO, "Scheduled auto-sync: Task started.")
                     try:
+                        # Re-get manager inside the thread for safety
                         sync_manager = get_git_manager()
                         commit_message = f"chore: automatic sync at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
                         sync_manager.sync_workspace(commit_message)
@@ -110,7 +124,7 @@ async def lifespan(app: FastAPI):
 
     # --- Shutdown logic ---
     logger.info("Application shutdown...")
-    if hasattr(app.state, "scheduler"):
+    if hasattr(app.state, "scheduler") and app.state.scheduler.running:
         logger.info("Shutting down scheduler.")
         app.state.scheduler.shutdown()
 
@@ -160,7 +174,9 @@ if global_config.auth_type not in [AuthType.NONE, AuthType.READ_ONLY]:
         try:
             return auth.login(data)
         except ValueError:
-            raise HTTPException(status_code=401, detail=api_messages.login_failed)
+            raise HTTPException(
+                status_code=401, detail=api_messages.login_failed
+            )
 
 
 # endregion
@@ -178,7 +194,9 @@ def get_note(title: str):
     try:
         return note_storage.get(title)
     except ValueError:
-        raise HTTPException(status_code=400, detail=api_messages.invalid_note_title)
+        raise HTTPException(
+            status_code=400, detail=api_messages.invalid_note_title
+        )
     except FileNotFoundError:
         raise HTTPException(404, api_messages.note_not_found)
 
@@ -201,7 +219,9 @@ if global_config.auth_type != AuthType.READ_ONLY:
                 detail=api_messages.invalid_note_title,
             )
         except FileExistsError:
-            raise HTTPException(status_code=409, detail=api_messages.note_exists)
+            raise HTTPException(
+                status_code=409, detail=api_messages.note_exists
+            )
 
     # Update Note
     @router.patch(
@@ -218,7 +238,9 @@ if global_config.auth_type != AuthType.READ_ONLY:
                 detail=api_messages.invalid_note_title,
             )
         except FileExistsError:
-            raise HTTPException(status_code=409, detail=api_messages.note_exists)
+            raise HTTPException(
+                status_code=409, detail=api_messages.note_exists
+            )
         except FileNotFoundError:
             raise HTTPException(404, api_messages.note_not_found)
 
@@ -319,7 +341,9 @@ def get_attachment(filename: str):
             detail=api_messages.invalid_attachment_filename,
         )
     except FileNotFoundError:
-        raise HTTPException(status_code=404, detail=api_messages.attachment_not_found)
+        raise HTTPException(
+            status_code=404, detail=api_messages.attachment_not_found
+        )
 
 
 if global_config.auth_type != AuthType.READ_ONLY:

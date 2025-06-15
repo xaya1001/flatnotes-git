@@ -1,3 +1,4 @@
+<!-- client/git-integration/components/shared/FileTable.vue -->
 <template>
   <div>
     <div v-if="files.length > 0">
@@ -22,19 +23,9 @@
                   slotProps.data.work_tree_status,
                 )
               "
-              :title="
-                getStatusLabel(
-                  slotProps.data.index_status !== ' '
-                    ? slotProps.data.index_status
-                    : slotProps.data.work_tree_status,
-                )
-              "
+              :title="getStatusLabel(statusToShow(slotProps.data))"
             >
-              {{
-                slotProps.data.index_status !== " "
-                  ? slotProps.data.index_status
-                  : slotProps.data.work_tree_status
-              }}
+              {{ statusToShow(slotProps.data) }}
             </span>
           </template>
         </Column>
@@ -88,11 +79,27 @@ import { getStatusLabel, getFileStatusClass } from "../../gitUtils";
 const props = defineProps({
   files: Array,
   isLoading: Boolean,
-  actionPrimaryIcon: { type: String, default: null }, // 'stage' or 'unstage'
-  actionSecondaryIcon: { type: String, default: null }, // 'discard'
+  actionPrimaryIcon: { type: String, default: null },
+  actionSecondaryIcon: { type: String, default: null },
 });
 
 defineEmits(["open", "action:primary", "action:secondary"]);
+
+// This function determines which status character to display.
+// For unstaged changes (action is 'stage'), we MUST show work_tree_status.
+// For staged changes (action is 'unstage'), we MUST show index_status.
+const statusToShow = (file) => {
+  if (props.actionPrimaryIcon === "stage") {
+    // This is the 'Changes' (unstaged) table
+    return file.work_tree_status;
+  }
+  if (props.actionPrimaryIcon === "unstage") {
+    // This is the 'Staged Changes' table
+    return file.index_status;
+  }
+  // Fallback for any other case
+  return file.work_tree_status || file.index_status;
+};
 
 const primaryActionIconPath = computed(() => {
   if (props.actionPrimaryIcon === "stage") return mdilPlus;

@@ -28,6 +28,8 @@ class GitStatusResponse(BaseModel):
 
     files: List[GitFileStatusItem]
     current_branch: Optional[str]
+    commits_ahead: int
+    commits_behind: int
     # Consider adding more context like remote tracking branch, ahead/behind counts later if needed.
     # For now, keeping it aligned with readily available info from git_utils.
 
@@ -36,7 +38,7 @@ class GitStatusResponse(BaseModel):
 class GitCommitRequest(BaseModel):
     """Request model for committing changes."""
 
-    message: str = Field(..., min_length=1, description="Commit message.")
+    message: str = Field(..., description="Commit message.", min_length=0)
 
 
 # --- Log Endpoint ---
@@ -48,6 +50,7 @@ class GitLogEntry(BaseModel):
     author_email: str
     date: str  # ISO 8601 format string
     message: str
+    is_pushed: bool = True
 
 
 class GitLogResponse(BaseModel):
@@ -56,8 +59,7 @@ class GitLogResponse(BaseModel):
     log: List[GitLogEntry]
     page: int
     limit: int
-    total_pages: Optional[int] = None  # Could be calculated if total_commits is known
-    # total_commits: Optional[int] = None # Getting total commits accurately can be expensive.
+    remote_base_url: Optional[str] = None
 
 
 # --- Pull Endpoint (Query Parameters as a Model for clarity) ---
@@ -95,6 +97,8 @@ class GitFileOperationRequest(BaseModel):
 class GitStatusSummaryResponse(BaseModel):
     current_branch: Optional[str]
     files_changed_count: int
+    commits_ahead: int
+    commits_behind: int
 
 
 class BranchInfo(BaseModel):
@@ -110,3 +114,8 @@ class BranchListResponse(BaseModel):
 
 class SwitchBranchRequest(BaseModel):
     branch_name: str = Field(..., description="The name of the branch to switch to.")
+
+
+class GitRestoreFileRequest(BaseModel):
+    commit_hash: str = Field(..., description="The hash of the commit to restore from.")
+    filepath: str = Field(..., description="The path of the file to restore.")
