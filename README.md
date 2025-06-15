@@ -7,9 +7,9 @@
 
 > [!WARNING]
 > **This is a forked version of `flatnotes` with added Git integration features.**
-> 
-> This repository extends the original `flatnotes` to allow server-side Git operations (status, commit, push, pull) directly from the web UI. For all new features and configurations related to Git, please see the **[xxx Guide](xxx.md)**.
-> 
+>
+> This repository extends the original `flatnotes` to allow server-side Git operations (status, commit, push, pull) directly from the web UI. For all new features and configurations related to Git, please see the ****[Git Integration Guide](client/git-integration/GIT_INTEGRATION_GUIDE.md)****.
+>
 > For information about core `flatnotes` features, please refer to the [official repository](https://github.com/dullage/flatnotes).
 
 A self-hosted, database-less note-taking web app that utilises a flat folder of markdown files for storage.
@@ -99,7 +99,7 @@ services:
       FLATNOTES_SECRET_KEY: "aLongRandomSeriesOfCharacters"
     volumes:
       - "./data:/data"
-      # Optional. Allows you to save the search index in a different location: 
+      # Optional. Allows you to save the search index in a different location:
       # - "./index:/data/.flatnotes"
     ports:
       - "8080:8080"
