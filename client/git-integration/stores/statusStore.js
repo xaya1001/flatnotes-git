@@ -22,6 +22,8 @@ export const useStatusStore = defineStore("git-status", () => {
   const pollingTimer = ref(null);
   const commitsAhead = ref(0);
   const commitsBehind = ref(0);
+  const isTrackingUpstream = ref(true);
+  const isInitialLoadComplete = ref(false); // Manages initial loading state
 
   // --- GETTERS ---
   const stagedFiles = computed(() =>
@@ -33,10 +35,18 @@ export const useStatusStore = defineStore("git-status", () => {
     gitStatus.value.files.filter((f) => f.work_tree_status !== " "),
   );
   const tooltipText = computed(() => {
-    if (isLoadingSummary.value) return "Loading Git status...";
-    if (summaryError.value) return `Error: ${summaryError.value}.`;
+    if (!isInitialLoadComplete.value) return "Loading Git status...";
+    if (summaryError.value) {
+      if (summaryError.value.includes("not initialized")) {
+        return "Git repository not initialized. Click to see setup instructions.";
+      }
+      return `Error: ${summaryError.value}.`;
+    }
 
     let parts = [];
+    if (!isTrackingUpstream.value) {
+      parts.push("Branch not tracking remote");
+    }
     if (commitsBehind.value > 0) parts.push(`${commitsBehind.value} to pull`);
     if (commitsAhead.value > 0) parts.push(`${commitsAhead.value} to push`);
     if (filesChangedCount.value > 0)
@@ -54,16 +64,21 @@ export const useStatusStore = defineStore("git-status", () => {
     try {
       const data = await gitApi.getGitStatus();
       gitStatus.value = data;
-      // Also update ahead/behind from the detailed status
       commitsAhead.value = data.commits_ahead || 0;
       commitsBehind.value = data.commits_behind || 0;
+      isTrackingUpstream.value = data.is_tracking_upstream;
+      summaryError.value = null;
     } catch (err) {
-      toast.add({
-        severity: "error",
-        summary: "Error Fetching Detailed Status",
-        detail: err.message,
-        life: 3000,
-      });
+      if (err.response?.status === 428) {
+        summaryError.value = "Git repository not initialized";
+      } else {
+        toast.add({
+          severity: "error",
+          summary: "Error Fetching Detailed Status",
+          detail: err.message,
+          life: 3000,
+        });
+      }
       gitStatus.value = { files: [] };
     } finally {
       isLoading.value = false;
@@ -78,11 +93,17 @@ export const useStatusStore = defineStore("git-status", () => {
       filesChangedCount.value = summary.files_changed_count;
       commitsAhead.value = summary.commits_ahead || 0;
       commitsBehind.value = summary.commits_behind || 0;
+      isTrackingUpstream.value = summary.is_tracking_upstream;
       summaryError.value = null;
     } catch (err) {
-      summaryError.value = err.response?.data?.detail || "Connection failed";
+      if (err.response?.status === 428) {
+        summaryError.value = "Git repository not initialized";
+      } else {
+        summaryError.value = err.response?.data?.detail || "Connection failed";
+      }
     } finally {
       isLoadingSummary.value = false;
+      isInitialLoadComplete.value = true; // Mark initial load as complete
     }
   }
 
@@ -120,6 +141,8 @@ export const useStatusStore = defineStore("git-status", () => {
     tooltipText,
     commitsAhead,
     commitsBehind,
+    isTrackingUpstream,
+    isInitialLoadComplete,
     fetchStatusSummary,
     fetchStatus,
     startPolling,

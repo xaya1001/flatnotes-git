@@ -1,5 +1,5 @@
 # server/git_integration/git_manager.py
-import os  # <--- 1. 添加 os 模块的导入
+import os
 import subprocess
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
@@ -9,6 +9,8 @@ from pygit2 import GitError, Signature
 from pygit2.enums import FileStatus
 
 from logger import logger
+
+from . import config as git_config
 
 
 # --- Custom Exceptions for Clearer Error Handling ---
@@ -56,13 +58,31 @@ class GitManager:
         try:
             git_repo_path = pygit2.discover_repository(repo_path)
             if git_repo_path is None:
-                raise RepositoryInvalidError(
-                    f"No Git repository found at or above '{repo_path}'"
-                )
-            self.repo = pygit2.Repository(git_repo_path)
+                # No repository found. Check if we should auto-initialize.
+                if git_config.GIT_AUTO_INIT:
+                    logger.info(f"Initializing a new Git repository at '{repo_path}'")
+                    # pygit2.init_repository is safer and more direct
+                    self.repo = pygit2.init_repository(
+                        repo_path, initial_head=self.default_branch
+                    )
+
+                    # Set user name and email for the new repository if provided
+                    if self.author:
+                        config = self.repo.config
+                        config.set_multivar("user.name", ".*", self.author.name)
+                        config.set_multivar("user.email", ".*", self.author.email)
+
+                else:
+                    raise RepositoryInvalidError(
+                        f"No Git repository found at or above '{repo_path}'. "
+                        "To automatically create one, set FLATNOTES_GIT_AUTO_INIT=true."
+                    )
+            else:
+                self.repo = pygit2.Repository(git_repo_path)
+
         except GitError as e:
             raise RepositoryInvalidError(
-                f"Invalid repository at '{repo_path}': {e}"
+                f"Invalid or inaccessible repository at '{repo_path}': {e}"
             ) from e
 
         logger.info(f"GitManager initialized for repository at: {self.repo.path}")
@@ -173,11 +193,19 @@ class GitManager:
                 }
             )
         ahead, behind = self.get_ahead_behind()
+
+        # This is the canonical pygit2 way. With caching removed, it will now work correctly.
+        current_branch_obj = self.repo.branches.get(self.get_current_branch())
+        is_tracking_upstream = (
+            current_branch_obj is not None and current_branch_obj.upstream is not None
+        )
+
         return {
             "files": all_files,
             "current_branch": self.get_current_branch(),
             "commits_ahead": ahead,
             "commits_behind": behind,
+            "is_tracking_upstream": is_tracking_upstream,
         }
 
     def add_file(self, filepath: str) -> None:
@@ -454,12 +482,21 @@ class GitManager:
                 | FileStatus.WT_RENAMED
             ):
                 unstaged_count += 1
+
         ahead, behind = self.get_ahead_behind()
+
+        # This is the canonical pygit2 way. With caching removed, it will now work correctly.
+        current_branch_obj = self.repo.branches.get(self.get_current_branch())
+        is_tracking_upstream = (
+            current_branch_obj is not None and current_branch_obj.upstream is not None
+        )
+
         return {
             "current_branch": self.get_current_branch(),
             "files_changed_count": staged_count + unstaged_count,
             "commits_ahead": ahead,
             "commits_behind": behind,
+            "is_tracking_upstream": is_tracking_upstream,
         }
 
     def _format_commit_message(self, template: str) -> str:

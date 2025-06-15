@@ -30,8 +30,7 @@ class GitStatusResponse(BaseModel):
     current_branch: Optional[str]
     commits_ahead: int
     commits_behind: int
-    # Consider adding more context like remote tracking branch, ahead/behind counts later if needed.
-    # For now, keeping it aligned with readily available info from git_utils.
+    is_tracking_upstream: bool
 
 
 # --- Commit Endpoint ---
@@ -99,6 +98,7 @@ class GitStatusSummaryResponse(BaseModel):
     files_changed_count: int
     commits_ahead: int
     commits_behind: int
+    is_tracking_upstream: bool
 
 
 class BranchInfo(BaseModel):
