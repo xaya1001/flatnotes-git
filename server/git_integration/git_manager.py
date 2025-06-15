@@ -66,15 +66,17 @@ class GitManager:
 
     # --- Core Methods ---
     def get_status(self) -> Dict[str, Any]:
-        """Gets the status of the repository by directly reporting diff states."""
+        """
+        Gets the status of the repository using a hybrid approach to ensure
+        reliability, especially for deleted files.
+        """
         all_files: Dict[str, Dict[str, Any]] = {}
 
         def get_path(diff):
             return diff.a_path or diff.b_path
 
+        # --- Stage 1: Staged Changes (Index vs. HEAD) ---
         try:
-            # Staged changes (Index vs. HEAD)
-            # We now trust diff.change_type because the action methods are correct.
             for diff in self.repo.index.diff("HEAD", R=True):
                 filepath = get_path(diff)
                 all_files[filepath] = {
@@ -86,7 +88,9 @@ class GitManager:
         except git.exc.BadName:  # Handles new repo with no HEAD
             pass  # Unstaged changes will cover initial adds
 
-        # Unstaged changes (Working Tree vs. Index)
+        # --- Stage 2: Unstaged Modifications & Deletions ---
+
+        # Part A: Detect unstaged MODIFICATIONS using diff. This is reliable for existing files.
         for diff in self.repo.index.diff(None, R=True):
             filepath = get_path(diff)
             if filepath in all_files:
@@ -98,14 +102,37 @@ class GitManager:
                     "work_tree_status": diff.change_type,
                     "original_path": diff.rename_from if diff.renamed else None,
                 }
-        # Untracked files
+
+        # Part B : Manually detect unstaged DELETIONS.
+        # This is more reliable than relying on the diff for deleted file detection.
+        indexed_files = {path for path, _ in self.repo.index.entries}
+        for filepath in indexed_files:
+            # If a file is in the index but not on disk, it's a working-tree deletion.
+            if not os.path.exists(os.path.join(self.repo.working_dir, filepath)):
+                # Only mark as deleted if it's not already staged as deleted.
+                if (
+                    filepath not in all_files
+                    or all_files[filepath]["index_status"] != "D"
+                ):
+                    if filepath in all_files:
+                        all_files[filepath]["work_tree_status"] = "D"
+                    else:
+                        all_files[filepath] = {
+                            "path": filepath,
+                            "index_status": " ",
+                            "work_tree_status": "D",
+                            "original_path": None,
+                        }
+
+        # --- Stage 3: Untracked Files ---
         for filepath in self.repo.untracked_files:
-            all_files[filepath] = {
-                "path": filepath,
-                "index_status": "?",
-                "work_tree_status": "?",
-                "original_path": None,
-            }
+            if filepath not in all_files:
+                all_files[filepath] = {
+                    "path": filepath,
+                    "index_status": "?",
+                    "work_tree_status": "?",
+                    "original_path": None,
+                }
 
         return {
             "files": list(all_files.values()),
@@ -172,15 +199,18 @@ class GitManager:
     ) -> str:
         """
         Pulls changes from a remote. This operation is designed to be safe and
-        will not leave the working directory in a conflicted state.
+        will not leave the working directory in a conflicted state. It uses a
+        safe stash-apply-drop sequence to protect local changes.
         """
         remote = self._get_remote(remote_name)
         current_branch = branch or self.default_branch
 
+        # Stash local changes if there are any
         stashed_changes = self.repo.git.stash()
         logger.debug(f"Stash result: {stashed_changes}")
 
         try:
+            # Pull remote changes
             fetch_info_list = remote.pull(
                 refspec=current_branch,
                 rebase=rebase,
@@ -189,25 +219,55 @@ class GitManager:
             output = "\n".join(messages) or "Pull successful."
 
         except GitPythonError as e:
+            # This handles conflicts during the PULL itself.
             logger.warning(f"Git pull failed. stderr: {e.stderr}")
-            self.repo.git.reset("--hard", "ORIG_HEAD")
-            raise MergeConflictError(
-                f"Conflict detected during pull. The operation was safely aborted, "
-                f"and your local files are unchanged. "
-                f"Please resolve conflicts manually using the command line. "
-                f"Details: {e.stderr}"
-            ) from e
-        finally:
+            # The pull failed, so we can safely pop the original stash back.
             if "No local changes to save" not in stashed_changes:
-                try:
-                    self.repo.git.stash("pop")
-                    logger.debug("Stash popped successfully.")
-                except GitPythonError as stash_err:
-                    logger.error(f"Failed to pop stash after pull: {stash_err.stderr}")
-                    raise GitManagerError(
-                        "Pull succeeded, but could not restore your uncommitted changes from the stash. "
-                        "Please run `git stash pop` manually."
-                    ) from stash_err
+                self.repo.git.stash("pop")
+            raise MergeConflictError(
+                "Conflict detected during pull. The operation was safely aborted, "
+                "and your local files are unchanged. "
+                "Please resolve conflicts manually using the command line."
+            ) from e
+
+        # If we had local changes, we now try to re-apply them safely.
+        if "No local changes to save" not in stashed_changes:
+            try:
+                # 1. Apply the stash but DO NOT drop it from the stack yet.
+                self.repo.git.stash("apply")
+                logger.debug("Stash applied successfully.")
+
+                # 2. Check if the apply resulted in conflicts.
+                # `git status --porcelain` shows 'UU' for unmerged (conflicted) files.
+                status_output = self.repo.git.status("--porcelain")
+                if "UU " in status_output:
+                    # 3. CONFLICT DETECTED.
+                    # Reset the working directory to a clean state, removing conflict markers.
+                    self.repo.git.reset("--hard")
+                    logger.error(
+                        "Conflict detected while applying stashed changes after a pull. Stash is preserved."
+                    )
+                    # The stash is still on the stack because we used `apply`.
+                    # Raise a clear error to the user.
+                    raise MergeConflictError(
+                        "Pull was successful, but your local changes could not be automatically reapplied due to a conflict. "
+                        "Your uncommitted work has been safely preserved in a stash. "
+                        "Please resolve this manually via the command line (e.g., using 'git stash pop')."
+                    )
+
+                # 4. NO CONFLICT. The apply was clean. Now we can safely drop the stash.
+                self.repo.git.stash("drop")
+                logger.debug("Stash dropped successfully after clean apply.")
+
+            except GitPythonError as stash_err:
+                # This catches other errors during the apply/drop process.
+                logger.error(f"Failed to re-apply stash after pull: {stash_err.stderr}")
+                # The stash is preserved because we haven't dropped it yet.
+                raise GitManagerError(
+                    "Pull succeeded, but could not restore your uncommitted changes from the stash. "
+                    "Please run `git stash apply` manually to investigate."
+                ) from stash_err
+
         return output
 
     def push_local_changes(

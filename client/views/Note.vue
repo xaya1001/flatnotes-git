@@ -143,6 +143,7 @@ import ToastEditor from "../components/toastui/ToastEditor.vue";
 import ToastViewer from "../components/toastui/ToastViewer.vue";
 import { authTypes } from "../constants.js";
 import { useGlobalStore } from "../globalStore.js";
+import { useStatusStore } from "../git-integration/stores/statusStore.js";
 import { getToastOptions } from "../helpers.js";
 import Compressor from "compressorjs";
 
@@ -151,11 +152,12 @@ const props = defineProps({
 });
 
 const canModify = computed(
-  () => globalStore.config.authType != authTypes.readOnly,
+  () => globalStore.config.value.authType != authTypes.readOnly,
 );
 let contentChangedTimeout = null;
 const editMode = ref(false);
 const globalStore = useGlobalStore();
+const statusStore = useStatusStore();
 const isSaveChangesModalVisible = ref(false);
 const isDeleteModalVisible = ref(false);
 const isDraftModalVisible = ref(false);
@@ -242,6 +244,10 @@ function deleteConfirmedHandler() {
   deleteNote(note.value.title)
     .then(() => {
       toast.add(getToastOptions("Note deleted ✓", "Success", "success"));
+      if (globalStore.config.value.flatnotesGitEnabled) {
+        statusStore.fetchStatusSummary();
+        statusStore.fetchStatus();
+      }
       router.push({ name: "home" });
     })
     .catch((error) => {
@@ -336,6 +342,10 @@ function noteSaveSuccess(close = false) {
   }
   setBeforeUnloadConfirmation(false);
   toast.add(getToastOptions("Note saved successfully ✓", "Success", "success"));
+  if (globalStore.config.value.flatnotesGitEnabled) {
+    statusStore.fetchStatusSummary();
+    statusStore.fetchStatus();
+  }
 }
 
 // Note Closure
@@ -362,9 +372,10 @@ function uploadAndInsert(fileToUpload, callback) {
   const altTextInputValue = document.getElementById(
     "toastuiAltTextInput",
   )?.value;
-
+  // Upload the image then use the callback to insert the URL into the editor
   postAttachment(fileToUpload).then(function (data) {
     if (data) {
+      // If the user has entered an alt text, use it. Otherwise, use the filename returned by the API.
       const altText = altTextInputValue ? altTextInputValue : data.filename;
       callback(data.url, altText);
     }
@@ -379,15 +390,19 @@ function postAttachment(fileToUpload) {
     return Promise.reject("No file provided");
   }
 
+  // Invalid Character Validation
   if (reservedFilenameCharacters.test(fileToUpload.name)) {
     badFilenameToast("Filename");
     return Promise.reject("Invalid filename");
   }
 
+  // Uploading Toast
   toast.add(getToastOptions("Uploading attachment..."));
 
-  return createAttachment(fileToUpload)
+  // Upload the attachment
+  return createAttachment(file)
     .then((data) => {
+      // Success Toast
       toast.add(
         getToastOptions(
           "Attachment uploaded successfully ✓",
@@ -399,6 +414,8 @@ function postAttachment(fileToUpload) {
     })
     .catch((error) => {
       if (error.response?.status === 409) {
+        // Note: The current implementation will append a datetime to the filename if it already exists.
+        // Error Toast
         toast.add(
           getToastOptions(
             "An attachment with this filename already exists.",

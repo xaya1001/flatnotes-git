@@ -7,8 +7,14 @@
 set -e
 
 USER_HOME="/home/appuser"
-SOURCE_SSH_DIR="/ssh_source"
-FINAL_SSH_DIR="$USER_HOME/.ssh"
+USER_SSH_DIR="$USER_HOME/.ssh"
+
+# Source paths for mounted files
+SOURCE_SSH_KEY_PATH="/git_ssh_key_source"
+SOURCE_KNOWN_HOSTS_PATH="/known_hosts_source"
+
+# Path for the key inside the container
+USER_SSH_KEY_PATH="$USER_SSH_DIR/user_git_ssh_key"
 
 echo "Configuring user with UID=${PUID} and GID=${PGID}..."
 if ! getent group "${PGID}" > /dev/null; then
@@ -18,22 +24,34 @@ if ! getent passwd "${PUID}" > /dev/null; then
     adduser --system --shell /bin/sh --uid "${PUID}" --gid "${PGID}" appuser
 fi
 
-mkdir -p "$USER_HOME"
-chown "${PUID}:${PGID}" "$USER_HOME"
+# Create user's home and .ssh directory
+mkdir -p "$USER_SSH_DIR"
+chown -R "${PUID}:${PGID}" "$USER_HOME"
 
-if [ -d "$SOURCE_SSH_DIR" ]; then
-    mkdir -p "$FINAL_SSH_DIR"
+# --- Securely copy and permission SSH files ---
+if [ -f "$SOURCE_SSH_KEY_PATH" ]; then
+    echo "Copying SSH private key..."
+    cp "$SOURCE_SSH_KEY_PATH" "$USER_SSH_KEY_PATH"
+    chown "${PUID}:${PGID}" "$USER_SSH_KEY_PATH"
+    chmod 600 "$USER_SSH_KEY_PATH"
 
-    cp -rL "$SOURCE_SSH_DIR"/. "$FINAL_SSH_DIR"
-
-    chown -R "${PUID}:${PGID}" "$FINAL_SSH_DIR"
-    chmod 700 "$FINAL_SSH_DIR"
-    find "$FINAL_SSH_DIR" -type f -exec chmod 644 {} \;
-    find "$FINAL_SSH_DIR" -type f -name 'id_*' ! -name '*.pub' -exec chmod 600 {} \;
+    # Configure Git to use the copied key
+    export GIT_SSH_COMMAND="ssh -i ${USER_SSH_KEY_PATH} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes"
 else
-    echo "Warning: No source SSH directory found. Git operations may fail."
+    echo "Warning: No SSH key found at ${SOURCE_SSH_KEY_PATH}. Git operations requiring SSH will fail."
 fi
 
+if [ -f "$SOURCE_KNOWN_HOSTS_PATH" ]; then
+    echo "Copying known_hosts file..."
+    cp "$SOURCE_KNOWN_HOSTS_PATH" "$USER_SSH_DIR/known_hosts"
+    chown "${PUID}:${PGID}" "$USER_SSH_DIR/known_hosts"
+    chmod 644 "$USER_SSH_DIR/known_hosts"
+fi
+
+# Ensure the .ssh directory itself has the correct permissions
+chmod 700 "$USER_SSH_DIR"
+
+# Ensure git trusts the repository directory
 ${EXEC_TOOL} "${PUID}:${PGID}" git config --global --add safe.directory "${FLATNOTES_PATH}"
 
 echo "\
