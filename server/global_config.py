@@ -34,12 +34,6 @@ class GlobalConfig:
             if self.flatnotes_git_enabled
             else 0
         )
-        self.flatnotes_git_auto_pull_on_start: bool = get_env(
-            "FLATNOTES_GIT_AUTO_PULL_ON_START",
-            mandatory=False,
-            default=False,
-            cast_bool=True,
-        )
 
         self.attachment_storage_provider: StorageProviderType = (
             self._load_attachment_storage_provider()

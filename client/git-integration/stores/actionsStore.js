@@ -7,6 +7,7 @@ import { useLogStore } from "./logStore";
 import { useStatusStore } from "./statusStore";
 import { useHistoryStore } from "./historyStore";
 import { usePanelUiStore } from "./panelUiStore";
+import { useConflictStore } from "./conflictStore";
 
 export const useActionsStore = defineStore("git-actions", () => {
   const toast = useToast();
@@ -14,6 +15,7 @@ export const useActionsStore = defineStore("git-actions", () => {
   const statusStore = useStatusStore();
   const historyStore = useHistoryStore();
   const panelUiStore = usePanelUiStore();
+  const conflictStore = useConflictStore();
 
   const isActionLoading = ref(false);
   const isAutoSyncPaused = ref(false);
@@ -21,11 +23,7 @@ export const useActionsStore = defineStore("git-actions", () => {
   // This is a new helper function for centralized refreshing
   async function refreshAllStores() {
     // We run them in parallel for better performance
-    await Promise.all([
-      statusStore.fetchStatus(),
-      statusStore.fetchStatusSummary(),
-      historyStore.fetchGitLog(),
-    ]);
+    await Promise.all([statusStore.fetchStatus(), historyStore.fetchGitLog()]);
   }
 
   async function performGitAction(
@@ -56,7 +54,10 @@ export const useActionsStore = defineStore("git-actions", () => {
 
       return true;
     } catch (err) {
-      const errorMessage = err.response?.data?.detail || err.message;
+      const errorMessage =
+        err.response?.data?.detail?.message ||
+        err.response?.data?.detail ||
+        err.message;
       toast.add({
         severity: "error",
         summary: `Error: ${actionName}`,
@@ -157,14 +158,56 @@ export const useActionsStore = defineStore("git-actions", () => {
 
   async function handleSync() {
     const message = statusStore.commitMessage;
-    const success = await performGitAction(
-      gitApi.gitSyncWorkspace,
-      [message],
-      "Commit & Sync",
-      "Workspace synced.",
-    );
-    if (success) {
+    isActionLoading.value = true;
+    const pendingLogId = logStore.addPendingLog("Commit & Sync...");
+    try {
+      const response = await gitApi.gitSyncWorkspace(message);
+      toast.add({
+        severity: "success",
+        summary: "Success",
+        detail: "Workspace synced.",
+        life: 3000,
+      });
+      logStore.updateLog(pendingLogId, {
+        level: "success",
+        message: "Workspace synced.",
+        details: response.details,
+      });
       statusStore.clearCommitMessage();
+      await refreshAllStores();
+    } catch (err) {
+      if (
+        err.response?.status === 409 &&
+        err.response.data.detail?.state === "REBASE_CONFLICT"
+      ) {
+        const errorData = err.response.data.detail;
+        logStore.updateLog(pendingLogId, {
+          level: "warn",
+          message: "Sync failed: Rebase conflict.",
+          details: errorData.message,
+        });
+        await statusStore.fetchStatus();
+        conflictStore.enterConflictMode(errorData.conflicted_files);
+      } else {
+        const errorMessage =
+          err.response?.data?.detail?.message ||
+          err.response?.data?.detail ||
+          err.message;
+        toast.add({
+          severity: "error",
+          summary: "Error: Commit & Sync",
+          detail: errorMessage,
+          life: 5000,
+        });
+        logStore.updateLog(pendingLogId, {
+          level: "error",
+          message: "Failed: Commit & Sync",
+          details: errorMessage,
+        });
+        await refreshAllStores();
+      }
+    } finally {
+      isActionLoading.value = false;
     }
   }
 
@@ -289,5 +332,6 @@ export const useActionsStore = defineStore("git-actions", () => {
     getBranches,
     switchBranch,
     handleResetToRemote,
+    performGitAction,
   };
 });

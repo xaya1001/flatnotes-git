@@ -10,14 +10,21 @@
   },
 
   // Features to add to the dev container. More info: https://containers.dev/features.
-  // "features": {},
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "configureZshAsDefaultShell": true
+    },
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "20"
+    }
+  },
 
   // Use 'forwardPorts' to make a list of ports inside the container available locally.
   "forwardPorts": [8080],
 
   // Uncomment the next line to run commands after the container is created.
   // "postCreateCommand": "cat /etc/os-release",
-  "postCreateCommand": "pipenv install --dev && npm install && npm run build && if ! grep -q '^PYTHONPATH=' .env; then echo 'PYTHONPATH=./server' >> .env; fi",
+  "postCreateCommand": "sudo chown -R $USER . && pipenv install --dev && npm install && npm run build && if ! grep -q '^PYTHONPATH=' .env; then echo 'PYTHONPATH=./server' >> .env; fi",
 
   // Configure tool-specific properties.
   "customizations": {
@@ -30,8 +37,11 @@
         "Vue.volar"
       ]
     }
-  }
+  },
 
   // Uncomment to connect as an existing user other than the container default. More info: https://aka.ms/dev-containers-non-root.
-  // "remoteUser": "devcontainer"
+  // The remoteUser will now be determined automatically based on the host user.
+  // We can leave this commented out to use the default, or use a variable.
+  // For maximum clarity, we should also make remoteUser dynamic.
+  "remoteUser": "${localEnv:USER}"
 }

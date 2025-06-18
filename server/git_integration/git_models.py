@@ -1,3 +1,4 @@
+# server/git_integration/git_models.py
 from typing import Any, List, Optional
 
 from pydantic import BaseModel, Field
@@ -31,6 +32,8 @@ class GitStatusResponse(BaseModel):
     commits_ahead: int
     commits_behind: int
     is_tracking_upstream: bool
+    repository_state: str
+    files_changed_count: int
 
 
 # --- Commit Endpoint ---
@@ -99,6 +102,7 @@ class GitStatusSummaryResponse(BaseModel):
     commits_ahead: int
     commits_behind: int
     is_tracking_upstream: bool
+    repository_state: str
 
 
 class BranchInfo(BaseModel):

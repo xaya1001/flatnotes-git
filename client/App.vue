@@ -14,7 +14,7 @@
         :hide-logo="!showNavBarLogo"
         @toggleSearchModal="toggleSearchModal"
       />
-      <RouterView />
+      <RouterView :key="route.fullPath" />
       <GitSidebar v-if="gitIntegrationEnabled" />
     </template>
     <div v-else class="flex flex-grow items-center justify-center">
@@ -90,7 +90,6 @@ onMounted(() => {
       isConfigLoaded.value = true;
       loadingIndicator.value.setLoaded();
       if (data.flatnotesGitEnabled) {
-        statusStore.fetchStatusSummary();
         statusStore.fetchStatus();
         statusStore.startPolling();
       }
@@ -114,7 +113,6 @@ function handleVisibilityChange() {
     statusStore.stopPolling();
   } else {
     if (gitIntegrationEnabled.value) {
-      statusStore.fetchStatusSummary();
       statusStore.fetchStatus();
       statusStore.startPolling();
     }

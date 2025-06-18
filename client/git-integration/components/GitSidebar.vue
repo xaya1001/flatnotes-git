@@ -13,7 +13,7 @@
       :pt="{
         root: {
           class:
-            'h-full border-l border-theme-border bg-theme-background-elevated shadow-none flex flex-col w-[480px]',
+            'h-full border-l border-theme-border bg-theme-background-elevated shadow-none flex flex-col w-full sm:w-96 md:w-[480px]',
         },
         content: { class: 'p-0 h-full flex-grow min-h-0' },
       }"
@@ -47,10 +47,14 @@
                 {{ globalConfig.flatnotesGitAutoSyncInterval }} min)
               </span>
               <Toggle
-                :isOn="!actionsStore.isAutoSyncPaused"
-                :label="actionsStore.isAutoSyncPaused ? 'Paused' : 'Enabled'"
+                :isOn="
+                  !actionsStore.isAutoSyncPaused && !conflictStore.isInConflict
+                "
+                :label="autoSyncLabel"
                 @click="actionsStore.toggleAutoSyncPause"
-                :disabled="actionsStore.isActionLoading"
+                :disabled="
+                  actionsStore.isActionLoading || conflictStore.isInConflict
+                "
               />
             </template>
             <span v-else>Automatic Sync Disabled</span>
@@ -67,10 +71,18 @@
                 :size="20"
               />
             </button>
+            <button
+              @click="panelUiStore.hideSidebar"
+              class="rounded-full p-1 hover:bg-theme-border"
+              title="Close Panel"
+            >
+              <SvgIcon type="mdi" :path="mdiClose" :size="20" />
+            </button>
           </div>
         </div>
 
         <!-- Initial Loading State -->
+
         <div
           v-if="!statusStore.isInitialLoadComplete && !statusStore.summaryError"
           class="flex flex-grow items-center justify-center"
@@ -131,7 +143,7 @@
             @reject="() => panelUiStore.resolveConfirmation(false)"
           />
 
-          <!-- Main TabView with 3 Tabs -->
+          <!-- Main TabView with 3 Tabs (shown only when NOT in conflict) -->
           <TabView
             class="main-tabview flex min-h-0 flex-grow flex-col"
             :pt="{
@@ -140,11 +152,28 @@
             }"
           >
             <TabPanel
-              header="Workspace"
-              :pt="{ content: { class: 'p-0 flex flex-col h-full' } }"
+              :pt="{
+                header: {
+                  class: conflictStore.isInConflict
+                    ? 'conflict-tab-header'
+                    : '',
+                },
+                content: { class: 'p-0 flex flex-col h-full' },
+              }"
             >
-              <WorkspaceTab />
+              <template #header>
+                <div class="flex items-center space-x-1">
+                  <span>Workspace</span>
+                  <span
+                    v-if="conflictStore.isInConflict"
+                    class="h-2 w-2 rounded-full bg-red-500"
+                  ></span>
+                </div>
+              </template>
+              <ConflictView v-if="conflictStore.isInConflict" />
+              <WorkspaceTab v-else />
             </TabPanel>
+
             <TabPanel
               header="History"
               :pt="{ content: { class: 'p-0 flex flex-col h-full' } }"
@@ -171,7 +200,7 @@ import TabView from "primevue/tabview";
 import TabPanel from "primevue/tabpanel";
 import SvgIcon from "@jamescoyle/vue-icon";
 import { mdilRefresh, mdilPin, mdilPinOff } from "@mdi/light-js";
-import { mdiSourceRepository } from "@mdi/js";
+import { mdiClose, mdiSourceRepository } from "@mdi/js";
 
 import { useGlobalStore } from "../../globalStore";
 import { usePanelUiStore } from "../stores/panelUiStore";
@@ -179,6 +208,7 @@ import { useStatusStore } from "../stores/statusStore";
 import { useHistoryStore } from "../stores/historyStore";
 import { useActionsStore } from "../stores/actionsStore";
 import { useLogStore } from "../stores/logStore";
+import { useConflictStore } from "../stores/conflictStore";
 
 import GitStatusIndicator from "./GitStatusIndicator.vue";
 import ConfirmModal from "../../components/ConfirmModal.vue";
@@ -186,6 +216,7 @@ import Toggle from "../../components/Toggle.vue";
 import WorkspaceTab from "./tabs/WorkspaceTab.vue";
 import GitLogTab from "./tabs/GitLogTab.vue";
 import GitHistoryTab from "./tabs/GitHistoryTab.vue";
+import ConflictView from "./tabs/ConflictView.vue";
 
 const globalStore = useGlobalStore();
 const panelUiStore = usePanelUiStore();
@@ -193,30 +224,33 @@ const statusStore = useStatusStore();
 const historyStore = useHistoryStore();
 const actionsStore = useActionsStore();
 const logStore = useLogStore();
+const conflictStore = useConflictStore();
 
 const isRefreshing = ref(false);
 const globalConfig = computed(() => globalStore.config.value);
 
+// [+] ADDED: Computed property for the auto-sync label
+const autoSyncLabel = computed(() => {
+  if (conflictStore.isInConflict) {
+    return "Paused (Conflict)";
+  }
+  return actionsStore.isAutoSyncPaused ? "Paused" : "Enabled";
+});
+
 function handleSidebarShow() {
-  // Always fetch summary when sidebar is shown to get the latest state
-  statusStore.fetchStatusSummary();
+  statusStore.fetchStatus();
 }
 
 async function refreshAll() {
   isRefreshing.value = true;
   const pendingLogId = logStore.addPendingLog("Refreshing all data...");
   try {
-    // Re-fetch the summary first to check the state
-    await statusStore.fetchStatusSummary();
-
-    // Only fetch details if not in an uninitialized state
-    if (!statusStore.summaryError?.includes("not initialized")) {
-      await Promise.all([
-        statusStore.fetchStatus(),
-        historyStore.fetchGitLog(),
-        logStore.fetchActivityLog(),
-      ]);
-    }
+    // We now expect all these to succeed, even in a REBASING state
+    await Promise.all([
+      statusStore.fetchStatus(),
+      historyStore.fetchGitLog(),
+      logStore.fetchActivityLog(),
+    ]);
 
     logStore.updateLog(pendingLogId, {
       level: "success",
@@ -238,13 +272,10 @@ onMounted(() => {
   if (globalConfig.value?.flatnotesGitEnabled) {
     logStore.initialize();
 
-    // Fetch summary on mount to determine state before fetching everything else
-    statusStore.fetchStatusSummary().then(() => {
-      if (!statusStore.summaryError?.includes("not initialized")) {
-        historyStore.fetchGitLog();
-        if (globalConfig.value.flatnotesGitAutoSyncInterval > 0) {
-          actionsStore.fetchAutoSyncState();
-        }
+    statusStore.fetchStatus().then(() => {
+      historyStore.fetchGitLog();
+      if (globalConfig.value.flatnotesGitAutoSyncInterval > 0) {
+        actionsStore.fetchAutoSyncState();
       }
     });
   }
