@@ -101,9 +101,6 @@ environment:
   FLATNOTES_GIT_COMMIT_USER_NAME: "flatnotes-bot"
   FLATNOTES_GIT_COMMIT_USER_EMAIL: "bot@flatnotes.local"
 
-  # (Optional) Set to "true" to automatically pull on startup.
-  FLATNOTES_GIT_AUTO_PULL_ON_START: "true"
-
   # (Optional) Auto-sync interval in minutes. 0 to disable.
   # A value of 1-4 is not recommended for performance reasons.
   FLATNOTES_GIT_AUTO_SYNC_INTERVAL: 15

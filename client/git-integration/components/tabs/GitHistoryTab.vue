@@ -201,7 +201,7 @@ const statusStore = useStatusStore();
 
 const settingsPanel = ref();
 const toggleSettingsPanel = (event) => {
-  statusStore.fetchStatusSummary();
+  statusStore.fetchStatus();
   settingsPanel.value.toggle(event);
 };
 </script>

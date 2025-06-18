@@ -92,14 +92,6 @@ export async function gitDiscardAll() {
     return Promise.reject(error);
   }
 }
-export async function getGitStatusSummary() {
-  try {
-    const response = await api.get("api/git/status-summary");
-    return response.data;
-  } catch (error) {
-    return Promise.reject(error);
-  }
-}
 export async function gitSyncWorkspace(message) {
   try {
     const response = await api.post("api/git/sync", { message });
@@ -178,6 +170,24 @@ export async function gitRestoreFile(commitHash, filepath) {
       commit_hash: commitHash,
       filepath: filepath,
     });
+    return response.data;
+  } catch (error) {
+    return Promise.reject(error);
+  }
+}
+
+export async function gitRebaseContinue() {
+  try {
+    const response = await api.post("api/git/rebase/continue");
+    return response.data;
+  } catch (error) {
+    return Promise.reject(error);
+  }
+}
+
+export async function gitRebaseAbort() {
+  try {
+    const response = await api.post("api/git/rebase/abort");
     return response.data;
   } catch (error) {
     return Promise.reject(error);

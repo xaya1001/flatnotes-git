@@ -4,18 +4,19 @@ import { ref, computed } from "vue";
 import { useToast } from "primevue/usetoast";
 import { useRouter } from "vue-router";
 import * as gitApi from "../gitApi";
+import { useConflictStore } from "./conflictStore";
 
 const POLLING_INTERVAL_MS = 30000;
 
 export const useStatusStore = defineStore("git-status", () => {
   const toast = useToast();
   const router = useRouter();
+  const conflictStore = useConflictStore();
 
   // --- STATE ---
   const gitStatus = ref({ files: [] });
   const commitMessage = ref("");
   const isLoading = ref(true);
-  const isLoadingSummary = ref(true);
   const summaryError = ref(null);
   const branchName = ref("");
   const filesChangedCount = ref(0);
@@ -23,6 +24,7 @@ export const useStatusStore = defineStore("git-status", () => {
   const commitsAhead = ref(0);
   const commitsBehind = ref(0);
   const isTrackingUpstream = ref(true);
+  const repositoryState = ref("CLEAN");
   const isInitialLoadComplete = ref(false); // Manages initial loading state
 
   // --- GETTERS ---
@@ -41,6 +43,9 @@ export const useStatusStore = defineStore("git-status", () => {
         return "Git repository not initialized. Click to see setup instructions.";
       }
       return `Error: ${summaryError.value}.`;
+    }
+    if (repositoryState.value.startsWith("REBASE")) {
+      return `Conflict: Rebase in progress. Click to resolve.`;
     }
 
     let parts = [];
@@ -64,10 +69,27 @@ export const useStatusStore = defineStore("git-status", () => {
     try {
       const data = await gitApi.getGitStatus();
       gitStatus.value = data;
+      branchName.value = data.current_branch || "N/A";
+      filesChangedCount.value = data.files_changed_count;
       commitsAhead.value = data.commits_ahead || 0;
       commitsBehind.value = data.commits_behind || 0;
       isTrackingUpstream.value = data.is_tracking_upstream;
+      repositoryState.value = data.repository_state;
       summaryError.value = null;
+
+      // App startup conflict state recovery.
+      // This is the ONLY place where a status fetch can INITIATE conflict mode.
+      if (
+        repositoryState.value.startsWith("REBASING") &&
+        !conflictStore.isInConflict
+      ) {
+        const conflicted = data.files
+          .filter((f) => f.index_status === "U" || f.work_tree_status === "U")
+          .map((f) => f.path);
+        conflictStore.enterConflictMode(conflicted, { silent: true });
+      }
+      // **REMOVED**: The logic to exit conflict mode from here.
+      // Exiting conflict mode is now the exclusive responsibility of the conflictStore.
     } catch (err) {
       if (err.response?.status === 428) {
         summaryError.value = "Git repository not initialized";
@@ -75,41 +97,20 @@ export const useStatusStore = defineStore("git-status", () => {
         toast.add({
           severity: "error",
           summary: "Error Fetching Detailed Status",
-          detail: err.message,
+          detail: err.response?.data?.detail || err.message,
           life: 3000,
         });
       }
       gitStatus.value = { files: [] };
     } finally {
       isLoading.value = false;
-    }
-  }
-
-  async function fetchStatusSummary() {
-    isLoadingSummary.value = true;
-    try {
-      const summary = await gitApi.getGitStatusSummary();
-      branchName.value = summary.current_branch || "N/A";
-      filesChangedCount.value = summary.files_changed_count;
-      commitsAhead.value = summary.commits_ahead || 0;
-      commitsBehind.value = summary.commits_behind || 0;
-      isTrackingUpstream.value = summary.is_tracking_upstream;
-      summaryError.value = null;
-    } catch (err) {
-      if (err.response?.status === 428) {
-        summaryError.value = "Git repository not initialized";
-      } else {
-        summaryError.value = err.response?.data?.detail || "Connection failed";
-      }
-    } finally {
-      isLoadingSummary.value = false;
-      isInitialLoadComplete.value = true; // Mark initial load as complete
+      isInitialLoadComplete.value = true;
     }
   }
 
   function startPolling() {
     if (pollingTimer.value) return;
-    pollingTimer.value = setInterval(fetchStatusSummary, POLLING_INTERVAL_MS);
+    pollingTimer.value = setInterval(fetchStatus, POLLING_INTERVAL_MS);
   }
 
   function stopPolling() {
@@ -121,7 +122,11 @@ export const useStatusStore = defineStore("git-status", () => {
 
   function openNoteInEditor(path) {
     const title = path.replace(/\.md$/, "");
-    router.push({ name: "note", params: { title } });
+    router.push({
+      name: "note",
+      params: { title },
+      query: { t: Date.now() }, // Force re-render of the component
+    });
   }
 
   function clearCommitMessage() {
@@ -132,7 +137,6 @@ export const useStatusStore = defineStore("git-status", () => {
     gitStatus,
     commitMessage,
     isLoading,
-    isLoadingSummary,
     summaryError,
     branchName,
     filesChangedCount,
@@ -142,8 +146,8 @@ export const useStatusStore = defineStore("git-status", () => {
     commitsAhead,
     commitsBehind,
     isTrackingUpstream,
+    repositoryState,
     isInitialLoadComplete,
-    fetchStatusSummary,
     fetchStatus,
     startPolling,
     stopPolling,

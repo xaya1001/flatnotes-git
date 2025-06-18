@@ -49,34 +49,6 @@ async def lifespan(app: FastAPI):
         try:
             manager = get_git_manager()
 
-            if global_config.flatnotes_git_auto_pull_on_start:
-                logger.info("Performing auto-pull on startup...")
-                add_git_log(LogLevel.INFO, "Auto-pull on startup: Initiated.")
-                try:
-                    pull_result = manager.pull_remote_changes(rebase=True)
-                    logger.info(f"Auto-pull successful. Stdout: {pull_result}")
-
-                    # Format the pull_result dictionary into a string for logging
-                    log_details = pull_result.get("message", "Pull command executed.")
-                    changed_files = pull_result.get("changed_files", [])
-                    if changed_files:
-                        file_list_str = "\n".join(
-                            f"  - {file['change_type']}: {file['path']}"
-                            for file in changed_files
-                        )
-                        log_details += f"\n\nUpdated files ({len(changed_files)}):\n{file_list_str}"
-
-                    add_git_log(
-                        LogLevel.SUCCESS,
-                        "Auto-pull on startup: Successful.",
-                        details=log_details.strip(),
-                    )
-                except GitManagerError as e:
-                    logger.error(f"Auto-pull on startup failed: {e}", exc_info=True)
-                    add_git_log(
-                        LogLevel.ERROR, "Auto-pull on startup: Failed.", details=str(e)
-                    )
-
             if global_config.flatnotes_git_auto_sync_interval > 0:
                 logger.info(
                     f"Initializing scheduled auto-sync for every {global_config.flatnotes_git_auto_sync_interval} minutes."
@@ -86,6 +58,31 @@ async def lifespan(app: FastAPI):
                 def scheduled_sync_job():
                     if git_config.is_auto_sync_paused():
                         logger.debug("Auto-sync is paused, skipping scheduled job.")
+                        return
+
+                    try:
+                        manager = get_git_manager()
+                        repo_state = manager.get_repository_state()
+                        if not repo_state.startswith("CLEAN"):
+                            logger.info(
+                                f"Skipping auto-sync: Repository is in '{repo_state}' state, requires manual intervention."
+                            )
+                            # Optionally add a log entry for the user to see in the UI
+                            add_git_log(
+                                LogLevel.WARN,
+                                "Auto-sync skipped",
+                                f"Cannot sync while repository state is '{repo_state}'.",
+                            )
+                            return
+                    except Exception as e:
+                        logger.error(
+                            f"Auto-sync failed during pre-check: {e}", exc_info=True
+                        )
+                        add_git_log(
+                            LogLevel.ERROR,
+                            "Auto-sync pre-check failed.",
+                            details=str(e),
+                        )
                         return
 
                     logger.info("Executing scheduled git sync...")

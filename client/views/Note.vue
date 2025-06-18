@@ -245,7 +245,6 @@ function deleteConfirmedHandler() {
     .then(() => {
       toast.add(getToastOptions("Note deleted ✓", "Success", "success"));
       if (globalStore.config.value.flatnotesGitEnabled) {
-        statusStore.fetchStatusSummary();
         statusStore.fetchStatus();
       }
       router.push({ name: "home" });
@@ -343,7 +342,6 @@ function noteSaveSuccess(close = false) {
   setBeforeUnloadConfirmation(false);
   toast.add(getToastOptions("Note saved successfully ✓", "Success", "success"));
   if (globalStore.config.value.flatnotesGitEnabled) {
-    statusStore.fetchStatusSummary();
     statusStore.fetchStatus();
   }
 }

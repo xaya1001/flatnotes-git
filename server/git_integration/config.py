@@ -43,10 +43,6 @@ GIT_AUTO_SYNC_INTERVAL: int = get_env(
     "FLATNOTES_GIT_AUTO_SYNC_INTERVAL", mandatory=False, default=0, cast_int=True
 )
 
-GIT_AUTO_PULL_ON_START: bool = get_env(
-    "FLATNOTES_GIT_AUTO_PULL_ON_START", mandatory=False, default=False, cast_bool=True
-)
-
 GIT_AUTO_INIT: bool = get_env(
     "FLATNOTES_GIT_AUTO_INIT", mandatory=False, default=False, cast_bool=True
 )
@@ -88,8 +84,6 @@ if GIT_ENABLED:
             f"No Git repository found in '{GIT_REPO_PATH}'. "
             f"FLATNOTES_GIT_AUTO_INIT is true, attempting to initialize a new repository."
         )
-    if GIT_AUTO_PULL_ON_START:
-        logger.info("Auto-pull on startup is enabled.")
     if GIT_AUTO_SYNC_INTERVAL > 0:
         logger.info(
             f"Auto-sync is enabled with an interval of {GIT_AUTO_SYNC_INTERVAL} minutes."

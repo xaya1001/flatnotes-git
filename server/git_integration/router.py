@@ -29,7 +29,6 @@ from .git_models import (
     GitPushParams,
     GitRestoreFileRequest,
     GitStatusResponse,
-    GitStatusSummaryResponse,
     SwitchBranchRequest,
 )
 from .log_handler import LogEntry, LogLevel, add_git_log, get_all_logs
@@ -62,11 +61,19 @@ common_deps = auth_deps + [Depends(get_git_manager)]
 router = APIRouter(dependencies=common_deps)
 
 
-def handle_git_exception(e: Exception, action: str):
+def handle_git_exception(e: Exception, action: str, manager: GitManager):
     """Centralized exception handler for Git operations."""
     if isinstance(e, MergeConflictError):
         add_git_log(LogLevel.ERROR, f"Failed: {action} - Merge Conflict", str(e))
-        raise HTTPException(status_code=409, detail=str(e))
+        conflicted_files = manager.get_conflicted_files()
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": f"A merge conflict occurred during the '{action}' operation. Please resolve it.",
+                "state": "REBASE_CONFLICT",
+                "conflicted_files": conflicted_files,
+            },
+        )
     if isinstance(e, (ValueError, NoChangesError)):
         add_git_log(
             LogLevel.WARN, f"Skipped: {action} - No Changes or Bad Request", str(e)
@@ -76,8 +83,9 @@ def handle_git_exception(e: Exception, action: str):
         add_git_log(LogLevel.ERROR, f"Failed: {action} - Not Found", str(e))
         raise HTTPException(status_code=404, detail=str(e))
     if isinstance(e, GitManagerError):
+        error_message = str(e)
         add_git_log(LogLevel.ERROR, f"Failed: {action} - Git Error", str(e))
-        raise HTTPException(status_code=500, detail=f"A Git error occurred: {e}")
+        raise HTTPException(status_code=400, detail=error_message)
     # Catch-all for unexpected errors
     logger.error(f"Unexpected error during '{action}': {e}", exc_info=True)
     add_git_log(LogLevel.ERROR, f"Failed: {action} - Unexpected Server Error", str(e))
@@ -94,7 +102,7 @@ def get_git_status(manager: GitManager = Depends(get_git_manager)):
     try:
         return manager.get_status()
     except Exception as e:
-        handle_git_exception(e, "Get Status")
+        handle_git_exception(e, "Get Status", manager)
 
 
 @router.post("/add_all", response_model=GitCommandResponse)
@@ -105,7 +113,7 @@ def add_all_git_changes(manager: GitManager = Depends(get_git_manager)):
         add_git_log(LogLevel.SUCCESS, message)
         return GitCommandResponse(message=message)
     except Exception as e:
-        handle_git_exception(e, "Stage All")
+        handle_git_exception(e, "Stage All", manager)
 
 
 @router.post("/unstage_all", response_model=GitCommandResponse)
@@ -116,7 +124,7 @@ def unstage_all_git_changes(manager: GitManager = Depends(get_git_manager)):
         add_git_log(LogLevel.SUCCESS, message)
         return GitCommandResponse(message=message)
     except Exception as e:
-        handle_git_exception(e, "Unstage All")
+        handle_git_exception(e, "Unstage All", manager)
 
 
 @router.post("/stage_file", response_model=GitCommandResponse)
@@ -129,7 +137,7 @@ def stage_file(
         add_git_log(LogLevel.SUCCESS, message)
         return GitCommandResponse(message=message)
     except Exception as e:
-        handle_git_exception(e, f"Stage File '{request.filepath}'")
+        handle_git_exception(e, f"Stage File '{request.filepath}'", manager)
 
 
 @router.post("/unstage_file", response_model=GitCommandResponse)
@@ -142,7 +150,7 @@ def unstage_file(
         add_git_log(LogLevel.SUCCESS, message)
         return GitCommandResponse(message=message)
     except Exception as e:
-        handle_git_exception(e, f"Unstage File '{request.filepath}'")
+        handle_git_exception(e, f"Unstage File '{request.filepath}'", manager)
 
 
 @router.post("/discard_file", response_model=GitCommandResponse)
@@ -155,7 +163,7 @@ def discard_file(
         add_git_log(LogLevel.WARN, message)
         return GitCommandResponse(message=message)
     except Exception as e:
-        handle_git_exception(e, f"Discard File '{request.filepath}'")
+        handle_git_exception(e, f"Discard File '{request.filepath}'", manager)
 
 
 @router.post("/discard_all", response_model=GitCommandResponse)
@@ -166,7 +174,7 @@ def discard_all_changes(manager: GitManager = Depends(get_git_manager)):
         add_git_log(LogLevel.WARN, message, "This is a destructive operation.")
         return GitCommandResponse(message=message)
     except Exception as e:
-        handle_git_exception(e, "Discard All")
+        handle_git_exception(e, "Discard All", manager)
 
 
 @router.post("/commit", response_model=GitCommandResponse)
@@ -184,7 +192,7 @@ def commit_git_changes(
         )
         return GitCommandResponse(message=message, details={"commitHash": commit_hash})
     except Exception as e:
-        handle_git_exception(e, "Commit")
+        handle_git_exception(e, "Commit", manager)
 
 
 @router.post("/pull", response_model=GitCommandResponse)
@@ -212,7 +220,7 @@ def pull_git_changes(
             message=message, stdout=result.get("message"), details=result
         )
     except Exception as e:
-        handle_git_exception(e, "Pull")
+        handle_git_exception(e, "Pull", manager)
 
 
 @router.post("/push", response_model=GitCommandResponse)
@@ -227,7 +235,7 @@ def push_git_changes(
         add_git_log(LogLevel.SUCCESS, message, details=output)
         return GitCommandResponse(message=message, stdout=output)
     except Exception as e:
-        handle_git_exception(e, "Push")
+        handle_git_exception(e, "Push", manager)
 
 
 @router.post("/sync", response_model=GitCommandResponse)
@@ -275,7 +283,7 @@ def sync_workspace(
         add_git_log(LogLevel.SUCCESS, message, details="\n".join(log_details_parts))
         return GitCommandResponse(message=message, details=results)
     except Exception as e:
-        handle_git_exception(e, "Sync Workspace")
+        handle_git_exception(e, "Sync Workspace", manager)
 
 
 @router.get("/log", response_model=GitLogResponse)
@@ -293,19 +301,17 @@ def get_git_log(
             log=log_entries, page=page, limit=limit, remote_base_url=web_url
         )
     except Exception as e:
-        handle_git_exception(e, "Get Log")
-
-
-@router.get("/status-summary", response_model=GitStatusSummaryResponse)
-def get_git_status_summary(manager: GitManager = Depends(get_git_manager)):
-    try:
-        return manager.get_status_summary()
-    except Exception as e:
-        handle_git_exception(e, "Get Status Summary")
+        handle_git_exception(e, "Get Log", manager)
 
 
 @router.get("/commits/{commit_hash}/files", response_model=List[GitFileStatusItem])
 def get_commit_files(commit_hash: str, manager: GitManager = Depends(get_git_manager)):
+    repo_state = manager.get_repository_state()
+    if repo_state != "CLEAN":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot fetch commit files while repository is in '{repo_state}' state.",
+        )
     try:
         raw_files = manager.get_files_in_commit(commit_hash)
         return [
@@ -315,7 +321,7 @@ def get_commit_files(commit_hash: str, manager: GitManager = Depends(get_git_man
             for f in raw_files
         ]
     except Exception as e:
-        handle_git_exception(e, f"Get Files for Commit {commit_hash[:7]}")
+        handle_git_exception(e, f"Get Files for Commit {commit_hash[:7]}", manager)
 
 
 @router.get("/branches", response_model=BranchListResponse)
@@ -323,7 +329,7 @@ def get_branches(manager: GitManager = Depends(get_git_manager)):
     try:
         return manager.fetch_and_list_branches()
     except Exception as e:
-        handle_git_exception(e, "List Branches")
+        handle_git_exception(e, "List Branches", manager)
 
 
 @router.post("/branches/switch", response_model=GitCommandResponse)
@@ -336,7 +342,33 @@ def switch_to_branch(
         add_git_log(LogLevel.SUCCESS, message)
         return GitCommandResponse(message=message)
     except Exception as e:
-        handle_git_exception(e, f"Switch Branch to '{request.branch_name}'")
+        handle_git_exception(e, f"Switch Branch to '{request.branch_name}'", manager)
+
+
+@router.post("/rebase/continue", response_model=GitCommandResponse)
+def rebase_continue(manager: GitManager = Depends(get_git_manager)):
+    action_name = "Rebase Continue"
+    try:
+        result = manager.rebase_continue()
+        message = result.get("message", "Rebase continued successfully.")
+        add_git_log(LogLevel.SUCCESS, message, details=result.get("details"))
+        return GitCommandResponse(message=message, details=result)
+    except Exception as e:
+        handle_git_exception(e, action_name, manager)
+
+
+@router.post("/rebase/abort", response_model=GitCommandResponse)
+def rebase_abort(manager: GitManager = Depends(get_git_manager)):
+    action_name = "Rebase Abort"
+    try:
+        output = manager.rebase_abort()
+        message = (
+            "Rebase aborted successfully. Repository is back to its previous state."
+        )
+        add_git_log(LogLevel.WARN, message, details=output)
+        return GitCommandResponse(message=message, stdout=output)
+    except Exception as e:
+        handle_git_exception(e, action_name, manager)
 
 
 # --- Management Endpoints ---
@@ -382,7 +414,7 @@ def reset_to_remote(manager: GitManager = Depends(get_git_manager)):
         )
         return GitCommandResponse(message=result.get("message"), details=result)
     except Exception as e:
-        handle_git_exception(e, action_name)
+        handle_git_exception(e, action_name, manager)
 
 
 @router.post("/restore-file", response_model=GitCommandResponse)
@@ -401,4 +433,4 @@ def restore_file_from_commit(
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        handle_git_exception(e, action_name)
+        handle_git_exception(e, action_name, manager)

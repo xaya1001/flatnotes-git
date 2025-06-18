@@ -101,7 +101,6 @@ export const useHistoryStore = defineStore("git-history", () => {
         });
 
         await statusStore.fetchStatus();
-        await statusStore.fetchStatusSummary();
       } catch (err) {
         const errorMessage = err.response?.data?.detail || err.message;
         toast.add({

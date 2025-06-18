@@ -7,6 +7,7 @@ export function getStatusLabel(statusChar) {
     D: "Deleted",
     R: "Renamed",
     C: "Copied",
+    U: "Unmerged",
     "?": "Untracked",
   };
   return map[statusChar] || statusChar;
@@ -14,6 +15,8 @@ export function getStatusLabel(statusChar) {
 
 export function getFileStatusClass(index, workTree) {
   const status = index !== " " && index !== "?" ? index : workTree;
+  if (status === "U")
+    return "border border-red-500 bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-200";
   if (status === "A" || status === "C")
     return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200";
   if (status === "M")
