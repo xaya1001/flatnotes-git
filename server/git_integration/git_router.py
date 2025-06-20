@@ -8,7 +8,8 @@ from auth.base import BaseAuth
 from global_config import GlobalConfig
 from logger import logger
 
-from . import config as git_config
+from . import git_config as git_config
+from .git_logger import LogEntry, LogLevel, add_git_log, get_all_logs
 from .git_manager import (
     BranchNotFoundError,
     GitManager,
@@ -31,7 +32,6 @@ from .git_models import (
     GitStatusResponse,
     SwitchBranchRequest,
 )
-from .log_handler import LogEntry, LogLevel, add_git_log, get_all_logs
 
 
 # --- Dependency Injection ---

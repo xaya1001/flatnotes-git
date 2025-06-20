@@ -10,8 +10,8 @@ from pygit2.enums import FileStatus, RepositoryState, SortMode
 
 from logger import logger
 
-from . import config as git_config
-from .config import PullStrategy
+from . import git_config
+from .git_config import PullStrategy
 
 
 # --- Custom Exceptions for Clearer Error Handling ---
@@ -51,6 +51,9 @@ class GitManager:
         user_name: Optional[str] = None,
         user_email: Optional[str] = None,
     ):
+        """
+        Initializes the GitManager and ensures the .flatnotes directory is ignored.
+        """
         self.repo_path = repo_path
         self.default_branch = default_branch
         self.default_remote = default_remote
@@ -68,12 +71,6 @@ class GitManager:
                     self.repo = pygit2.init_repository(
                         repo_path, initial_head=self.default_branch
                     )
-                    # Create .gitignore and .gitattributes
-                    with open(os.path.join(repo_path, ".gitignore"), "w") as f:
-                        f.write("*\n!*.md\n")
-                    with open(os.path.join(repo_path, ".gitattributes"), "w") as f:
-                        f.write("* text=auto eol=lf\n")
-
                     if self.author:
                         config = self.repo.config
                         config.set_multivar("user.name", ".*", self.author.name)
@@ -86,12 +83,42 @@ class GitManager:
             else:
                 self.repo = pygit2.Repository(git_repo_path)
 
+            self._ensure_flatnotes_ignored()
+
         except GitError as e:
             raise RepositoryInvalidError(
                 f"Invalid or inaccessible repository at '{repo_path}': {e}"
             ) from e
 
         logger.info(f"GitManager initialized for repository at: {self.repo.path}")
+
+    def _ensure_flatnotes_ignored(self):
+        """
+        Ensures that the .flatnotes/ directory is present in the .gitignore file.
+        This is a critical function to prevent the app's cache from being committed.
+        """
+        gitignore_path = os.path.join(self.repo.workdir, ".gitignore")
+        ignore_rule = ".flatnotes/"
+
+        if not os.path.exists(gitignore_path):
+            # If .gitignore doesn't exist, create it with our rule.
+            logger.info(f"No .gitignore found. Creating one to ignore '{ignore_rule}'.")
+            with open(gitignore_path, "w") as f:
+                f.write(f"# Flatnotes specific ignores\n{ignore_rule}\n")
+        else:
+            # If .gitignore exists, check if our rule is already present.
+            with open(gitignore_path, "r+") as f:
+                content = f.read()
+                if ignore_rule not in content:
+                    logger.warning(
+                        f"'{ignore_rule}' not found in existing .gitignore. Appending rule to prevent committing cache."
+                    )
+                    f.seek(0, os.SEEK_END)
+                    if not content.endswith("\n"):
+                        f.write("\n")
+                    f.write(
+                        f"\n# Added by Flatnotes to ignore its cache\n{ignore_rule}\n"
+                    )
 
     def _run_git_command(self, command: List[str]) -> str:
         """
@@ -349,7 +376,6 @@ class GitManager:
         if not message.strip():
             raise ValueError("Commit message cannot be empty.")
 
-        # --- CORRECTED LOGIC FOR CHECKING STAGED CHANGES ---
         try:
             # This works for all subsequent commits after the first one.
             head_tree = self.repo.head.peel().tree
@@ -384,8 +410,6 @@ class GitManager:
             os.remove(merge_head_path)
 
         return str(commit_oid)
-
-    # --- Other methods remain unchanged, only adding a few for completeness ---
 
     def _format_remote_url_for_web(self, url: str) -> Optional[str]:
         if not url:
