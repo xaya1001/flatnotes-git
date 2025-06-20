@@ -20,12 +20,11 @@ export const useActionsStore = defineStore("git-actions", () => {
   const isActionLoading = ref(false);
   const isAutoSyncPaused = ref(false);
 
-  // This is a new helper function for centralized refreshing
   async function refreshAllStores() {
-    // We run them in parallel for better performance
     await Promise.all([statusStore.fetchStatus(), historyStore.fetchGitLog()]);
   }
 
+  // This helper is for simple actions that don't have complex error states like conflicts.
   async function performGitAction(
     actionFunc,
     args,
@@ -47,11 +46,7 @@ export const useActionsStore = defineStore("git-actions", () => {
         message: successMessage,
         details: response.stdout || response.message || null,
       });
-
-      // After any successful action, trigger a full refresh.
-      // This is simpler and more robust than checking actionName.
       await refreshAllStores();
-
       return true;
     } catch (err) {
       const errorMessage =
@@ -69,15 +64,123 @@ export const useActionsStore = defineStore("git-actions", () => {
         message: `Failed: ${actionName}`,
         details: errorMessage,
       });
-
-      // Also refresh on failure to show any resulting error state (e.g., conflicts)
-      await refreshAllStores();
-
+      await refreshAllStores(); // Refresh even on failure to show the resulting state
       return false;
     } finally {
       isActionLoading.value = false;
     }
   }
+
+  // --- handlers for complex actions like sync and pull ---
+
+  async function handleSync() {
+    const message = statusStore.commitMessage;
+    isActionLoading.value = true;
+    const pendingLogId = logStore.addPendingLog("Commit & Sync...");
+    try {
+      const response = await gitApi.gitSyncWorkspace(message);
+      toast.add({
+        severity: "success",
+        summary: "Success",
+        detail: "Workspace synced.",
+        life: 3000,
+      });
+      logStore.updateLog(pendingLogId, {
+        level: "success",
+        message: "Workspace synced.",
+        details: response.details,
+      });
+      statusStore.clearCommitMessage();
+      await refreshAllStores();
+    } catch (err) {
+      const errorData = err.response?.data?.detail;
+      // ** THE FIX IS HERE **
+      // Check for a 409 conflict and immediately act on the error data.
+      if (
+        err.response?.status === 409 &&
+        errorData?.state?.includes("CONFLICT")
+      ) {
+        logStore.updateLog(pendingLogId, {
+          level: "warn",
+          message: `Sync failed: ${errorData.state}.`,
+          details: errorData.message,
+        });
+        // 1. Enter conflict mode IMMEDIATELY. This updates the UI instantly.
+        conflictStore.enterConflictMode(errorData);
+        // 2. We can still refresh the status in the background to ensure all other details are up-to-date,
+        // but we DON'T await it. The crucial UI change has already happened.
+        statusStore.fetchStatus();
+      } else {
+        const errorMessage = errorData?.message || errorData || err.message;
+        toast.add({
+          severity: "error",
+          summary: "Error: Commit & Sync",
+          detail: errorMessage,
+          life: 5000,
+        });
+        logStore.updateLog(pendingLogId, {
+          level: "error",
+          message: "Failed: Commit & Sync",
+          details: errorMessage,
+        });
+        await refreshAllStores(); // Refresh to show the resulting state
+      }
+    } finally {
+      isActionLoading.value = false;
+    }
+  }
+
+  async function handlePull() {
+    isActionLoading.value = true;
+    const pendingLogId = logStore.addPendingLog("Pulling changes...");
+    try {
+      const response = await gitApi.gitPull();
+      toast.add({
+        severity: "success",
+        summary: "Success",
+        detail: "Pull operation completed.",
+        life: 3000,
+      });
+      logStore.updateLog(pendingLogId, {
+        level: "success",
+        message: "Pull completed.",
+        details: response.stdout,
+      });
+      await refreshAllStores();
+    } catch (err) {
+      const errorData = err.response?.data?.detail;
+      if (
+        err.response?.status === 409 &&
+        errorData?.state?.includes("CONFLICT")
+      ) {
+        logStore.updateLog(pendingLogId, {
+          level: "warn",
+          message: `Pull failed: ${errorData.state}.`,
+          details: errorData.message,
+        });
+        conflictStore.enterConflictMode(errorData);
+        statusStore.fetchStatus();
+      } else {
+        const errorMessage = errorData?.message || errorData || err.message;
+        toast.add({
+          severity: "error",
+          summary: "Error: Pull",
+          detail: errorMessage,
+          life: 5000,
+        });
+        logStore.updateLog(pendingLogId, {
+          level: "error",
+          message: "Failed: Pull",
+          details: errorMessage,
+        });
+        await refreshAllStores();
+      }
+    } finally {
+      isActionLoading.value = false;
+    }
+  }
+
+  // --- Other action handlers ---
 
   function handleStageFile(filepath) {
     performGitAction(
@@ -156,65 +259,6 @@ export const useActionsStore = defineStore("git-actions", () => {
     }
   }
 
-  async function handleSync() {
-    const message = statusStore.commitMessage;
-    isActionLoading.value = true;
-    const pendingLogId = logStore.addPendingLog("Commit & Sync...");
-    try {
-      const response = await gitApi.gitSyncWorkspace(message);
-      toast.add({
-        severity: "success",
-        summary: "Success",
-        detail: "Workspace synced.",
-        life: 3000,
-      });
-      logStore.updateLog(pendingLogId, {
-        level: "success",
-        message: "Workspace synced.",
-        details: response.details,
-      });
-      statusStore.clearCommitMessage();
-      await refreshAllStores();
-    } catch (err) {
-      if (
-        err.response?.status === 409 &&
-        err.response.data.detail?.state === "REBASE_CONFLICT"
-      ) {
-        const errorData = err.response.data.detail;
-        logStore.updateLog(pendingLogId, {
-          level: "warn",
-          message: "Sync failed: Rebase conflict.",
-          details: errorData.message,
-        });
-        await statusStore.fetchStatus();
-        conflictStore.enterConflictMode(errorData.conflicted_files);
-      } else {
-        const errorMessage =
-          err.response?.data?.detail?.message ||
-          err.response?.data?.detail ||
-          err.message;
-        toast.add({
-          severity: "error",
-          summary: "Error: Commit & Sync",
-          detail: errorMessage,
-          life: 5000,
-        });
-        logStore.updateLog(pendingLogId, {
-          level: "error",
-          message: "Failed: Commit & Sync",
-          details: errorMessage,
-        });
-        await refreshAllStores();
-      }
-    } finally {
-      isActionLoading.value = false;
-    }
-  }
-
-  function handlePull() {
-    performGitAction(gitApi.gitPull, [], "Pull", "Pull operation completed.");
-  }
-
   function handlePush() {
     performGitAction(gitApi.gitPush, [], "Push", "Push operation completed.");
   }
@@ -227,7 +271,6 @@ export const useActionsStore = defineStore("git-actions", () => {
       console.error("Failed to get initial auto-sync state", error);
     }
   }
-
   async function toggleAutoSyncPause() {
     const action = isAutoSyncPaused.value
       ? gitApi.resumeAutoSync

@@ -175,19 +175,17 @@ export async function gitRestoreFile(commitHash, filepath) {
     return Promise.reject(error);
   }
 }
-
-export async function gitRebaseContinue() {
+export async function gitConflictContinue() {
   try {
-    const response = await api.post("api/git/rebase/continue");
+    const response = await api.post("api/git/conflict/continue");
     return response.data;
   } catch (error) {
     return Promise.reject(error);
   }
 }
-
-export async function gitRebaseAbort() {
+export async function gitConflictAbort() {
   try {
-    const response = await api.post("api/git/rebase/abort");
+    const response = await api.post("api/git/conflict/abort");
     return response.data;
   } catch (error) {
     return Promise.reject(error);

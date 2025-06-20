@@ -21,12 +21,13 @@
       </p>
     </div>
 
-    <!-- [+] ADDED: Warning for unstaged changes -->
+    <!-- Warning for unstaged changes -->
     <div
       v-if="showUnstagedChangesWarning"
       class="m-2 rounded-md border border-yellow-500/50 bg-yellow-400/10 p-2 text-center text-xs text-yellow-300"
     >
-      You have unstaged changes. Please stage them before continuing the rebase.
+      You have unstaged changes. Please stage them before continuing the
+      operation.
     </div>
 
     <!-- Main Content Area (Scrollable) -->
@@ -69,14 +70,14 @@
           class="rounded bg-theme-success p-2 font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
           :title="continueButtonTitle"
         >
-          Continue Rebase
+          {{ continueButtonText }}
         </button>
         <button
           @click="handleAbort"
           :disabled="actionsStore.isActionLoading"
           class="rounded bg-theme-danger p-2 font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          Abort Rebase
+          {{ abortButtonText }}
         </button>
       </div>
     </div>
@@ -110,53 +111,65 @@ const stagedResolutions = computed(() =>
 );
 
 // --- Computed Properties for Dynamic UI Text & State ---
+const conflictType = computed(() =>
+  statusStore.repositoryState.startsWith("REBASING") ? "Rebase" : "Merge",
+);
+
 const headerTitle = computed(() => {
-  if (statusStore.repositoryState === "REBASING_CONTINUE") {
+  if (
+    statusStore.repositoryState === "REBASING_CONTINUE" ||
+    statusStore.repositoryState === "MERGING"
+  ) {
     return "All Conflicts Resolved";
   }
-  return "Resolve Conflicts to Continue";
+  return `Resolve Conflicts to Continue ${conflictType.value}`;
 });
 
 const headerSubtitle = computed(() => {
-  if (statusStore.repositoryState === "REBASING_CONTINUE") {
-    return "Ready to continue the rebase operation.";
+  if (
+    statusStore.repositoryState === "REBASING_CONTINUE" ||
+    statusStore.repositoryState === "MERGING"
+  ) {
+    return `Ready to continue the ${conflictType.value.toLowerCase()} operation.`;
   }
-  return "A rebase is in progress. Stage your resolved files to proceed.";
+  return `A ${conflictType.value.toLowerCase()} is in progress. Stage your resolved files to proceed.`;
 });
 
-// [+] ADDED: Logic to show the new warning banner
+const continueButtonText = computed(() => `Continue ${conflictType.value}`);
+const abortButtonText = computed(() => `Abort ${conflictType.value}`);
+
 const showUnstagedChangesWarning = computed(() => {
+  const state = statusStore.repositoryState;
   return (
-    statusStore.repositoryState === "REBASING_CONTINUE" &&
+    (state === "REBASING_CONTINUE" || state === "MERGING") &&
     unresolvedFiles.value.length > 0
   );
 });
 
-// [+] ADDED: More robust logic for disabling the continue button
 const isContinueDisabled = computed(() => {
   if (actionsStore.isActionLoading) return true;
-  if (statusStore.repositoryState !== "REBASING_CONTINUE") return true;
-  // Disable if there are ANY unstaged changes left
+  const state = statusStore.repositoryState;
+  if (state !== "REBASING_CONTINUE" && state !== "MERGING") return true;
   if (unresolvedFiles.value.length > 0) return true;
   return false;
 });
 
 const continueButtonTitle = computed(() => {
-  if (statusStore.repositoryState !== "REBASING_CONTINUE") {
+  const state = statusStore.repositoryState;
+  if (state !== "REBASING_CONTINUE" && state !== "MERGING") {
     return "You must resolve all conflicts and stage the files before continuing.";
   }
   if (unresolvedFiles.value.length > 0) {
     return "You must stage all remaining changes before continuing.";
   }
-  return "Continue the rebase operation";
+  return `Continue the ${conflictType.value.toLowerCase()} operation`;
 });
 
 // --- Action Handlers ---
 async function handleContinue() {
   const confirmed = await panelUiStore.showConfirmation({
-    title: "Confirm Continue Rebase",
-    message:
-      "This will proceed with the rebase using your staged resolutions. Are you sure?",
+    title: `Confirm Continue ${conflictType.value}`,
+    message: `This will proceed with the ${conflictType.value.toLowerCase()} using your staged resolutions. Are you sure?`,
     confirmButtonText: "Yes, Continue",
     confirmButtonStyle: "success",
   });
@@ -167,10 +180,9 @@ async function handleContinue() {
 
 async function handleAbort() {
   const confirmed = await panelUiStore.showConfirmation({
-    title: "Confirm Abort Rebase",
-    message:
-      "This will cancel the rebase and return your repository to the state before the operation began. All your conflict resolutions will be lost. This cannot be undone.",
-    confirmButtonText: "Yes, Abort",
+    title: `Confirm Abort ${conflictType.value}`,
+    message: `This will cancel the ${conflictType.value.toLowerCase()} and return your repository to the state before the operation began. All your conflict resolutions will be lost. This cannot be undone.`,
+    confirmButtonText: `Yes, Abort`,
     confirmButtonStyle: "danger",
   });
   if (confirmed) {
