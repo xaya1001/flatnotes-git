@@ -17,17 +17,33 @@
             @click="actionsStore.handlePull"
             :disabled="isPullDisabled"
             :title="pullButtonTitle"
-            class="rounded bg-theme-background p-2 text-sm font-semibold hover:bg-theme-border disabled:cursor-not-allowed disabled:opacity-50"
+            class="flex items-center justify-center rounded p-2 text-sm font-semibold transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-50"
+            :class="pullButtonStyle"
           >
-            Pull
+            <SvgIcon
+              v-if="statusStore.commitsBehind > 0"
+              type="mdi"
+              :path="mdilArrowDown"
+              :size="16"
+              class="mr-1"
+            />
+            <span>{{ pullButtonText }}</span>
           </button>
           <button
             @click="actionsStore.handlePush"
             :disabled="isPushDisabled"
             :title="pushButtonTitle"
-            class="rounded bg-theme-background p-2 text-sm font-semibold hover:bg-theme-border disabled:cursor-not-allowed disabled:opacity-50"
+            class="flex items-center justify-center rounded p-2 text-sm font-semibold transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-50"
+            :class="pushButtonStyle"
           >
-            Push
+            <SvgIcon
+              v-if="statusStore.commitsAhead > 0"
+              type="mdi"
+              :path="mdilArrowUp"
+              :size="16"
+              class="mr-1"
+            />
+            <span>{{ pushButtonText }}</span>
           </button>
 
           <!-- Row 2: Commit Actions -->
@@ -43,7 +59,8 @@
             @click="actionsStore.handleSync"
             :disabled="isSyncDisabled"
             :title="syncButtonTitle"
-            class="rounded bg-theme-brand p-2 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            class="rounded p-2 text-sm font-semibold text-white transition-colors duration-200 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            :class="syncButtonStyle"
           >
             Commit & Sync
           </button>
@@ -123,8 +140,9 @@
         @click="toggleBranchMenu"
         class="flex w-full cursor-pointer items-center justify-between px-4 py-2 hover:bg-theme-border"
         :class="{
-          'cursor-not-allowed opacity-50': actionsStore.isActionLoading,
+          'cursor-not-allowed opacity-50': isBranchSwitchingDisabled,
         }"
+        :title="branchSwitchingTitle"
       >
         <div class="flex items-center space-x-2 text-sm text-theme-text-muted">
           <SvgIcon type="mdi" :path="mdilSitemap" :size="16" />
@@ -274,30 +292,75 @@ const noLocalChanges = computed(
 );
 const isNotTracking = computed(() => !statusStore.isTrackingUpstream);
 const noCommitMessage = computed(() => !statusStore.commitMessage.trim());
+const hasUncommittedChanges = computed(
+  () => !noStagedFiles.value || !noUnstagedFiles.value,
+);
 
-// Pull Button
+// --- Dynamic Button Text ---
+const pullButtonText = computed(() => {
+  return statusStore.commitsBehind > 0
+    ? `Pull ${statusStore.commitsBehind}`
+    : "Pull";
+});
+
+const pushButtonText = computed(() => {
+  return statusStore.commitsAhead > 0
+    ? `Push ${statusStore.commitsAhead}`
+    : "Push";
+});
+
+// --- Dynamic Button Styles ---
+const pullButtonStyle = computed(() => {
+  if (statusStore.commitsBehind > 0) {
+    return "bg-theme-brand text-white hover:opacity-90";
+  }
+  return "bg-theme-background hover:bg-theme-border";
+});
+
+const pushButtonStyle = computed(() => {
+  if (statusStore.commitsAhead > 0 && statusStore.commitsBehind === 0) {
+    return "bg-theme-brand text-white hover:opacity-90";
+  }
+  return "bg-theme-background hover:bg-theme-border";
+});
+
+const syncButtonStyle = computed(() => {
+  // Sync button is primary only if there are no pending pulls or pushes.
+  if (statusStore.commitsBehind > 0 || statusStore.commitsAhead > 0) {
+    return "bg-gray-500"; // A neutral, less prominent color
+  }
+  return "bg-theme-brand";
+});
+
+// --- Button Disabled States & Titles ---
 const isPullDisabled = computed(
-  () => isActionInProgress.value || isNotTracking.value,
+  () =>
+    isActionInProgress.value ||
+    isNotTracking.value ||
+    statusStore.commitsBehind === 0,
 );
 const pullButtonTitle = computed(() => {
   if (isActionInProgress.value) return "Action in progress...";
   if (isNotTracking.value)
     return "Current branch is not tracking a remote branch.";
-  return "Pull changes from remote";
+  if (statusStore.commitsBehind === 0) return "No incoming changes to pull.";
+  return `Pull ${statusStore.commitsBehind} commits from remote`;
 });
 
-// Push Button
 const isPushDisabled = computed(
-  () => isActionInProgress.value || isNotTracking.value,
+  () =>
+    isActionInProgress.value ||
+    isNotTracking.value ||
+    statusStore.commitsAhead === 0,
 );
 const pushButtonTitle = computed(() => {
   if (isActionInProgress.value) return "Action in progress...";
   if (isNotTracking.value)
     return "Current branch is not tracking a remote branch.";
-  return "Push local commits to remote";
+  if (statusStore.commitsAhead === 0) return "No local commits to push.";
+  return `Push ${statusStore.commitsAhead} commits to remote`;
 });
 
-// Commit Staged Button
 const isCommitStagedDisabled = computed(
   () =>
     isActionInProgress.value || noStagedFiles.value || noCommitMessage.value,
@@ -309,12 +372,15 @@ const commitStagedButtonTitle = computed(() => {
   return "Commit staged changes";
 });
 
-// Commit & Sync Button
 const isSyncDisabled = computed(
   () => isActionInProgress.value || noLocalChanges.value || isNotTracking.value,
 );
 const syncButtonTitle = computed(() => {
   if (isActionInProgress.value) return "Action in progress...";
+  if (statusStore.commitsBehind > 0)
+    return "Please pull remote changes before syncing.";
+  if (statusStore.commitsAhead > 0)
+    return "You have unpushed commits. Please push them or sync again.";
   if (noLocalChanges.value) return "No local changes to sync.";
   if (isNotTracking.value)
     return "Current branch is not tracking a remote branch.";
@@ -331,6 +397,17 @@ const isStageAllDisabled = computed(
   () => isActionInProgress.value || noUnstagedFiles.value,
 );
 
+const isBranchSwitchingDisabled = computed(() => {
+  return actionsStore.isActionLoading || hasUncommittedChanges.value;
+});
+
+const branchSwitchingTitle = computed(() => {
+  if (actionsStore.isActionLoading) return "Action in progress...";
+  if (hasUncommittedChanges.value)
+    return "Commit or discard your changes before switching branches.";
+  return "Switch branch";
+});
+
 const toggleUpstreamWarning = (event) => {
   upstreamWarningPanel.value.toggle(event);
 };
@@ -343,7 +420,7 @@ const handleBranchSelect = (branch) => {
 };
 
 const toggleBranchMenu = async () => {
-  if (actionsStore.isActionLoading) return;
+  if (isBranchSwitchingDisabled.value) return;
   if (isBranchMenuVisible.value) {
     isBranchMenuVisible.value = false;
     return;

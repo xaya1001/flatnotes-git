@@ -44,8 +44,11 @@ export const useStatusStore = defineStore("git-status", () => {
       }
       return `Error: ${summaryError.value}.`;
     }
-    if (repositoryState.value.startsWith("REBASE")) {
-      return `Conflict: Rebase in progress. Click to resolve.`;
+    if (repositoryState.value.includes("CONFLICT")) {
+      const type = repositoryState.value.includes("REBASE")
+        ? "Rebase"
+        : "Merge";
+      return `Conflict: ${type} in progress. Click to resolve.`;
     }
 
     let parts = [];
@@ -79,17 +82,29 @@ export const useStatusStore = defineStore("git-status", () => {
 
       // App startup conflict state recovery.
       // This is the ONLY place where a status fetch can INITIATE conflict mode.
+      const state = repositoryState.value;
       if (
-        repositoryState.value.startsWith("REBASING") &&
+        (state.startsWith("REBASING") || state.startsWith("MERGING")) &&
         !conflictStore.isInConflict
       ) {
-        const conflicted = data.files
-          .filter((f) => f.index_status === "U" || f.work_tree_status === "U")
-          .map((f) => f.path);
-        conflictStore.enterConflictMode(conflicted, { silent: true });
+        // Construct a mock errorData object that matches the API response structure.
+        const errorData = {
+          state: state, // e.g., "REBASING_CONFLICT" or "MERGING_CONFLICT"
+          conflicted_files: data.files
+            .filter((f) => f.index_status === "U" || f.work_tree_status === "U")
+            .map((f) => f.path),
+        };
+        // Enter conflict mode silently on page load.
+        conflictStore.enterConflictMode(errorData, { silent: true });
+      } else if (
+        !state.startsWith("REBASING") &&
+        !state.startsWith("MERGING") &&
+        conflictStore.isInConflict
+      ) {
+        // If the repo state is clean but the UI is still in conflict mode, exit it.
+        // This handles cases where the conflict was resolved outside the UI.
+        conflictStore.exitConflictMode();
       }
-      // **REMOVED**: The logic to exit conflict mode from here.
-      // Exiting conflict mode is now the exclusive responsibility of the conflictStore.
     } catch (err) {
       if (err.response?.status === 428) {
         summaryError.value = "Git repository not initialized";

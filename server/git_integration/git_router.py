@@ -16,6 +16,7 @@ from .git_manager import (
     GitManagerError,
     MergeConflictError,
     NoChangesError,
+    PushRejectedError,
     RemoteNotFoundError,
     RepositoryInvalidError,
 )
@@ -74,6 +75,17 @@ def handle_git_exception(e: Exception, action: str, manager: GitManager):
                 "message": f"A conflict occurred during the '{action}' operation. Please resolve it.",
                 "state": repo_state,  # e.g., REBASING_CONFLICT or MERGING_CONFLICT
                 "conflicted_files": conflicted_files,
+            },
+        )
+    if isinstance(e, PushRejectedError):
+        add_git_log(LogLevel.WARN, f"Failed: {action} - Push Rejected", str(e))
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "Push was rejected by the remote because it is not a fast-forward. "
+                "This usually means the remote has changes you don't have locally. "
+                "Please pull the latest changes and try again.",
+                "state": "PUSH_REJECTED_NON_FAST_FORWARD",
             },
         )
     if isinstance(e, (ValueError, NoChangesError)):

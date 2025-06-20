@@ -1,4 +1,3 @@
-<!-- client/git-integration/components/tabs/GitHistoryTab.vue -->
 <template>
   <div class="relative flex h-full flex-col p-2">
     <!-- Commit List -->
@@ -125,7 +124,8 @@
                 <!-- Restore file button -->
                 <button
                   @click.stop="historyStore.restoreFile(commit.hash, file.path)"
-                  class="p-1 text-theme-text-muted hover:text-theme-text"
+                  class="p-1 text-theme-text-muted hover:text-theme-text disabled:cursor-not-allowed disabled:opacity-50"
+                  :disabled="conflictStore.isInConflict"
                   title="Restore this file to the version in this commit"
                 >
                   <SvgIcon type="mdi" :path="mdiRestore" :size="14" />
@@ -168,7 +168,9 @@
           <button
             v-if="statusStore.commitsAhead > 0 || statusStore.commitsBehind > 0"
             @click="actionsStore.handleResetToRemote"
-            :disabled="actionsStore.isActionLoading"
+            :disabled="
+              actionsStore.isActionLoading || conflictStore.isInConflict
+            "
             class="w-full rounded border border-theme-danger p-2 text-sm font-semibold text-theme-danger hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Reset to Remote...
@@ -187,6 +189,7 @@ import { ref } from "vue";
 import { useHistoryStore } from "../../stores/historyStore";
 import { useActionsStore } from "../../stores/actionsStore";
 import { useStatusStore } from "../../stores/statusStore";
+import { useConflictStore } from "../../stores/conflictStore";
 import { getCommitFileStatusClass } from "../../gitUtils";
 import SvgIcon from "@jamescoyle/vue-icon";
 import OverlayPanel from "primevue/overlaypanel";
@@ -198,6 +201,7 @@ import { mdiOpenInNew, mdiCog, mdiRestore } from "@mdi/js";
 const historyStore = useHistoryStore();
 const actionsStore = useActionsStore();
 const statusStore = useStatusStore();
+const conflictStore = useConflictStore();
 
 const settingsPanel = ref();
 const toggleSettingsPanel = (event) => {

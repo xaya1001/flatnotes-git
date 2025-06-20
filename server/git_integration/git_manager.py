@@ -29,6 +29,12 @@ class MergeConflictError(GitManagerError):
     pass
 
 
+class PushRejectedError(GitManagerError):
+    """Raised when a push is rejected by the remote (e.g., non-fast-forward)."""
+
+    pass
+
+
 class RemoteNotFoundError(GitManagerError):
     """Raised when the specified remote does not exist."""
 
@@ -98,26 +104,38 @@ class GitManager:
         This is a critical function to prevent the app's cache from being committed.
         """
         gitignore_path = os.path.join(self.repo.workdir, ".gitignore")
-        ignore_rule = ".flatnotes/"
+        preferred_rule = ".flatnotes/"
+        valid_rules = {".flatnotes", ".flatnotes/"}
 
         if not os.path.exists(gitignore_path):
-            # If .gitignore doesn't exist, create it with our rule.
-            logger.info(f"No .gitignore found. Creating one to ignore '{ignore_rule}'.")
+            logger.info(
+                f"No .gitignore found. Creating one to ignore '{preferred_rule}'."
+            )
             with open(gitignore_path, "w") as f:
-                f.write(f"# Flatnotes specific ignores\n{ignore_rule}\n")
+                f.write(f"# Flatnotes specific ignores\n{preferred_rule}\n")
         else:
-            # If .gitignore exists, check if our rule is already present.
-            with open(gitignore_path, "r+") as f:
-                content = f.read()
-                if ignore_rule not in content:
-                    logger.warning(
-                        f"'{ignore_rule}' not found in existing .gitignore. Appending rule to prevent committing cache."
-                    )
-                    f.seek(0, os.SEEK_END)
-                    if not content.endswith("\n"):
+            rule_exists = False
+            full_content = ""
+            with open(gitignore_path, "r") as f:
+                lines = f.readlines()
+                full_content = "".join(lines)
+                for line in lines:
+                    # Check each line, ignoring comments and whitespace.
+                    cleaned_line = line.strip()
+                    if cleaned_line in valid_rules:
+                        rule_exists = True
+                        break
+
+            if not rule_exists:
+                logger.warning(
+                    f"A rule to ignore '.flatnotes' was not found in .gitignore. "
+                    f"Appending '{preferred_rule}' to prevent committing cache."
+                )
+                with open(gitignore_path, "a") as f:
+                    if not full_content.endswith("\n"):
                         f.write("\n")
                     f.write(
-                        f"\n# Added by Flatnotes to ignore its cache\n{ignore_rule}\n"
+                        f"\n# Added by Flatnotes to ignore its cache\n{preferred_rule}\n"
                     )
 
     def _run_git_command(self, command: List[str]) -> str:
@@ -148,6 +166,13 @@ class GitManager:
                 f"STDOUT: {e.stdout}\n"
                 f"STDERR: {e.stderr}"
             )
+
+            # Check for push rejections first, as they are a specific failure case.
+            if command[0] == "push" and (
+                "non-fast-forward" in output_lower
+                or "updates were rejected" in output_lower
+            ):
+                raise PushRejectedError(e.stderr or e.stdout)
 
             # Check for a broad set of conflict indicators.
             if (
