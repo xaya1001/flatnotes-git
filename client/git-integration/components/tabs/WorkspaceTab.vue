@@ -1,4 +1,3 @@
-<!-- client/git-integration/components/tabs/WorkspaceTab.vue -->
 <template>
   <div class="flex h-full flex-col">
     <!-- Main Content Area (Scrollable) -->
@@ -16,28 +15,16 @@
           <!-- Row 1: Network Actions -->
           <button
             @click="actionsStore.handlePull"
-            :disabled="
-              actionsStore.isActionLoading || !statusStore.isTrackingUpstream
-            "
-            :title="
-              !statusStore.isTrackingUpstream
-                ? 'Current branch is not tracking a remote branch'
-                : ''
-            "
+            :disabled="isPullDisabled"
+            :title="pullButtonTitle"
             class="rounded bg-theme-background p-2 text-sm font-semibold hover:bg-theme-border disabled:cursor-not-allowed disabled:opacity-50"
           >
             Pull
           </button>
           <button
             @click="actionsStore.handlePush"
-            :disabled="
-              actionsStore.isActionLoading || !statusStore.isTrackingUpstream
-            "
-            :title="
-              !statusStore.isTrackingUpstream
-                ? 'Current branch is not tracking a remote branch'
-                : ''
-            "
+            :disabled="isPushDisabled"
+            :title="pushButtonTitle"
             class="rounded bg-theme-background p-2 text-sm font-semibold hover:bg-theme-border disabled:cursor-not-allowed disabled:opacity-50"
           >
             Push
@@ -46,28 +33,16 @@
           <!-- Row 2: Commit Actions -->
           <button
             @click="actionsStore.handleCommit"
-            :disabled="
-              actionsStore.isActionLoading ||
-              statusStore.stagedFiles.length === 0 ||
-              !statusStore.commitMessage.trim()
-            "
+            :disabled="isCommitStagedDisabled"
+            :title="commitStagedButtonTitle"
             class="rounded bg-theme-background p-2 text-sm font-semibold hover:bg-theme-border disabled:cursor-not-allowed disabled:opacity-50"
           >
             Commit Staged
           </button>
           <button
             @click="actionsStore.handleSync"
-            :disabled="
-              actionsStore.isActionLoading ||
-              (statusStore.stagedFiles.length === 0 &&
-                statusStore.unstagedFiles.length === 0) ||
-              !statusStore.isTrackingUpstream
-            "
-            :title="
-              !statusStore.isTrackingUpstream
-                ? 'Current branch is not tracking a remote branch'
-                : ''
-            "
+            :disabled="isSyncDisabled"
+            :title="syncButtonTitle"
             class="rounded bg-theme-brand p-2 text-sm font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Commit & Sync
@@ -85,11 +60,9 @@
             </h3>
             <button
               @click="actionsStore.handleUnstageAll"
-              :disabled="
-                actionsStore.isActionLoading ||
-                statusStore.stagedFiles.length === 0
-              "
-              class="text-xs font-semibold text-theme-text-muted hover:text-theme-text disabled:opacity-50"
+              :disabled="isUnstageAllDisabled"
+              title="Unstage All"
+              class="text-xs font-semibold text-theme-text-muted hover:text-theme-text disabled:cursor-not-allowed disabled:opacity-50"
             >
               Unstage All
             </button>
@@ -111,11 +84,9 @@
             </h3>
             <button
               @click="actionsStore.handleStageAll"
-              :disabled="
-                actionsStore.isActionLoading ||
-                statusStore.unstagedFiles.length === 0
-              "
-              class="text-xs font-semibold text-theme-text-muted hover:text-theme-text disabled:opacity-50"
+              :disabled="isStageAllDisabled"
+              title="Stage All"
+              class="text-xs font-semibold text-theme-text-muted hover:text-theme-text disabled:cursor-not-allowed disabled:opacity-50"
             >
               Stage All
             </button>
@@ -135,10 +106,7 @@
           >
             <button
               @click="actionsStore.handleDiscardAll"
-              :disabled="
-                actionsStore.isActionLoading ||
-                statusStore.unstagedFiles.length === 0
-              "
+              :disabled="actionsStore.isActionLoading"
               class="w-full rounded border border-theme-danger p-2 text-sm font-semibold text-theme-danger hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Discard All Unstaged Changes...
@@ -275,7 +243,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from "vue";
+import { ref, onMounted, onUnmounted, computed } from "vue";
 import OverlayPanel from "primevue/overlaypanel";
 import { useStatusStore } from "../../stores/statusStore";
 import { useActionsStore } from "../../stores/actionsStore";
@@ -296,6 +264,73 @@ const isBranchMenuVisible = ref(false);
 const branchData = ref({ branches: [], current_branch: "" });
 const upstreamWarningPanel = ref();
 
+// --- Computed Properties for Button States & Titles ---
+
+const isActionInProgress = computed(() => actionsStore.isActionLoading);
+const noStagedFiles = computed(() => statusStore.stagedFiles.length === 0);
+const noUnstagedFiles = computed(() => statusStore.unstagedFiles.length === 0);
+const noLocalChanges = computed(
+  () => noStagedFiles.value && noUnstagedFiles.value,
+);
+const isNotTracking = computed(() => !statusStore.isTrackingUpstream);
+const noCommitMessage = computed(() => !statusStore.commitMessage.trim());
+
+// Pull Button
+const isPullDisabled = computed(
+  () => isActionInProgress.value || isNotTracking.value,
+);
+const pullButtonTitle = computed(() => {
+  if (isActionInProgress.value) return "Action in progress...";
+  if (isNotTracking.value)
+    return "Current branch is not tracking a remote branch.";
+  return "Pull changes from remote";
+});
+
+// Push Button
+const isPushDisabled = computed(
+  () => isActionInProgress.value || isNotTracking.value,
+);
+const pushButtonTitle = computed(() => {
+  if (isActionInProgress.value) return "Action in progress...";
+  if (isNotTracking.value)
+    return "Current branch is not tracking a remote branch.";
+  return "Push local commits to remote";
+});
+
+// Commit Staged Button
+const isCommitStagedDisabled = computed(
+  () =>
+    isActionInProgress.value || noStagedFiles.value || noCommitMessage.value,
+);
+const commitStagedButtonTitle = computed(() => {
+  if (isActionInProgress.value) return "Action in progress...";
+  if (noStagedFiles.value) return "No changes staged to commit.";
+  if (noCommitMessage.value) return "Commit message cannot be empty.";
+  return "Commit staged changes";
+});
+
+// Commit & Sync Button
+const isSyncDisabled = computed(
+  () => isActionInProgress.value || noLocalChanges.value || isNotTracking.value,
+);
+const syncButtonTitle = computed(() => {
+  if (isActionInProgress.value) return "Action in progress...";
+  if (noLocalChanges.value) return "No local changes to sync.";
+  if (isNotTracking.value)
+    return "Current branch is not tracking a remote branch.";
+  return "Commit all changes and sync with remote";
+});
+
+// Unstage All Button
+const isUnstageAllDisabled = computed(
+  () => isActionInProgress.value || noStagedFiles.value,
+);
+
+// Stage All Button
+const isStageAllDisabled = computed(
+  () => isActionInProgress.value || noUnstagedFiles.value,
+);
+
 const toggleUpstreamWarning = (event) => {
   upstreamWarningPanel.value.toggle(event);
 };
@@ -309,17 +344,14 @@ const handleBranchSelect = (branch) => {
 
 const toggleBranchMenu = async () => {
   if (actionsStore.isActionLoading) return;
-
   if (isBranchMenuVisible.value) {
     isBranchMenuVisible.value = false;
     return;
   }
-
   branchData.value = await actionsStore.getBranches();
   isBranchMenuVisible.value = true;
 };
 
-// Click-away to close menu
 const handleClickOutside = (event) => {
   if (isBranchMenuVisible.value) {
     if (!event.target.closest(".relative")) {

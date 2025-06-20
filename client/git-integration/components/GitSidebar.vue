@@ -28,7 +28,7 @@
             <button
               @click="refreshAll"
               class="rounded-full p-1 hover:bg-theme-border"
-              title="Refresh"
+              title="Refresh all Git data"
             >
               <SvgIcon
                 type="mdi"
@@ -52,9 +52,8 @@
                 "
                 :label="autoSyncLabel"
                 @click="actionsStore.toggleAutoSyncPause"
-                :disabled="
-                  actionsStore.isActionLoading || conflictStore.isInConflict
-                "
+                :disabled="isAutoSyncToggleDisabled"
+                :title="autoSyncToggleTitle"
               />
             </template>
             <span v-else>Automatic Sync Disabled</span>
@@ -229,12 +228,25 @@ const conflictStore = useConflictStore();
 const isRefreshing = ref(false);
 const globalConfig = computed(() => globalStore.config.value);
 
-// [+] ADDED: Computed property for the auto-sync label
 const autoSyncLabel = computed(() => {
   if (conflictStore.isInConflict) {
     return "Paused (Conflict)";
   }
   return actionsStore.isAutoSyncPaused ? "Paused" : "Enabled";
+});
+
+const isAutoSyncToggleDisabled = computed(
+  () => actionsStore.isActionLoading || conflictStore.isInConflict,
+);
+
+const autoSyncToggleTitle = computed(() => {
+  if (conflictStore.isInConflict)
+    return "Auto-sync is disabled during a conflict.";
+  if (actionsStore.isActionLoading)
+    return "Cannot change setting while an action is in progress.";
+  return actionsStore.isAutoSyncPaused
+    ? "Click to resume auto-sync"
+    : "Click to pause auto-sync";
 });
 
 function handleSidebarShow() {
@@ -245,7 +257,6 @@ async function refreshAll() {
   isRefreshing.value = true;
   const pendingLogId = logStore.addPendingLog("Refreshing all data...");
   try {
-    // We now expect all these to succeed, even in a REBASING state
     await Promise.all([
       statusStore.fetchStatus(),
       historyStore.fetchGitLog(),

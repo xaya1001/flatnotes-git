@@ -1,4 +1,3 @@
-<!-- client/git-integration/components/tabs/ConflictView.vue -->
 <template>
   <div class="flex h-full flex-col">
     <!-- Header -->
@@ -75,6 +74,7 @@
         <button
           @click="handleAbort"
           :disabled="actionsStore.isActionLoading"
+          :title="abortButtonTitle"
           class="rounded bg-theme-danger p-2 font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {{ abortButtonText }}
@@ -155,6 +155,7 @@ const isContinueDisabled = computed(() => {
 });
 
 const continueButtonTitle = computed(() => {
+  if (actionsStore.isActionLoading) return "Action in progress...";
   const state = statusStore.repositoryState;
   if (state !== "REBASING_CONTINUE" && state !== "MERGING") {
     return "You must resolve all conflicts and stage the files before continuing.";
@@ -163,6 +164,11 @@ const continueButtonTitle = computed(() => {
     return "You must stage all remaining changes before continuing.";
   }
   return `Continue the ${conflictType.value.toLowerCase()} operation`;
+});
+
+const abortButtonTitle = computed(() => {
+  if (actionsStore.isActionLoading) return "Action in progress...";
+  return `Abort the ${conflictType.value.toLowerCase()} and restore previous state`;
 });
 
 // --- Action Handlers ---

@@ -29,13 +29,12 @@ router = APIRouter()
 git_integration_router = None
 if global_config.flatnotes_git_enabled:
     try:
-        from git_integration import config as git_config
-        from git_integration.git_manager import GitManager, GitManagerError
-        from git_integration.log_handler import LogLevel, add_git_log
-        from git_integration.router import (
+        from git_integration import git_config as git_config
+        from git_integration.git_logger import LogLevel, add_git_log
+        from git_integration.git_router import (
             get_git_manager,
         )
-        from git_integration.router import router as git_integration_router
+        from git_integration.git_router import router as git_integration_router
     except ImportError as e:
         logger.error(f"FLATNOTES_GIT_ENABLED is true, but a module failed to load: {e}")
 
@@ -47,8 +46,6 @@ async def lifespan(app: FastAPI):
 
     if git_integration_router:
         try:
-            manager = get_git_manager()
-
             if global_config.flatnotes_git_auto_sync_interval > 0:
                 logger.info(
                     f"Initializing scheduled auto-sync for every {global_config.flatnotes_git_auto_sync_interval} minutes."
@@ -171,9 +168,7 @@ if global_config.auth_type not in [AuthType.NONE, AuthType.READ_ONLY]:
         try:
             return auth.login(data)
         except ValueError:
-            raise HTTPException(
-                status_code=401, detail=api_messages.login_failed
-            )
+            raise HTTPException(status_code=401, detail=api_messages.login_failed)
 
 
 # endregion
@@ -191,9 +186,7 @@ def get_note(title: str):
     try:
         return note_storage.get(title)
     except ValueError:
-        raise HTTPException(
-            status_code=400, detail=api_messages.invalid_note_title
-        )
+        raise HTTPException(status_code=400, detail=api_messages.invalid_note_title)
     except FileNotFoundError:
         raise HTTPException(404, api_messages.note_not_found)
 
@@ -216,9 +209,7 @@ if global_config.auth_type != AuthType.READ_ONLY:
                 detail=api_messages.invalid_note_title,
             )
         except FileExistsError:
-            raise HTTPException(
-                status_code=409, detail=api_messages.note_exists
-            )
+            raise HTTPException(status_code=409, detail=api_messages.note_exists)
 
     # Update Note
     @router.patch(
@@ -235,9 +226,7 @@ if global_config.auth_type != AuthType.READ_ONLY:
                 detail=api_messages.invalid_note_title,
             )
         except FileExistsError:
-            raise HTTPException(
-                status_code=409, detail=api_messages.note_exists
-            )
+            raise HTTPException(status_code=409, detail=api_messages.note_exists)
         except FileNotFoundError:
             raise HTTPException(404, api_messages.note_not_found)
 
@@ -338,9 +327,7 @@ def get_attachment(filename: str):
             detail=api_messages.invalid_attachment_filename,
         )
     except FileNotFoundError:
-        raise HTTPException(
-            status_code=404, detail=api_messages.attachment_not_found
-        )
+        raise HTTPException(status_code=404, detail=api_messages.attachment_not_found)
 
 
 if global_config.auth_type != AuthType.READ_ONLY:
