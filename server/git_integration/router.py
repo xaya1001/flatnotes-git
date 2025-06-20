@@ -45,6 +45,7 @@ def get_git_manager() -> GitManager:
             repo_path=git_config.GIT_REPO_PATH,
             default_branch=git_config.GIT_DEFAULT_BRANCH,
             default_remote=git_config.GIT_REMOTE_NAME,
+            pull_strategy=git_config.GIT_PULL_STRATEGY,
             user_name=git_config.GIT_COMMIT_USER_NAME,
             user_email=git_config.GIT_COMMIT_USER_EMAIL,
         )
@@ -64,13 +65,14 @@ router = APIRouter(dependencies=common_deps)
 def handle_git_exception(e: Exception, action: str, manager: GitManager):
     """Centralized exception handler for Git operations."""
     if isinstance(e, MergeConflictError):
+        repo_state = manager.get_repository_state()
         add_git_log(LogLevel.ERROR, f"Failed: {action} - Merge Conflict", str(e))
         conflicted_files = manager.get_conflicted_files()
         raise HTTPException(
             status_code=409,
             detail={
-                "message": f"A merge conflict occurred during the '{action}' operation. Please resolve it.",
-                "state": "REBASE_CONFLICT",
+                "message": f"A conflict occurred during the '{action}' operation. Please resolve it.",
+                "state": repo_state,  # e.g., REBASING_CONFLICT or MERGING_CONFLICT
                 "conflicted_files": conflicted_files,
             },
         )
@@ -201,24 +203,14 @@ def pull_git_changes(
 ):
     try:
         result = manager.pull_remote_changes(
-            remote_name=params.remote,
-            branch=params.branch,
-            rebase=params.rebase,
+            remote_name=params.remote, branch=params.branch
         )
         message = "Pull operation completed."
 
-        log_details = result.get("message", "").strip()
-        changed_files = result.get("changed_files", [])
-        if changed_files:
-            file_list_str = "\n".join(
-                f"  - {file['change_type']}: {file['path']}" for file in changed_files
-            )
-            log_details += f"\n\nUpdated files ({len(changed_files)}):\n{file_list_str}"
+        log_details = result.get("stdout", "").strip()
 
         add_git_log(LogLevel.SUCCESS, message, details=log_details)
-        return GitCommandResponse(
-            message=message, stdout=result.get("message"), details=result
-        )
+        return GitCommandResponse(message=message, stdout=log_details, details=result)
     except Exception as e:
         handle_git_exception(e, "Pull", manager)
 
@@ -259,28 +251,7 @@ def sync_workspace(
 
         results = manager.sync_workspace(commit_message=commit_message)
         message = "Workspace synchronized successfully."
-
-        # This logging logic can be improved, but is fine for now
-        commit_info = results.get("commit", {})
-        pull_info = results.get("pull", {})
-        push_info = results.get("push", {})
-
-        log_details_parts = []
-        if commit_info.get("hash") != "no_changes":
-            log_details_parts.append(f"Commit: {commit_info.get('hash', 'N/A')}")
-        else:
-            log_details_parts.append("Commit: No changes to commit.")
-
-        if pull_info.get("changed_files"):
-            log_details_parts.append(
-                f"Pull: {len(pull_info['changed_files'])} file(s) updated."
-            )
-        else:
-            log_details_parts.append(f"Pull: No new changes from remote.")
-
-        log_details_parts.append(f"Push: {push_info.get('message', 'N/A').strip()}")
-
-        add_git_log(LogLevel.SUCCESS, message, details="\n".join(log_details_parts))
+        add_git_log(LogLevel.SUCCESS, message, details=str(results))
         return GitCommandResponse(message=message, details=results)
     except Exception as e:
         handle_git_exception(e, "Sync Workspace", manager)
@@ -306,12 +277,6 @@ def get_git_log(
 
 @router.get("/commits/{commit_hash}/files", response_model=List[GitFileStatusItem])
 def get_commit_files(commit_hash: str, manager: GitManager = Depends(get_git_manager)):
-    repo_state = manager.get_repository_state()
-    if repo_state != "CLEAN":
-        raise HTTPException(
-            status_code=400,
-            detail=f"Cannot fetch commit files while repository is in '{repo_state}' state.",
-        )
     try:
         raw_files = manager.get_files_in_commit(commit_hash)
         return [
@@ -345,26 +310,24 @@ def switch_to_branch(
         handle_git_exception(e, f"Switch Branch to '{request.branch_name}'", manager)
 
 
-@router.post("/rebase/continue", response_model=GitCommandResponse)
-def rebase_continue(manager: GitManager = Depends(get_git_manager)):
-    action_name = "Rebase Continue"
+@router.post("/conflict/continue", response_model=GitCommandResponse)
+def conflict_continue(manager: GitManager = Depends(get_git_manager)):
+    action_name = "Continue Operation"
     try:
-        result = manager.rebase_continue()
-        message = result.get("message", "Rebase continued successfully.")
+        result = manager.continue_conflict_resolution()
+        message = result.get("message", "Operation continued successfully.")
         add_git_log(LogLevel.SUCCESS, message, details=result.get("details"))
         return GitCommandResponse(message=message, details=result)
     except Exception as e:
         handle_git_exception(e, action_name, manager)
 
 
-@router.post("/rebase/abort", response_model=GitCommandResponse)
-def rebase_abort(manager: GitManager = Depends(get_git_manager)):
-    action_name = "Rebase Abort"
+@router.post("/conflict/abort", response_model=GitCommandResponse)
+def conflict_abort(manager: GitManager = Depends(get_git_manager)):
+    action_name = "Abort Operation"
     try:
-        output = manager.rebase_abort()
-        message = (
-            "Rebase aborted successfully. Repository is back to its previous state."
-        )
+        output = manager.abort_conflict_resolution()
+        message = "Operation aborted successfully."
         add_git_log(LogLevel.WARN, message, details=output)
         return GitCommandResponse(message=message, stdout=output)
     except Exception as e:
@@ -400,10 +363,6 @@ def set_resume_auto_sync():
 
 @router.post("/reset-to-remote", response_model=GitCommandResponse)
 def reset_to_remote(manager: GitManager = Depends(get_git_manager)):
-    """
-    Resets the current branch to its upstream/remote counterpart.
-    This is a destructive operation and will discard all local changes and unpushed commits.
-    """
     action_name = "Reset to Remote"
     try:
         result = manager.reset_to_remote()
@@ -421,9 +380,6 @@ def reset_to_remote(manager: GitManager = Depends(get_git_manager)):
 def restore_file_from_commit(
     request: GitRestoreFileRequest, manager: GitManager = Depends(get_git_manager)
 ):
-    """
-    Restores a specific file in the working directory to its state from a given commit.
-    """
     action_name = f"Restore file '{request.filepath}'"
     try:
         manager.checkout_file_from_commit(request.commit_hash, request.filepath)

@@ -1,4 +1,6 @@
 import os
+import sys
+from enum import Enum
 from threading import Lock
 
 import pygit2
@@ -7,6 +9,12 @@ from helpers import get_env
 from logger import logger
 
 logger.debug("Loading Git integration config...")
+
+
+class PullStrategy(str, Enum):
+    REBASE = "rebase"
+    MERGE = "merge"
+
 
 GIT_ENABLED: bool = get_env(
     "FLATNOTES_GIT_ENABLED", mandatory=False, default=False, cast_bool=True
@@ -47,6 +55,19 @@ GIT_AUTO_INIT: bool = get_env(
     "FLATNOTES_GIT_AUTO_INIT", mandatory=False, default=False, cast_bool=True
 )
 
+GIT_PULL_STRATEGY_STR: str = get_env(
+    "FLATNOTES_GIT_PULL_STRATEGY", mandatory=False, default="rebase"
+)
+try:
+    GIT_PULL_STRATEGY: PullStrategy = PullStrategy(GIT_PULL_STRATEGY_STR.lower())
+except ValueError:
+    logger.error(
+        f"Invalid value '{GIT_PULL_STRATEGY_STR}' for FLATNOTES_GIT_PULL_STRATEGY. "
+        "Must be one of 'rebase' or 'merge'. Defaulting to 'rebase'."
+    )
+    GIT_PULL_STRATEGY: PullStrategy = PullStrategy.REBASE
+
+
 _auto_sync_paused_lock = Lock()
 _is_auto_sync_paused: bool = False
 
@@ -75,6 +96,7 @@ def resume_auto_sync():
 
 if GIT_ENABLED:
     logger.info("Git integration is enabled.")
+    logger.info(f"Using pull strategy: {GIT_PULL_STRATEGY.value}")
     if not os.path.isdir(GIT_REPO_PATH):
         logger.error(
             f"FLATNOTES_PATH (GIT_REPO_PATH) '{GIT_REPO_PATH}' is not a valid directory. Git integration functionality may fail."
