@@ -49,21 +49,50 @@ export const useActionsStore = defineStore("git-actions", () => {
       await refreshAllStores();
       return true;
     } catch (err) {
-      const errorMessage =
-        err.response?.data?.detail?.message ||
-        err.response?.data?.detail ||
-        err.message;
-      toast.add({
-        severity: "error",
-        summary: `Error: ${actionName}`,
-        detail: errorMessage,
-        life: 5000,
-      });
-      logStore.updateLog(pendingLogId, {
-        level: "error",
-        message: `Failed: ${actionName}`,
-        details: errorMessage,
-      });
+      const errorData = err.response?.data?.detail;
+      // Special handling for 409 errors
+      if (err.response?.status === 409 && errorData?.state) {
+        if (errorData.state === "PUSH_REJECTED_NON_FAST_FORWARD") {
+          logStore.updateLog(pendingLogId, {
+            level: "warn",
+            message: `Failed: ${actionName} - Push Rejected`,
+            details: errorData.message,
+          });
+          toast.add({
+            severity: "warn",
+            summary: "Push Rejected",
+            detail: "The remote has changes you need to pull first.",
+            life: 6000,
+          });
+        } else {
+          // Generic 409 handler for other conflicts
+          logStore.updateLog(pendingLogId, {
+            level: "error",
+            message: `Failed: ${actionName} - Conflict`,
+            details: errorData.message || "An unknown conflict occurred.",
+          });
+          toast.add({
+            severity: "error",
+            summary: `Conflict: ${actionName}`,
+            detail: errorData.message || "An unknown conflict occurred.",
+            life: 5000,
+          });
+        }
+      } else {
+        // Generic error handler for non-409 errors
+        const errorMessage = errorData?.message || errorData || err.message;
+        toast.add({
+          severity: "error",
+          summary: `Error: ${actionName}`,
+          detail: errorMessage,
+          life: 5000,
+        });
+        logStore.updateLog(pendingLogId, {
+          level: "error",
+          message: `Failed: ${actionName}`,
+          details: errorMessage,
+        });
+      }
       await refreshAllStores(); // Refresh even on failure to show the resulting state
       return false;
     } finally {
@@ -94,22 +123,45 @@ export const useActionsStore = defineStore("git-actions", () => {
       await refreshAllStores();
     } catch (err) {
       const errorData = err.response?.data?.detail;
-      // ** THE FIX IS HERE **
-      // Check for a 409 conflict and immediately act on the error data.
-      if (
-        err.response?.status === 409 &&
-        errorData?.state?.includes("CONFLICT")
-      ) {
-        logStore.updateLog(pendingLogId, {
-          level: "warn",
-          message: `Sync failed: ${errorData.state}.`,
-          details: errorData.message,
-        });
-        // 1. Enter conflict mode IMMEDIATELY. This updates the UI instantly.
-        conflictStore.enterConflictMode(errorData);
-        // 2. We can still refresh the status in the background to ensure all other details are up-to-date,
-        // but we DON'T await it. The crucial UI change has already happened.
-        statusStore.fetchStatus();
+      // Check for a 409 conflict and dispatch to the correct handler.
+      if (err.response?.status === 409 && errorData?.state) {
+        if (errorData.state.includes("CONFLICT")) {
+          logStore.updateLog(pendingLogId, {
+            level: "warn",
+            message: `Sync failed: ${errorData.state}.`,
+            details: errorData.message,
+          });
+          conflictStore.enterConflictMode(errorData);
+          statusStore.fetchStatus();
+        } else if (errorData.state === "PUSH_REJECTED_NON_FAST_FORWARD") {
+          logStore.updateLog(pendingLogId, {
+            level: "warn",
+            message: "Sync partially failed: Push rejected.",
+            details: errorData.message,
+          });
+          toast.add({
+            severity: "warn",
+            summary: "Push Rejected",
+            detail: "The remote has changes you need to pull first.",
+            life: 6000,
+          });
+          await refreshAllStores(); // Refresh to show the new ahead/behind state
+        } else {
+          // Handle other potential 409 errors if they arise
+          const errorMessage = errorData?.message || errorData || err.message;
+          toast.add({
+            severity: "error",
+            summary: "Sync Error",
+            detail: errorMessage,
+            life: 5000,
+          });
+          logStore.updateLog(pendingLogId, {
+            level: "error",
+            message: "Sync failed with unknown 409 error.",
+            details: errorMessage,
+          });
+          await refreshAllStores();
+        }
       } else {
         const errorMessage = errorData?.message || errorData || err.message;
         toast.add({

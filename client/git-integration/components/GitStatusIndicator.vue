@@ -17,37 +17,64 @@
       />
     </div>
 
-    <!-- Status Content -->
+    <!-- Status Content (No more loading spinner here) -->
     <div
       v-if="!panelUiStore.isSidebarVisible"
-      class="flex items-center space-x-2"
+      class="flex items-center space-x-3"
       :title="statusStore.tooltipText"
     >
-      <div v-if="statusStore.summaryError" class="flex items-center space-x-2">
-        <SvgIcon
-          type="mdi"
-          :path="mdilAlert"
-          :size="20"
-          class="h-5 w-5 text-theme-danger"
-        />
-        <span class="text-sm font-semibold text-theme-danger">Error</span>
-      </div>
-      <div
-        v-else-if="statusStore.isLoadingSummary"
-        class="h-5 w-5 animate-spin text-theme-text-muted"
-        role="status"
-      >
-        <SvgIcon type="mdi" :path="mdilRefresh" :size="20" />
-      </div>
-      <div v-else class="flex items-center space-x-2 text-theme-text">
+      <!-- Base Info: Branch Icon and Name (Always Visible) -->
+      <div class="flex items-center space-x-2 text-theme-text">
         <SvgIcon type="mdi" :path="mdilSitemap" :size="20" class="h-5 w-5" />
         <span class="text-sm font-semibold">{{ statusStore.branchName }}</span>
-        <span
-          v-if="statusStore.filesChangedCount > 0"
-          class="rounded-full bg-theme-brand px-2 py-0.5 text-xs font-bold text-white"
+      </div>
+
+      <!-- Dynamic Status Indicators -->
+      <div class="flex items-center text-sm font-semibold">
+        <!-- Error State -->
+        <div
+          v-if="statusStore.summaryError"
+          class="flex items-center space-x-1 text-theme-danger"
         >
-          {{ statusStore.filesChangedCount }}
-        </span>
+          <SvgIcon type="mdi" :path="mdilAlert" :size="20" />
+          <span>Error</span>
+        </div>
+
+        <!-- Conflict State -->
+        <div
+          v-else-if="statusStore.repositoryState.includes('CONFLICT')"
+          class="flex items-center space-x-1 text-theme-danger"
+        >
+          <SvgIcon type="mdi" :path="mdilAlertOctagon" :size="20" />
+          <span>Conflict</span>
+        </div>
+
+        <!-- Behind State (Needs Pull) -->
+        <div
+          v-else-if="statusStore.commitsBehind > 0"
+          class="flex items-center space-x-1 text-theme-text"
+        >
+          <SvgIcon type="mdi" :path="mdilArrowDown" :size="20" />
+          <span>{{ statusStore.commitsBehind }}</span>
+        </div>
+
+        <!-- Ahead State (Needs Push) -->
+        <div
+          v-else-if="statusStore.commitsAhead > 0"
+          class="flex items-center space-x-1 text-theme-text"
+        >
+          <SvgIcon type="mdi" :path="mdilArrowUp" :size="20" />
+          <span>{{ statusStore.commitsAhead }}</span>
+        </div>
+
+        <!-- Changed State -->
+        <div v-else-if="statusStore.filesChangedCount > 0">
+          <span
+            class="rounded-full bg-theme-brand px-2 py-0.5 text-xs font-bold text-white"
+          >
+            {{ statusStore.filesChangedCount }}
+          </span>
+        </div>
       </div>
     </div>
   </div>
@@ -60,10 +87,12 @@ import { usePanelUiStore } from "../stores/panelUiStore";
 import SvgIcon from "@jamescoyle/vue-icon";
 import {
   mdilSitemap,
-  mdilRefresh,
   mdilAlert,
   mdilChevronLeft,
   mdilChevronRight,
+  mdilArrowDown,
+  mdilArrowUp,
+  mdilAlertOctagon,
 } from "@mdi/light-js";
 
 defineEmits(["toggle-sidebar"]);
