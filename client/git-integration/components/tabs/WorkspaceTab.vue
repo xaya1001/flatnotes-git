@@ -1,3 +1,4 @@
+<!-- client/git-integration/components/tabs/WorkspaceTab.vue -->
 <template>
   <div class="flex h-full flex-col">
     <!-- Main Content Area (Scrollable) -->
@@ -64,6 +65,40 @@
           >
             Commit & Sync
           </button>
+        </div>
+      </div>
+
+      <!-- NEW: .gitignore Helper Message -->
+      <div
+        v-if="showGitignoreHelper"
+        class="mx-2 mb-4 rounded-md border border-blue-500/30 bg-blue-500/10 p-3 text-sm"
+      >
+        <div class="flex items-start">
+          <SvgIcon
+            type="mdi"
+            :path="mdiInformationOutline"
+            :size="20"
+            class="mr-2 mt-0.5 flex-shrink-0 text-blue-400"
+          />
+          <div>
+            <h4 class="font-semibold text-theme-text">
+              A .gitignore file is present
+            </h4>
+            <p class="mt-1 text-xs text-theme-text-muted">
+              This file tells Git to ignore certain files, like the app's cache.
+              It was automatically created to ensure a clean repository.
+            </p>
+            <p class="mt-2 text-xs text-theme-text-muted">
+              It's recommended to
+              <a
+                href="#"
+                @click.prevent="stageAndPrefillCommit"
+                class="font-semibold text-theme-brand hover:underline"
+                >stage and commit this file</a
+              >
+              to keep your workspace clean.
+            </p>
+          </div>
         </div>
       </div>
 
@@ -273,7 +308,11 @@ import {
   mdilArrowUp,
   mdilArrowDown,
 } from "@mdi/light-js";
-import { mdiCheck, mdiAlertCircleOutline } from "@mdi/js";
+import {
+  mdiCheck,
+  mdiAlertCircleOutline,
+  mdiInformationOutline,
+} from "@mdi/js";
 
 const statusStore = useStatusStore();
 const actionsStore = useActionsStore();
@@ -281,6 +320,22 @@ const actionsStore = useActionsStore();
 const isBranchMenuVisible = ref(false);
 const branchData = ref({ branches: [], current_branch: "" });
 const upstreamWarningPanel = ref();
+
+// --- .gitignore Helper ---
+const gitignoreFile = computed(() => {
+  return statusStore.gitStatus.files.find((f) => f.path === ".gitignore");
+});
+
+const showGitignoreHelper = computed(() => {
+  return gitignoreFile.value && gitignoreFile.value.work_tree_status !== " ";
+});
+
+function stageAndPrefillCommit() {
+  actionsStore.handleStageFile(".gitignore");
+  if (!statusStore.commitMessage) {
+    statusStore.commitMessage = "chore: Initialize .gitignore";
+  }
+}
 
 // --- Computed Properties for Button States & Titles ---
 
