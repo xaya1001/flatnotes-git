@@ -2,14 +2,20 @@
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response
 
 from auth.base import BaseAuth
 from global_config import GlobalConfig
 from logger import logger
 
 from . import git_config as git_config
-from .git_logger import LogEntry, LogLevel, add_git_log, get_all_logs
+from .git_logger import (
+    LogEntry,
+    LogLevel,
+    add_git_log,
+    clear_all_logs,
+    get_all_logs,
+)
 from .git_manager import (
     BranchNotFoundError,
     GitManager,
@@ -90,7 +96,10 @@ def handle_git_exception(e: Exception, action: str, manager: GitManager):
         )
     if isinstance(e, (ValueError, NoChangesError)):
         add_git_log(
-            LogLevel.WARN, f"Skipped: {action} - No Changes or Bad Request", str(e)
+            LogLevel.WARN,
+            f"Skipped: {action}",
+            str(e),
+            persist=False,
         )
         raise HTTPException(status_code=400, detail=str(e))
     if isinstance(e, (RemoteNotFoundError, BranchNotFoundError)):
@@ -124,7 +133,7 @@ def add_all_git_changes(manager: GitManager = Depends(get_git_manager)):
     try:
         manager.add_all()
         message = "All changes staged."
-        add_git_log(LogLevel.SUCCESS, message)
+        add_git_log(LogLevel.INFO, message, persist=False)
         return GitCommandResponse(message=message)
     except Exception as e:
         handle_git_exception(e, "Stage All", manager)
@@ -135,7 +144,7 @@ def unstage_all_git_changes(manager: GitManager = Depends(get_git_manager)):
     try:
         manager.unstage_all()
         message = "All staged changes have been unstaged."
-        add_git_log(LogLevel.SUCCESS, message)
+        add_git_log(LogLevel.INFO, message, persist=False)
         return GitCommandResponse(message=message)
     except Exception as e:
         handle_git_exception(e, "Unstage All", manager)
@@ -148,7 +157,7 @@ def stage_file(
     try:
         manager.add_file(request.filepath)
         message = f"File '{request.filepath}' staged."
-        add_git_log(LogLevel.SUCCESS, message)
+        add_git_log(LogLevel.INFO, message, persist=False)
         return GitCommandResponse(message=message)
     except Exception as e:
         handle_git_exception(e, f"Stage File '{request.filepath}'", manager)
@@ -161,7 +170,7 @@ def unstage_file(
     try:
         manager.unstage_file(request.filepath)
         message = f"File '{request.filepath}' unstaged."
-        add_git_log(LogLevel.SUCCESS, message)
+        add_git_log(LogLevel.INFO, message, persist=False)
         return GitCommandResponse(message=message)
     except Exception as e:
         handle_git_exception(e, f"Unstage File '{request.filepath}'", manager)
@@ -174,7 +183,7 @@ def discard_file(
     try:
         manager.discard_file(request.filepath)
         message = f"Changes for '{request.filepath}' discarded."
-        add_git_log(LogLevel.WARN, message)
+        add_git_log(LogLevel.WARN, message, persist=False)
         return GitCommandResponse(message=message)
     except Exception as e:
         handle_git_exception(e, f"Discard File '{request.filepath}'", manager)
@@ -197,14 +206,14 @@ def commit_git_changes(
     manager: GitManager = Depends(get_git_manager),
 ):
     try:
-        commit_hash = manager.commit(message=commit_request.message)
+        commit_result = manager.commit(message=commit_request.message)
         message = "Changes committed successfully."
         add_git_log(
             LogLevel.SUCCESS,
             message,
-            details=f'Commit: {commit_hash}\nMessage: "{commit_request.message}"',
+            details=commit_result,
         )
-        return GitCommandResponse(message=message, details={"commitHash": commit_hash})
+        return GitCommandResponse(message=message, details=commit_result)
     except Exception as e:
         handle_git_exception(e, "Commit", manager)
 
@@ -218,11 +227,8 @@ def pull_git_changes(
             remote_name=params.remote, branch=params.branch
         )
         message = "Pull operation completed."
-
-        log_details = result.get("stdout", "").strip()
-
-        add_git_log(LogLevel.SUCCESS, message, details=log_details)
-        return GitCommandResponse(message=message, stdout=log_details, details=result)
+        add_git_log(LogLevel.SUCCESS, message, details=result)
+        return GitCommandResponse(message=message, details=result)
     except Exception as e:
         handle_git_exception(e, "Pull", manager)
 
@@ -232,12 +238,12 @@ def push_git_changes(
     params: GitPushParams = Depends(), manager: GitManager = Depends(get_git_manager)
 ):
     try:
-        output = manager.push_local_changes(
+        result = manager.push_local_changes(
             remote_name=params.remote, branch=params.branch, force=params.force
         )
         message = "Push operation completed."
-        add_git_log(LogLevel.SUCCESS, message, details=output)
-        return GitCommandResponse(message=message, stdout=output)
+        add_git_log(LogLevel.SUCCESS, message, details=result)
+        return GitCommandResponse(message=message, details=result)
     except Exception as e:
         handle_git_exception(e, "Push", manager)
 
@@ -256,14 +262,15 @@ def sync_workspace(
             add_git_log(
                 LogLevel.INFO,
                 "No commit message provided, using default.",
-                details=commit_message,
+                details={"default_message": commit_message},
+                persist=False,
             )
         else:
             commit_message = commit_request.message
 
         results = manager.sync_workspace(commit_message=commit_message)
         message = "Workspace synchronized successfully."
-        add_git_log(LogLevel.SUCCESS, message, details=str(results))
+        add_git_log(LogLevel.SUCCESS, message, details=results)
         return GitCommandResponse(message=message, details=results)
     except Exception as e:
         handle_git_exception(e, "Sync Workspace", manager)
@@ -328,7 +335,7 @@ def conflict_continue(manager: GitManager = Depends(get_git_manager)):
     try:
         result = manager.continue_conflict_resolution()
         message = result.get("message", "Operation continued successfully.")
-        add_git_log(LogLevel.SUCCESS, message, details=result.get("details"))
+        add_git_log(LogLevel.SUCCESS, message, details=result)
         return GitCommandResponse(message=message, details=result)
     except Exception as e:
         handle_git_exception(e, action_name, manager)
@@ -340,7 +347,7 @@ def conflict_abort(manager: GitManager = Depends(get_git_manager)):
     try:
         output = manager.abort_conflict_resolution()
         message = "Operation aborted successfully."
-        add_git_log(LogLevel.WARN, message, details=output)
+        add_git_log(LogLevel.WARN, message, details={"raw_output": output})
         return GitCommandResponse(message=message, stdout=output)
     except Exception as e:
         handle_git_exception(e, action_name, manager)
@@ -352,6 +359,20 @@ def conflict_abort(manager: GitManager = Depends(get_git_manager)):
 @router.get("/activity-log", response_model=List[LogEntry], dependencies=auth_deps)
 def get_git_activity_log():
     return get_all_logs()
+
+
+@router.delete("/activity-log", status_code=204, dependencies=auth_deps)
+def delete_git_activity_log():
+    """Deletes all persisted git activity logs."""
+    try:
+        clear_all_logs()
+        # Per HTTP spec, a 204 response should not contain a body.
+        return Response(status_code=204)
+    except Exception as e:
+        # Avoid the generic handler so we don't add a new log entry
+        # right after clearing them.
+        logger.error(f"Failed to clear activity logs: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to clear activity logs.")
 
 
 @router.get("/auto-sync/state", response_model=dict, dependencies=auth_deps)
@@ -381,7 +402,7 @@ def reset_to_remote(manager: GitManager = Depends(get_git_manager)):
         add_git_log(
             LogLevel.WARN,
             "Local branch was hard reset to remote state.",
-            details=str(result),
+            details=result,
         )
         return GitCommandResponse(message=result.get("message"), details=result)
     except Exception as e:

@@ -44,7 +44,7 @@ export const useActionsStore = defineStore("git-actions", () => {
       logStore.updateLog(pendingLogId, {
         level: "success",
         message: successMessage,
-        details: response.stdout || response.message || null,
+        details: response.details || null,
       });
       await refreshAllStores();
       return true;
@@ -196,7 +196,7 @@ export const useActionsStore = defineStore("git-actions", () => {
       logStore.updateLog(pendingLogId, {
         level: "success",
         message: "Pull completed.",
-        details: response.stdout,
+        details: response.details,
       });
       await refreshAllStores();
     } catch (err) {
@@ -343,10 +343,13 @@ export const useActionsStore = defineStore("git-actions", () => {
         detail: successMessage,
         life: 3000,
       });
-      logStore.updateLog(pendingLogId, {
+      // Explicitly set details to null to clear the "Executing..." message.
+      const updatePayload = {
         level: "success",
         message: successMessage,
-      });
+        details: null,
+      };
+      logStore.updateLog(pendingLogId, updatePayload);
     } catch (err) {
       const errorMessage =
         err.response?.data?.detail || "Failed to update auto-sync state.";
@@ -356,11 +359,12 @@ export const useActionsStore = defineStore("git-actions", () => {
         detail: errorMessage,
         life: 3000,
       });
-      logStore.updateLog(pendingLogId, {
+      const errorPayload = {
         level: "error",
         message: `Failed: ${actionName}`,
         details: errorMessage,
-      });
+      };
+      logStore.updateLog(pendingLogId, errorPayload);
     } finally {
       isActionLoading.value = false;
     }
