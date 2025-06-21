@@ -403,6 +403,20 @@ class GitManager:
             logger.error(error_message)
             raise GitManagerError(error_message)
 
+    def _get_commit_diff(self, commit: pygit2.Commit) -> pygit2.Diff:
+        """
+        A helper method to get the diff of a commit against its parent.
+        It correctly handles the initial commit case (which has no parent).
+        """
+        parent = commit.parents[0] if commit.parents else None
+
+        if parent:
+            # If there's a parent, diff against its tree
+            return commit.tree.diff_to_tree(parent.tree)
+        else:
+            # This is the initial commit, diff against an empty tree
+            return commit.tree.diff_to_tree()
+
     def commit(self, message: Optional[str]) -> Dict[str, Any]:
         """
         Creates a commit and returns structured data about it.
@@ -447,10 +461,8 @@ class GitManager:
         if os.path.exists(merge_head_path):
             os.remove(merge_head_path)
 
-        # Get file list for the new commit
         new_commit = self.repo.get(commit_oid)
-        parent_tree = new_commit.parents[0].tree if new_commit.parents else None
-        commit_diff = self.repo.diff(parent_tree, new_commit.tree)
+        commit_diff = self._get_commit_diff(new_commit)
         files_changed = self._get_diff_files(commit_diff)
 
         return {
@@ -612,7 +624,6 @@ class GitManager:
         self,
         remote_name: Optional[str] = None,
         branch: Optional[str] = None,
-        force: bool = False,
     ) -> Dict[str, Any]:
         remote = remote_name or self.default_remote
         branch_to_push = branch or self.get_current_branch()
@@ -620,7 +631,7 @@ class GitManager:
             raise GitManagerError("Cannot push in a detached HEAD state.")
 
         ahead, _ = self.get_ahead_behind()
-        if ahead == 0 and not force:
+        if ahead == 0:
             return {"message": "Nothing to push."}
 
         commits_to_push = []
@@ -644,8 +655,6 @@ class GitManager:
                 files_changed = self._get_diff_files(diff)
 
         command = ["push", remote, branch_to_push]
-        if force:
-            command.append("--force")
 
         output = self._run_git_command(command)
         return {
@@ -695,9 +704,10 @@ class GitManager:
 
     def get_files_in_commit(self, commit_hash: str) -> List[Dict[str, str]]:
         commit = self.repo.get(commit_hash)
-        parent_tree = commit.parents[0].tree if commit.parents else None
+        if commit is None:
+            raise GitError(f"Object not found for hash '{commit_hash}'")
 
-        diff = self.repo.diff(parent_tree, commit.tree)
+        diff = self._get_commit_diff(commit)
 
         diff.find_similar()
 
@@ -714,6 +724,7 @@ class GitManager:
             return self.default_branch
         if self.repo.head_is_detached:
             return f"DETACHED ({str(self.repo.head.target)[:7]})"
+
         return self.repo.head.shorthand
 
     def fetch_and_list_branches(self) -> Dict[str, Any]:
@@ -721,6 +732,7 @@ class GitManager:
             self._run_git_command(["fetch", self.default_remote, "--prune"])
         except GitManagerError:
             pass
+
         return self.list_branches()
 
     def list_branches(self) -> Dict[str, Any]:
@@ -740,6 +752,7 @@ class GitManager:
                 branches.append(
                     {"name": branch_part, "is_active": False, "is_remote": True}
                 )
+
         branches.sort(key=lambda x: (x["is_remote"], x["name"]))
         return {"branches": branches, "current_branch": active_branch_name}
 
@@ -750,18 +763,30 @@ class GitManager:
             )
         if branch_name in self.repo.branches.local:
             self.repo.checkout(self.repo.branches.local[branch_name])
-        else:
-            remote_branch = self.repo.branches.remote[
-                f"{self.default_remote}/{branch_name}"
-            ]
+            return
+
+        try:
+            remote_branch_name = f"{self.default_remote}/{branch_name}"
+            remote_branch = self.repo.branches.remote[remote_branch_name]
+
             local_branch = self.repo.create_branch(branch_name, remote_branch.peel())
             local_branch.upstream = remote_branch
             self.repo.checkout(local_branch)
 
+        except KeyError:
+            raise BranchNotFoundError(
+                f"Branch '{branch_name}' not found locally or on remote '{self.default_remote}'."
+            )
+
     def checkout_file_from_commit(self, commit_hash: str, filepath: str):
         commit = self.repo.get(commit_hash)
+
         if not isinstance(commit, pygit2.Commit):
             raise GitError(f"Hash '{commit_hash}' is not a commit.")
+
+        if filepath not in commit.tree:
+            raise KeyError(f"File '{filepath}' not found in commit '{commit_hash}'")
+
         self.repo.checkout_tree(
             treeish=commit.tree, paths=[filepath], strategy=pygit2.GIT_CHECKOUT_FORCE
         )
@@ -771,11 +796,15 @@ class GitManager:
     ):
         if self.repo.head_is_detached:
             raise GitManagerError("Cannot reset in detached HEAD state.")
+
         local_branch_name = branch_name or self.get_current_branch()
         local_branch = self.repo.branches.local[local_branch_name]
+
         if not local_branch.upstream:
             raise GitManagerError("Branch has no upstream to reset to.")
+
         self._run_git_command(["fetch", remote_name or self.default_remote])
         upstream_commit = self.repo.lookup_reference(local_branch.upstream.name).peel()
         self.repo.reset(upstream_commit.id, pygit2.GIT_RESET_HARD)
+
         return {"message": f"Reset branch '{local_branch_name}' to remote state."}
