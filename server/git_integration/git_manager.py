@@ -624,7 +624,6 @@ class GitManager:
         self,
         remote_name: Optional[str] = None,
         branch: Optional[str] = None,
-        force: bool = False,
     ) -> Dict[str, Any]:
         remote = remote_name or self.default_remote
         branch_to_push = branch or self.get_current_branch()
@@ -632,7 +631,7 @@ class GitManager:
             raise GitManagerError("Cannot push in a detached HEAD state.")
 
         ahead, _ = self.get_ahead_behind()
-        if ahead == 0 and not force:
+        if ahead == 0:
             return {"message": "Nothing to push."}
 
         commits_to_push = []
@@ -705,6 +704,9 @@ class GitManager:
 
     def get_files_in_commit(self, commit_hash: str) -> List[Dict[str, str]]:
         commit = self.repo.get(commit_hash)
+        if commit is None:
+            raise GitError(f"Object not found for hash '{commit_hash}'")
+
         diff = self._get_commit_diff(commit)
 
         diff.find_similar()
@@ -781,6 +783,9 @@ class GitManager:
 
         if not isinstance(commit, pygit2.Commit):
             raise GitError(f"Hash '{commit_hash}' is not a commit.")
+
+        if filepath not in commit.tree:
+            raise KeyError(f"File '{filepath}' not found in commit '{commit_hash}'")
 
         self.repo.checkout_tree(
             treeish=commit.tree, paths=[filepath], strategy=pygit2.GIT_CHECKOUT_FORCE

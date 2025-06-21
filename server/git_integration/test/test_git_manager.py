@@ -21,7 +21,6 @@ from ..git_manager import (
 def manager_and_path(tmp_path):
     repo_path = tmp_path / "test_repo"
     repo_path.mkdir()
-
     subprocess.run(["git", "init"], cwd=repo_path, check=True)
     subprocess.run(
         ["git", "config", "user.name", "Test User"], cwd=repo_path, check=True
@@ -29,14 +28,12 @@ def manager_and_path(tmp_path):
     subprocess.run(
         ["git", "config", "user.email", "test@example.com"], cwd=repo_path, check=True
     )
-
     subprocess.run(
         ["git", "commit", "--allow-empty", "-m", "Initial empty commit"],
         cwd=repo_path,
         check=True,
     )
     subprocess.run(["git", "branch", "-M", "main"], cwd=repo_path, check=True)
-
     manager = GitManager(
         repo_path=str(repo_path),
         default_branch="main",
@@ -52,12 +49,10 @@ def manager_and_path(tmp_path):
 def repo_with_remote(tmp_path):
     local_repo_path = tmp_path / "local_repo"
     remote_repo_path = tmp_path / "remote_repo.git"
-
     subprocess.run(["git", "init", "--bare", str(remote_repo_path)], check=True)
     subprocess.run(
         ["git", "clone", str(remote_repo_path), str(local_repo_path)], check=True
     )
-
     local_path_str = str(local_repo_path)
     subprocess.run(
         ["git", "config", "user.name", "Test User"], cwd=local_path_str, check=True
@@ -67,7 +62,6 @@ def repo_with_remote(tmp_path):
         cwd=local_path_str,
         check=True,
     )
-
     subprocess.run(["git", "checkout", "-b", "main"], cwd=local_path_str, check=True)
     with open(os.path.join(local_path_str, "README.md"), "w") as f:
         f.write("# Test Repository\n")
@@ -78,7 +72,6 @@ def repo_with_remote(tmp_path):
     subprocess.run(
         ["git", "push", "-u", "origin", "main"], cwd=local_path_str, check=True
     )
-
     manager = GitManager(
         repo_path=local_path_str,
         default_branch="main",
@@ -123,9 +116,7 @@ class TestCommit:
         with open(os.path.join(repo_path, "note.md"), "w") as f:
             f.write("# A new note")
         manager.add_all()
-
         commit_details = manager.commit("feat: Add note and gitignore")
-
         assert "hash" in commit_details
         paths_in_commit = {f["path"] for f in commit_details["files_changed"]}
         assert paths_in_commit == {".gitignore", "note.md"}
@@ -167,6 +158,20 @@ class TestFileOperations:
         manager.discard_file("untracked.md")
         assert not os.path.exists(file_path)
 
+    def test_discard_file_resets_tracked_file(self, manager_and_path):
+        manager, repo_path = manager_and_path
+        file_path = "tracked_file.md"
+        full_path = os.path.join(repo_path, file_path)
+        with open(full_path, "w") as f:
+            f.write("initial content")
+        run_git(repo_path, ["add", file_path])
+        run_git(repo_path, ["commit", "-m", "add tracked file"])
+        with open(full_path, "w") as f:
+            f.write("modified content")
+        manager.discard_file(file_path)
+        with open(full_path, "r") as f:
+            assert f.read() == "initial content"
+
     def test_discard_all_cleans_workspace(self, manager_and_path):
         manager, repo_path = manager_and_path
         run_git(repo_path, ["add", ".gitignore"])
@@ -199,6 +204,12 @@ class TestFileOperations:
         manager, _ = manager_and_path
         with pytest.raises(GitError):
             manager.checkout_file_from_commit("a" * 40, "anyfile.txt")
+
+    def test_checkout_nonexistent_file_raises_error(self, manager_and_path):
+        manager, repo_path = manager_and_path
+        commit_hash = run_git(repo_path, ["rev-parse", "HEAD"])
+        with pytest.raises(KeyError):
+            manager.checkout_file_from_commit(commit_hash, "nonexistent_file.txt")
 
 
 class TestRepositoryState:
@@ -287,6 +298,44 @@ class TestRepositoryState:
         assert manager.get_repository_state() == "CLEAN"
         log_output = run_git(repo_path, ["log", "-1", "--pretty=%s"])
         assert "Merge branch 'other'" in log_output
+
+    def test_abort_conflict_resolution_aborts_rebase(self, manager_and_path):
+        manager, repo_path = manager_and_path
+        self._setup_conflict_scenario(repo_path)
+        run_git(repo_path, ["checkout", "other"])
+        try:
+            subprocess.run(
+                ["git", "rebase", "main"],
+                cwd=repo_path,
+                check=True,
+                capture_output=True,
+            )
+        except subprocess.CalledProcessError:
+            pass
+        manager.abort_conflict_resolution()
+        assert manager.get_repository_state() == "CLEAN"
+        log_output = run_git(repo_path, ["log", "-1", "--pretty=%s"])
+        assert log_output == "Initial commit"
+
+    def test_continue_conflict_resolution_completes_rebase(self, manager_and_path):
+        manager, repo_path = manager_and_path
+        self._setup_conflict_scenario(repo_path)
+        run_git(repo_path, ["checkout", "other"])
+        try:
+            subprocess.run(
+                ["git", "rebase", "main"],
+                cwd=repo_path,
+                check=True,
+                capture_output=True,
+            )
+        except subprocess.CalledProcessError:
+            pass
+        with open(os.path.join(repo_path, "file.txt"), "w") as f:
+            f.write("resolved version\n")
+        run_git(repo_path, ["add", "file.txt"])
+        result = manager.continue_conflict_resolution()
+        assert "Rebase finished" in result["message"]
+        assert manager.get_repository_state() == "CLEAN"
 
     def test_continue_resolution_in_clean_state_raises_error(self, manager_and_path):
         manager, _ = manager_and_path
@@ -385,6 +434,34 @@ class TestRemoteOperations:
         local_log = run_git(local_path, ["log", "-1", "--pretty=%s"])
         assert "Merge branch 'main' of" in local_log
 
+    def test_pull_with_rebase_strategy_rebases_commits(self, repo_with_remote):
+        manager, local_path, remote_path = (
+            repo_with_remote  # This manager uses rebase strategy
+        )
+        temp_clone_path = os.path.join(
+            os.path.dirname(remote_path), "temp_clone_rebase"
+        )
+        run_git(
+            os.path.dirname(remote_path),
+            ["clone", "-b", "main", remote_path, temp_clone_path],
+        )
+        run_git(temp_clone_path, ["config", "user.name", "Remote Actor"])
+        run_git(temp_clone_path, ["config", "user.email", "remote@example.com"])
+        with open(os.path.join(temp_clone_path, "remote_file.txt"), "w") as f:
+            f.write("r")
+        run_git(temp_clone_path, ["add", "."])
+        run_git(temp_clone_path, ["commit", "-m", "Remote change"])
+        run_git(temp_clone_path, ["push", "origin", "main"])
+        with open(os.path.join(local_path, "local_file.txt"), "w") as f:
+            f.write("l")
+        run_git(local_path, ["add", "."])
+        run_git(local_path, ["commit", "-m", "Local change"])
+        manager.pull_remote_changes()
+        local_log = run_git(local_path, ["log", "--oneline", "-n", "2"])
+        assert "Local change" in local_log
+        assert "Remote change" in local_log
+        assert local_log.find("Local change") < local_log.find("Remote change")
+
     def test_push_non_fast_forward_raises_push_rejected_error(self, repo_with_remote):
         manager, local_path, remote_path = repo_with_remote
         with open(os.path.join(local_path, "local_file.txt"), "w") as f:
@@ -447,6 +524,12 @@ class TestReadOnlyOperations:
         assert len(files) == 1
         assert files[0]["path"] == ".gitignore"
 
+    def test_get_files_in_commit_with_invalid_hash(self, manager_and_path):
+        manager, _ = manager_and_path
+        invalid_hash = "a" * 40
+        with pytest.raises(GitError):
+            manager.get_files_in_commit(invalid_hash)
+
     def test_list_branches_returns_local_and_remote(self, repo_with_remote):
         manager, local_path, remote_path = repo_with_remote
         run_git(local_path, ["checkout", "-b", "local-feature"])
@@ -474,5 +557,7 @@ class TestReadOnlyOperations:
 
     def test_switch_to_non_existent_branch_raises_error(self, manager_and_path):
         manager, _ = manager_and_path
-        with pytest.raises(GitManagerError):
+        from ..git_manager import BranchNotFoundError
+
+        with pytest.raises(BranchNotFoundError):
             manager.switch_branch("non-existent-branch")
