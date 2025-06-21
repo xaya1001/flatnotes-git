@@ -392,12 +392,15 @@ const isPullDisabled = computed(
   () =>
     isActionInProgress.value ||
     isNotTracking.value ||
-    statusStore.commitsBehind === 0,
+    statusStore.commitsBehind === 0 ||
+    hasUncommittedChanges.value,
 );
 const pullButtonTitle = computed(() => {
   if (isActionInProgress.value) return "Action in progress...";
   if (isNotTracking.value)
     return "Current branch is not tracking a remote branch.";
+  if (hasUncommittedChanges.value)
+    return "Commit or discard your local changes before pulling.";
   if (statusStore.commitsBehind === 0) return "No incoming changes to pull.";
   return `Pull ${statusStore.commitsBehind} commits from remote`;
 });
