@@ -5,6 +5,8 @@
   "description": "A database-less note taking web app that utilises a flat folder of markdown files for storage.",
   "main": "client/index.html",
   "scripts": {
+    "git-test": "pipenv run pytest",
+    "prepare": "husky",
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "vite build",
     "watch": "vite build --watch",
@@ -30,6 +32,8 @@
   "devDependencies": {
     "@vitejs/plugin-vue": "5.2.3",
     "autoprefixer": "10.4.21",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.1.2",
     "postcss": "8.5.3",
     "prettier": "3.5.3",
     "prettier-plugin-tailwindcss": "0.6.11",
@@ -44,7 +48,8 @@
     "*.{json,html,css,scss,md}": "prettier --write",
     "*.py": [
       "pipenv run isort",
-      "pipenv run black"
+      "pipenv run black",
+      "pipenv run flake8"
     ]
   }
 }
