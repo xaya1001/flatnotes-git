@@ -253,41 +253,58 @@ class GitManager:
         if self.repo.head_is_detached or branch_to_pull.startswith("DETACHED"):
             raise GitManagerError("Cannot pull in a detached HEAD state.")
 
+        old_head_oid = self.repo.head.target
+
         command = ["pull", remote, branch_to_pull]
         if self.pull_strategy == PullStrategy.REBASE:
             command.append("--rebase")
 
         output = self._run_git_command(command)
-        return {"message": "Pull successful.", "stdout": output}
+        new_head_oid = self.repo.head.target
+
+        # Generate rich details about the pull
+        commits_received = 0
+        files_updated = []
+        if old_head_oid != new_head_oid:
+            # Count new commits
+            for commit in self.repo.walk(new_head_oid, SortMode.TOPOLOGICAL):
+                if commit.id == old_head_oid:
+                    break
+                commits_received += 1
+
+            # Get list of changed files
+            diff = self.repo.diff(
+                self.repo.get(old_head_oid), self.repo.get(new_head_oid)
+            )
+            files_updated = self._get_diff_files(diff)
+
+        return {
+            "message": "Pull successful.",
+            "stdout": output,
+            "commits_received": commits_received,
+            "files_updated": files_updated,
+        }
 
     def sync_workspace(
         self, commit_message: str, remote_name: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Performs the full "Commit & Sync" operation: add, commit, pull, push.
+        Returns a dictionary with structured results of each step.
         """
         results = {}
-        # The responsibility for checking for changes is now entirely within the commit() method.
-        # This simplifies the logic here.
         if self.repo.status():
             self.add_all()
             try:
-                commit_hash = self.commit(message=commit_message)
-                results["commit"] = {
-                    "hash": commit_hash,
-                    "message": "Changes committed.",
-                }
+                results["commit"] = self.commit(message=commit_message)
             except NoChangesError:
-                results["commit"] = {
-                    "hash": "no_changes",
-                    "message": "No changes to commit.",
-                }
+                results["commit"] = {"message": "No changes to commit."}
         else:
-            results["commit"] = {"hash": "no_changes", "message": "No local changes."}
+            results["commit"] = {"message": "No local changes."}
 
         # The pull operation is the one that can raise MergeConflictError
         results["pull"] = self.pull_remote_changes(remote_name=remote_name)
-        results["push"] = {"message": self.push_local_changes(remote_name=remote_name)}
+        results["push"] = self.push_local_changes(remote_name=remote_name)
         return results
 
     def continue_conflict_resolution(self) -> Dict[str, Any]:
@@ -304,11 +321,12 @@ class GitManager:
         elif state == "MERGING":
             # This is a merge. The "continue" action is to make a commit.
             # We will use the default merge message prepared by Git.
-            commit_hash = self.commit(message=None)  # Let pygit2 use MERGE_MSG
-            push_output = self.push_local_changes()
+            commit_result = self.commit(message=None)  # Let pygit2 use MERGE_MSG
+            push_result = self.push_local_changes()
             return {
                 "message": "Merge finalized and pushed successfully.",
-                "details": f"Merge Commit: {commit_hash}\nPush: {push_output}",
+                "commit": commit_result,
+                "push": push_result,
             }
         else:
             raise GitManagerError(
@@ -385,10 +403,11 @@ class GitManager:
             logger.error(error_message)
             raise GitManagerError(error_message)
 
-    def commit(self, message: Optional[str]) -> str:
+    def commit(self, message: Optional[str]) -> Dict[str, Any]:
         """
-        Creates a commit. If message is None, it attempts to use a default
-        message from .git/MERGE_MSG for merge commits.
+        Creates a commit and returns structured data about it.
+        If message is None, it attempts to use a default message
+        from .git/MERGE_MSG for merge commits.
         """
         if message is None:
             # This is for finalizing a merge commit
@@ -402,18 +421,13 @@ class GitManager:
             raise ValueError("Commit message cannot be empty.")
 
         try:
-            # This works for all subsequent commits after the first one.
             head_tree = self.repo.head.peel().tree
             diff = self.repo.index.diff_to_tree(head_tree)
-            # An empty diff object evaluates to False. This is the correct way to check.
             if not diff:
                 raise NoChangesError("No changes staged for commit.")
         except GitError:
-            # This handles the "unborn head" case (the very first commit).
-            # If there's no HEAD, we simply check if the index is empty.
             if len(self.repo.index) == 0:
                 raise NoChangesError("No changes staged for commit.")
-        # --- END OF CORRECTION ---
 
         tree = self.repo.index.write_tree()
         parents = [] if self.repo.head_is_unborn else [self.repo.head.target]
@@ -422,7 +436,6 @@ class GitManager:
         if os.path.exists(merge_head_path):
             with open(merge_head_path) as f:
                 merge_parent_oid = pygit2.Oid(hex=f.read().strip())
-                # Avoid adding the same parent twice
                 if merge_parent_oid not in parents:
                     parents.append(merge_parent_oid)
 
@@ -434,7 +447,27 @@ class GitManager:
         if os.path.exists(merge_head_path):
             os.remove(merge_head_path)
 
-        return str(commit_oid)
+        # Get file list for the new commit
+        new_commit = self.repo.get(commit_oid)
+        parent_tree = new_commit.parents[0].tree if new_commit.parents else None
+        commit_diff = self.repo.diff(parent_tree, new_commit.tree)
+        files_changed = self._get_diff_files(commit_diff)
+
+        return {
+            "hash": str(commit_oid),
+            "message": message,
+            "files_changed": files_changed,
+        }
+
+    def _get_diff_files(self, diff: pygit2.Diff) -> List[Dict[str, str]]:
+        """Helper to extract a structured file list from a diff object."""
+        files = []
+        for patch in diff:
+            delta = patch.delta
+            status = delta.status_char()
+            path = delta.new_file.path if status != "D" else delta.old_file.path
+            files.append({"status": status, "path": path})
+        return files
 
     def _format_remote_url_for_web(self, url: str) -> Optional[str]:
         if not url:
@@ -562,15 +595,48 @@ class GitManager:
         remote_name: Optional[str] = None,
         branch: Optional[str] = None,
         force: bool = False,
-    ) -> str:
+    ) -> Dict[str, Any]:
         remote = remote_name or self.default_remote
         branch_to_push = branch or self.get_current_branch()
         if self.repo.head_is_detached or branch_to_push.startswith("DETACHED"):
             raise GitManagerError("Cannot push in a detached HEAD state.")
+
+        ahead, _ = self.get_ahead_behind()
+        if ahead == 0 and not force:
+            return {"message": "Nothing to push."}
+
+        commits_to_push = []
+        files_changed = []
+
+        if ahead > 0:
+            local_branch = self.repo.branches.local[self.repo.head.shorthand]
+            upstream_ref = local_branch.upstream
+            if upstream_ref:
+                # Get commits to push
+                walker = self.repo.walk(local_branch.target, SortMode.TOPOLOGICAL)
+                for i, commit in enumerate(walker):
+                    if i >= ahead:
+                        break
+                    commits_to_push.append(
+                        {"hash": str(commit.id), "message": commit.message.strip()}
+                    )
+
+                # Get files changed in the entire push
+                diff = self.repo.diff(upstream_ref.target, local_branch.target)
+                files_changed = self._get_diff_files(diff)
+
         command = ["push", remote, branch_to_push]
         if force:
             command.append("--force")
-        return self._run_git_command(command)
+
+        output = self._run_git_command(command)
+        return {
+            "message": "Push successful.",
+            "stdout": output,
+            "commits_pushed": ahead,
+            "commits": commits_to_push,
+            "files_changed": files_changed,
+        }
 
     def get_commit_log(self, limit: int = 20, page: int = 1) -> List[Dict[str, Any]]:
         if self.repo.head_is_unborn:
@@ -612,11 +678,12 @@ class GitManager:
     def get_files_in_commit(self, commit_hash: str) -> List[Dict[str, str]]:
         commit = self.repo.get(commit_hash)
         parent_tree = commit.parents[0].tree if commit.parents else None
+
         diff = self.repo.diff(parent_tree, commit.tree)
-        return [
-            {"status": d.delta.status_char(), "path": d.delta.new_file.path}
-            for d in diff
-        ]
+
+        diff.find_similar()
+
+        return self._get_diff_files(diff)
 
     def get_remote_url(self, remote_name: Optional[str] = None) -> Optional[str]:
         try:

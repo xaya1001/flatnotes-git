@@ -132,6 +132,14 @@ export async function getGitActivityLog() {
     return Promise.reject(error);
   }
 }
+export async function clearGitActivityLog() {
+  try {
+    // Note: A successful DELETE returns a 204 No Content, so there's no data.
+    await api.delete("api/git/activity-log");
+  } catch (error) {
+    return Promise.reject(error);
+  }
+}
 export async function getGitCommitFiles(commitHash) {
   try {
     const response = await api.get(`api/git/commits/${commitHash}/files`);

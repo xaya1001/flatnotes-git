@@ -1,3 +1,4 @@
+<!-- client/git-integration/components/tabs/GitHistoryTab.vue -->
 <template>
   <div class="relative flex h-full flex-col p-2">
     <!-- Commit List -->
@@ -38,7 +39,7 @@
             </div>
             <div class="mt-1 text-xs text-theme-text-muted">
               <span>{{ commit.author_name }}</span> committed on
-              <span>{{ new Date(commit.date).toLocaleDateString() }}</span>
+              <span>{{ new Date(commit.date).toLocaleString() }}</span>
             </div>
           </div>
 

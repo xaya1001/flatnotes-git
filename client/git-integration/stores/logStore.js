@@ -2,17 +2,28 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import { v4 as uuidv4 } from "uuid";
+import { useToast } from "primevue/usetoast";
 import * as gitApi from "../gitApi";
+import { usePanelUiStore } from "./panelUiStore";
 
 /**
  * Manages the state for the Git activity log. It is populated by other stores
  * and can be refreshed manually.
  */
 export const useLogStore = defineStore("git-log", () => {
+  const toast = useToast();
+  const panelUiStore = usePanelUiStore();
+
   // -- STATE --
   const logs = ref([]);
 
   // -- ACTIONS --
+  /**
+   * @param {object} logData
+   * @param {'info'|'success'|'warn'|'error'} logData.level
+   * @param {string} logData.message
+   * @param {any} [logData.details]
+   */
   function addLog(logData) {
     const newLog = {
       id: uuidv4(),
@@ -63,6 +74,36 @@ export const useLogStore = defineStore("git-log", () => {
     }
   }
 
+  async function clearAllLogs() {
+    const confirmed = await panelUiStore.showConfirmation({
+      title: "Confirm Clear Log",
+      message:
+        "This will permanently delete all activity log entries from the server. This cannot be undone.",
+      confirmButtonText: "Yes, Clear Log",
+      confirmButtonStyle: "danger",
+    });
+
+    if (confirmed) {
+      try {
+        await gitApi.clearGitActivityLog();
+        logs.value = []; // Clear local state immediately
+        toast.add({
+          severity: "success",
+          summary: "Success",
+          detail: "Activity log cleared.",
+          life: 3000,
+        });
+      } catch (err) {
+        toast.add({
+          severity: "error",
+          summary: "Error",
+          detail: "Failed to clear activity log.",
+          life: 5000,
+        });
+      }
+    }
+  }
+
   function initialize() {
     // Fetch initial logs when the application loads.
     fetchActivityLog();
@@ -80,5 +121,6 @@ export const useLogStore = defineStore("git-log", () => {
     initialize,
     cleanup,
     fetchActivityLog,
+    clearAllLogs,
   };
 });
