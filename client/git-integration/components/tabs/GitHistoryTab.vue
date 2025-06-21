@@ -106,6 +106,7 @@
                 <span
                   class="ml-2 w-6 text-center font-bold"
                   :class="getCommitFileStatusClass(file.index_status)"
+                  :title="getStatusLabel(file.index_status)"
                   >{{ file.index_status }}</span
                 >
 
@@ -191,7 +192,7 @@ import { useHistoryStore } from "../../stores/historyStore";
 import { useActionsStore } from "../../stores/actionsStore";
 import { useStatusStore } from "../../stores/statusStore";
 import { useConflictStore } from "../../stores/conflictStore";
-import { getCommitFileStatusClass } from "../../gitUtils";
+import { getCommitFileStatusClass, getStatusLabel } from "../../gitUtils";
 import SvgIcon from "@jamescoyle/vue-icon";
 import OverlayPanel from "primevue/overlaypanel";
 

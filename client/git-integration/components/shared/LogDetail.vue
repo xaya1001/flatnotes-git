@@ -36,9 +36,13 @@
             <span
               class="mr-2 w-4 text-center font-bold"
               :class="getCommitFileStatusClass(file.status)"
+              :title="getStatusLabel(file.status)"
               >{{ file.status }}</span
             >
-            <span>{{ file.path }}</span>
+            <span v-if="file.old_path">
+              {{ file.old_path }} → {{ file.path }}
+            </span>
+            <span v-else>{{ file.path }}</span>
           </li>
         </ul>
       </div>
@@ -70,9 +74,13 @@
             <span
               class="mr-2 w-4 text-center font-bold"
               :class="getCommitFileStatusClass(file.status)"
+              :title="getStatusLabel(file.status)"
               >{{ file.status }}</span
             >
-            <span>{{ file.path }}</span>
+            <span v-if="file.old_path">
+              {{ file.old_path }} → {{ file.path }}
+            </span>
+            <span v-else>{{ file.path }}</span>
           </li>
         </ul>
       </div>
@@ -104,9 +112,13 @@
             <span
               class="mr-2 w-4 text-center font-bold"
               :class="getCommitFileStatusClass(file.status)"
+              :title="getStatusLabel(file.status)"
               >{{ file.status }}</span
             >
-            <span>{{ file.path }}</span>
+            <span v-if="file.old_path">
+              {{ file.old_path }} → {{ file.path }}
+            </span>
+            <span v-else>{{ file.path }}</span>
           </li>
         </ul>
       </div>
@@ -134,7 +146,7 @@
 
 <script setup>
 import { computed } from "vue";
-import { getCommitFileStatusClass } from "../../gitUtils";
+import { getCommitFileStatusClass, getStatusLabel } from "../../gitUtils";
 
 const props = defineProps({
   details: [Object, String],

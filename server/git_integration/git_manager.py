@@ -459,14 +459,32 @@ class GitManager:
             "files_changed": files_changed,
         }
 
-    def _get_diff_files(self, diff: pygit2.Diff) -> List[Dict[str, str]]:
-        """Helper to extract a structured file list from a diff object."""
+    def _get_diff_files(self, diff: pygit2.Diff) -> List[Dict[str, Any]]:
+        """Helper to extract a structured file list from a diff object.
+        Handles renames and copies distinctly, including both old and new paths.
+        """
+        diff.find_similar()  # This is crucial to detect renames/copies
         files = []
         for patch in diff:
             delta = patch.delta
             status = delta.status_char()
-            path = delta.new_file.path if status != "D" else delta.old_file.path
-            files.append({"status": status, "path": path})
+            # pygit2 defines status codes: 'A' (added), 'D' (deleted), 'M' (modified), 'R' (renamed), 'C' (copied), etc.
+            if status in ("R", "C"):
+                files.append(
+                    {
+                        "status": status,
+                        "old_path": delta.old_file.path,
+                        "path": delta.new_file.path,
+                    }
+                )
+            else:
+                path = delta.new_file.path if status != "D" else delta.old_file.path
+                files.append(
+                    {
+                        "status": status,
+                        "path": path,
+                    }
+                )
         return files
 
     def _format_remote_url_for_web(self, url: str) -> Optional[str]:

@@ -86,7 +86,9 @@ export const useLogStore = defineStore("git-log", () => {
     if (confirmed) {
       try {
         await gitApi.clearGitActivityLog();
-        logs.value = []; // Clear local state immediately
+        // Instead of clearing locally, we fetch from the single source of truth,
+        // which we know is now empty. This is safer against race conditions.
+        await fetchActivityLog();
         toast.add({
           severity: "success",
           summary: "Success",
