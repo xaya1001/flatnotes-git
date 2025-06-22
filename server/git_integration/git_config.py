@@ -1,5 +1,4 @@
 import os
-import sys
 from enum import Enum
 from threading import Lock
 
@@ -23,6 +22,10 @@ GIT_ENABLED: bool = get_env(
 GIT_REPO_PATH: str = get_env(
     "FLATNOTES_PATH",  # Using the same env var as the main notes path
     mandatory=True,  # If Git is enabled, this path must be set
+)
+
+GIT_WEBHOOK_SECRET: str = get_env(
+    "FLATNOTES_GIT_WEBHOOK_SECRET", mandatory=False, default=None
 )
 
 GIT_REMOTE_NAME: str = get_env(

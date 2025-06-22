@@ -734,6 +734,19 @@ class GitManager:
 
         return self.repo.head.shorthand
 
+    def fetch_only(self, remote_name: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Performs a 'git fetch' to download objects and refs from the remote,
+        but does not modify the local branch. This is a safe, read-only operation.
+        """
+        remote = remote_name or self.default_remote
+        try:
+            output = self._run_git_command(["fetch", remote, "--prune"])
+            return {"message": "Fetch successful.", "stdout": output}
+        except GitManagerError as e:
+            # Re-raise to be handled by the router's exception handler.
+            raise GitManagerError(f"Fetch operation failed: {e}")
+
     def fetch_and_list_branches(self) -> Dict[str, Any]:
         try:
             self._run_git_command(["fetch", self.default_remote, "--prune"])

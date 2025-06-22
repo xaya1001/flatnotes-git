@@ -3,7 +3,15 @@ from datetime import datetime
 from typing import List, Literal
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, UploadFile
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    HTTPException,
+    Request,
+    UploadFile,
+)
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -31,10 +39,10 @@ if global_config.flatnotes_git_enabled:
     try:
         from git_integration import git_config as git_config
         from git_integration.git_logger import LogLevel, add_git_log
-        from git_integration.git_router import (
-            get_git_manager,
-        )
+        from git_integration.git_router import get_git_manager
         from git_integration.git_router import router as git_integration_router
+        from git_integration.webhook_handler import verify_github_signature
+        from git_integration.websockets import connection_manager
     except ImportError as e:
         logger.error(f"FLATNOTES_GIT_ENABLED is true, but a module failed to load: {e}")
 
@@ -128,6 +136,89 @@ app = FastAPI(
     openapi_url=global_config.path_prefix + "/openapi.json",
     lifespan=lifespan,
 )
+
+
+# --- Webhook Endpoint ---
+if git_integration_router:
+
+    @app.post(
+        f"{global_config.path_prefix}/api/git/webhook/github",
+        # The endpoint itself has no dependencies, we check inside.
+        include_in_schema=False,
+    )
+    async def github_webhook_receiver(
+        request: Request,
+        background_tasks: BackgroundTasks,
+    ):
+        """
+        Receives webhook events from GitHub.
+        If a secret is configured, it verifies the signature.
+        On a valid 'push' event, it triggers a 'git fetch'.
+        """
+        # 1. Check if the feature is configured to be active.
+        if not git_config.GIT_WEBHOOK_SECRET:
+            logger.info(
+                "Webhook received but ignored: FLATNOTES_GIT_WEBHOOK_SECRET is not set."
+            )
+            raise HTTPException(
+                status_code=412,
+                detail="Webhook feature is disabled: secret is not configured on the server.",
+            )
+
+        # 2. Verify the signature (now that we know a secret exists).
+        await verify_github_signature(
+            request, request.headers.get("x-hub-signature-256")
+        )
+
+        # 3. Process the event.
+        event_type = request.headers.get("X-GitHub-Event")
+        if event_type != "push":
+            return {
+                "status": "event_ignored",
+                "reason": f"Event type '{event_type}' is not 'push'.",
+            }
+
+        try:
+            payload = await request.json()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid JSON payload.")
+
+        expected_ref = f"refs/heads/{git_config.GIT_DEFAULT_BRANCH}"
+        if payload.get("ref") != expected_ref:
+            return {
+                "status": "push_ignored",
+                "reason": f"Push was not to the default branch ('{git_config.GIT_DEFAULT_BRANCH}').",
+            }
+
+        pusher_name = payload.get("pusher", {}).get("name", "unknown")
+        logger.info(
+            f"Webhook: Received valid push event from '{pusher_name}'. Triggering fetch."
+        )
+        add_git_log(
+            LogLevel.INFO,
+            "Webhook: Push event received",
+            details={"pusher": pusher_name},
+        )
+
+        async def fetch_and_broadcast_task():
+            """The actual git fetch operation, run in the background."""
+            try:
+                manager = get_git_manager()
+                result = manager.fetch_only()  # <--- CALLING FETCH_ONLY
+                add_git_log(
+                    LogLevel.SUCCESS, "Webhook: Fetch successful", details=result
+                )
+            except Exception as e:
+                logger.error(f"Webhook fetch task failed: {e}")
+                add_git_log(LogLevel.ERROR, "Webhook: Fetch failed", details=str(e))
+            finally:
+                # Always broadcast, so the UI can update its ahead/behind status.
+                await connection_manager.broadcast_status_update()
+
+        background_tasks.add_task(fetch_and_broadcast_task)
+
+        return {"status": "accepted", "detail": "Fetch operation scheduled."}
+
 
 # Conditionally include the Git integration router
 if git_integration_router:

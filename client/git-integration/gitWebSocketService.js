@@ -11,13 +11,17 @@ function connect() {
     return;
   }
 
-  // Dynamically determine WebSocket protocol
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  // Use the URL constructor for robust path joining. This is the safest way.
+  const base = `${window.location.protocol}//${window.location.host}`;
+  const path = new URL(import.meta.env.BASE_URL, base).pathname;
 
-  // Use a relative URL to automatically adapt to any path_prefix
-  const pathPrefix = import.meta.env.BASE_URL.replace(/\/$/, ""); // Get base URL from Vite config
-  const wsUrl = `${protocol}//${window.location.host}${pathPrefix}/api/git/ws/status`;
+  // Create a clean base URL for the WebSocket path
+  const wsPath = (path === "/" ? "" : path) + "/api/git/ws/status";
 
+  const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  const wsUrl = `${wsProtocol}//${window.location.host}${wsPath}`;
+
+  console.log(`Attempting to connect to WebSocket at: ${wsUrl}`); // Added for easier debugging
   socket = new WebSocket(wsUrl);
 
   socket.onopen = () => {
@@ -29,7 +33,6 @@ function connect() {
       const data = JSON.parse(event.data);
       if (data.type === "status_update") {
         console.log("WebSocket: Received status update trigger.");
-        // Key logic: upon receiving a trigger, call the existing action to fetch the latest state.
         const statusStore = useStatusStore();
         statusStore.fetchStatus();
       }
@@ -42,18 +45,15 @@ function connect() {
     console.warn(
       `WebSocket disconnected. Attempting to reconnect in ${reconnectInterval / 1000}s...`,
     );
-    // Clear the old socket reference
     socket = null;
-    // Set a timer to attempt reconnection
     reconnectTimer = setTimeout(() => {
-      reconnectTimer = null; // Clear the timer before trying to connect
+      reconnectTimer = null;
       connect();
     }, reconnectInterval);
   };
 
   socket.onerror = (error) => {
     console.error("WebSocket error:", error);
-    // The onclose event will fire automatically after an error, triggering the reconnect logic.
     if (socket) {
       socket.close();
     }
@@ -61,21 +61,19 @@ function connect() {
 }
 
 function disconnect() {
-  // Clear any pending reconnect timers
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
   }
 
   if (socket) {
-    socket.onclose = null; // Disable the reconnect logic
+    socket.onclose = null;
     socket.close();
     socket = null;
     console.log("WebSocket connection intentionally disconnected.");
   }
 }
 
-// Export a singleton service object
 export const gitWebSocketService = {
   connect,
   disconnect,
