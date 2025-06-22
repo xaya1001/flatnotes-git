@@ -2,7 +2,17 @@
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Body,
+    Depends,
+    HTTPException,
+    Query,
+    Response,
+    WebSocket,
+    WebSocketDisconnect,
+)
 
 from auth.base import BaseAuth
 from global_config import GlobalConfig
@@ -39,6 +49,7 @@ from .git_models import (
     GitStatusResponse,
     SwitchBranchRequest,
 )
+from .websockets import connection_manager
 
 
 # --- Dependency Injection ---
@@ -129,79 +140,104 @@ def get_git_status(manager: GitManager = Depends(get_git_manager)):
 
 
 @router.post("/add_all", response_model=GitCommandResponse)
-def add_all_git_changes(manager: GitManager = Depends(get_git_manager)):
+async def add_all_git_changes(
+    background_tasks: BackgroundTasks, manager: GitManager = Depends(get_git_manager)
+):
     try:
         manager.add_all()
         message = "All changes staged."
         add_git_log(LogLevel.INFO, message, persist=False)
+        background_tasks.add_task(connection_manager.broadcast_status_update)
         return GitCommandResponse(message=message)
     except Exception as e:
+        background_tasks.add_task(connection_manager.broadcast_status_update)
         handle_git_exception(e, "Stage All", manager)
 
 
 @router.post("/unstage_all", response_model=GitCommandResponse)
-def unstage_all_git_changes(manager: GitManager = Depends(get_git_manager)):
+async def unstage_all_git_changes(
+    background_tasks: BackgroundTasks, manager: GitManager = Depends(get_git_manager)
+):
     try:
         manager.unstage_all()
         message = "All staged changes have been unstaged."
         add_git_log(LogLevel.INFO, message, persist=False)
+        background_tasks.add_task(connection_manager.broadcast_status_update)
         return GitCommandResponse(message=message)
     except Exception as e:
+        background_tasks.add_task(connection_manager.broadcast_status_update)
         handle_git_exception(e, "Unstage All", manager)
 
 
 @router.post("/stage_file", response_model=GitCommandResponse)
-def stage_file(
-    request: GitFileOperationRequest, manager: GitManager = Depends(get_git_manager)
+async def stage_file(
+    background_tasks: BackgroundTasks,
+    request: GitFileOperationRequest,
+    manager: GitManager = Depends(get_git_manager),
 ):
     try:
         manager.add_file(request.filepath)
         message = f"File '{request.filepath}' staged."
         add_git_log(LogLevel.INFO, message, persist=False)
+        background_tasks.add_task(connection_manager.broadcast_status_update)
         return GitCommandResponse(message=message)
     except Exception as e:
+        background_tasks.add_task(connection_manager.broadcast_status_update)
         handle_git_exception(e, f"Stage File '{request.filepath}'", manager)
 
 
 @router.post("/unstage_file", response_model=GitCommandResponse)
-def unstage_file(
-    request: GitFileOperationRequest, manager: GitManager = Depends(get_git_manager)
+async def unstage_file(
+    background_tasks: BackgroundTasks,
+    request: GitFileOperationRequest,
+    manager: GitManager = Depends(get_git_manager),
 ):
     try:
         manager.unstage_file(request.filepath)
         message = f"File '{request.filepath}' unstaged."
         add_git_log(LogLevel.INFO, message, persist=False)
+        background_tasks.add_task(connection_manager.broadcast_status_update)
         return GitCommandResponse(message=message)
     except Exception as e:
+        background_tasks.add_task(connection_manager.broadcast_status_update)
         handle_git_exception(e, f"Unstage File '{request.filepath}'", manager)
 
 
 @router.post("/discard_file", response_model=GitCommandResponse)
-def discard_file(
-    request: GitFileOperationRequest, manager: GitManager = Depends(get_git_manager)
+async def discard_file(
+    background_tasks: BackgroundTasks,
+    request: GitFileOperationRequest,
+    manager: GitManager = Depends(get_git_manager),
 ):
     try:
         manager.discard_file(request.filepath)
         message = f"Changes for '{request.filepath}' discarded."
         add_git_log(LogLevel.WARN, message, persist=False)
+        background_tasks.add_task(connection_manager.broadcast_status_update)
         return GitCommandResponse(message=message)
     except Exception as e:
+        background_tasks.add_task(connection_manager.broadcast_status_update)
         handle_git_exception(e, f"Discard File '{request.filepath}'", manager)
 
 
 @router.post("/discard_all", response_model=GitCommandResponse)
-def discard_all_changes(manager: GitManager = Depends(get_git_manager)):
+async def discard_all_changes(
+    background_tasks: BackgroundTasks, manager: GitManager = Depends(get_git_manager)
+):
     try:
         manager.discard_all()
         message = "All unstaged changes have been discarded."
         add_git_log(LogLevel.WARN, message, "This is a destructive operation.")
+        background_tasks.add_task(connection_manager.broadcast_status_update)
         return GitCommandResponse(message=message)
     except Exception as e:
+        background_tasks.add_task(connection_manager.broadcast_status_update)
         handle_git_exception(e, "Discard All", manager)
 
 
 @router.post("/commit", response_model=GitCommandResponse)
-def commit_git_changes(
+async def commit_git_changes(
+    background_tasks: BackgroundTasks,
     commit_request: GitCommitRequest = Body(...),
     manager: GitManager = Depends(get_git_manager),
 ):
@@ -213,14 +249,18 @@ def commit_git_changes(
             message,
             details=commit_result,
         )
+        background_tasks.add_task(connection_manager.broadcast_status_update)
         return GitCommandResponse(message=message, details=commit_result)
     except Exception as e:
+        background_tasks.add_task(connection_manager.broadcast_status_update)
         handle_git_exception(e, "Commit", manager)
 
 
 @router.post("/pull", response_model=GitCommandResponse)
-def pull_git_changes(
-    params: GitPullParams = Depends(), manager: GitManager = Depends(get_git_manager)
+async def pull_git_changes(
+    background_tasks: BackgroundTasks,
+    params: GitPullParams = Depends(),
+    manager: GitManager = Depends(get_git_manager),
 ):
     try:
         result = manager.pull_remote_changes(
@@ -228,14 +268,18 @@ def pull_git_changes(
         )
         message = "Pull operation completed."
         add_git_log(LogLevel.SUCCESS, message, details=result)
+        background_tasks.add_task(connection_manager.broadcast_status_update)
         return GitCommandResponse(message=message, details=result)
     except Exception as e:
+        background_tasks.add_task(connection_manager.broadcast_status_update)
         handle_git_exception(e, "Pull", manager)
 
 
 @router.post("/push", response_model=GitCommandResponse)
-def push_git_changes(
-    params: GitPushParams = Depends(), manager: GitManager = Depends(get_git_manager)
+async def push_git_changes(
+    background_tasks: BackgroundTasks,
+    params: GitPushParams = Depends(),
+    manager: GitManager = Depends(get_git_manager),
 ):
     try:
         result = manager.push_local_changes(
@@ -243,13 +287,16 @@ def push_git_changes(
         )
         message = "Push operation completed."
         add_git_log(LogLevel.SUCCESS, message, details=result)
+        background_tasks.add_task(connection_manager.broadcast_status_update)
         return GitCommandResponse(message=message, details=result)
     except Exception as e:
+        background_tasks.add_task(connection_manager.broadcast_status_update)
         handle_git_exception(e, "Push", manager)
 
 
 @router.post("/sync", response_model=GitCommandResponse)
-def sync_workspace(
+async def sync_workspace(
+    background_tasks: BackgroundTasks,
     commit_request: Optional[GitCommitRequest] = Body(None),
     manager: GitManager = Depends(get_git_manager),
 ):
@@ -271,8 +318,10 @@ def sync_workspace(
         results = manager.sync_workspace(commit_message=commit_message)
         message = "Workspace synchronized successfully."
         add_git_log(LogLevel.SUCCESS, message, details=results)
+        background_tasks.add_task(connection_manager.broadcast_status_update)
         return GitCommandResponse(message=message, details=results)
     except Exception as e:
+        background_tasks.add_task(connection_manager.broadcast_status_update)
         handle_git_exception(e, "Sync Workspace", manager)
 
 
@@ -317,39 +366,90 @@ def get_branches(manager: GitManager = Depends(get_git_manager)):
 
 
 @router.post("/branches/switch", response_model=GitCommandResponse)
-def switch_to_branch(
-    request: SwitchBranchRequest, manager: GitManager = Depends(get_git_manager)
+async def switch_to_branch(
+    background_tasks: BackgroundTasks,
+    request: SwitchBranchRequest,
+    manager: GitManager = Depends(get_git_manager),
 ):
     try:
         manager.switch_branch(request.branch_name)
         message = f"Successfully switched to branch '{request.branch_name}'."
         add_git_log(LogLevel.SUCCESS, message)
+        background_tasks.add_task(connection_manager.broadcast_status_update)
         return GitCommandResponse(message=message)
     except Exception as e:
+        background_tasks.add_task(connection_manager.broadcast_status_update)
         handle_git_exception(e, f"Switch Branch to '{request.branch_name}'", manager)
 
 
 @router.post("/conflict/continue", response_model=GitCommandResponse)
-def conflict_continue(manager: GitManager = Depends(get_git_manager)):
+async def conflict_continue(
+    background_tasks: BackgroundTasks, manager: GitManager = Depends(get_git_manager)
+):
     action_name = "Continue Operation"
     try:
         result = manager.continue_conflict_resolution()
         message = result.get("message", "Operation continued successfully.")
         add_git_log(LogLevel.SUCCESS, message, details=result)
+        background_tasks.add_task(connection_manager.broadcast_status_update)
         return GitCommandResponse(message=message, details=result)
     except Exception as e:
+        background_tasks.add_task(connection_manager.broadcast_status_update)
         handle_git_exception(e, action_name, manager)
 
 
 @router.post("/conflict/abort", response_model=GitCommandResponse)
-def conflict_abort(manager: GitManager = Depends(get_git_manager)):
+async def conflict_abort(
+    background_tasks: BackgroundTasks, manager: GitManager = Depends(get_git_manager)
+):
     action_name = "Abort Operation"
     try:
         output = manager.abort_conflict_resolution()
         message = "Operation aborted successfully."
         add_git_log(LogLevel.WARN, message, details={"raw_output": output})
+        background_tasks.add_task(connection_manager.broadcast_status_update)
         return GitCommandResponse(message=message, stdout=output)
     except Exception as e:
+        background_tasks.add_task(connection_manager.broadcast_status_update)
+        handle_git_exception(e, action_name, manager)
+
+
+@router.post("/reset-to-remote", response_model=GitCommandResponse)
+async def reset_to_remote(
+    background_tasks: BackgroundTasks, manager: GitManager = Depends(get_git_manager)
+):
+    action_name = "Reset to Remote"
+    try:
+        result = manager.reset_to_remote()
+        add_git_log(
+            LogLevel.WARN,
+            "Local branch was hard reset to remote state.",
+            details=result,
+        )
+        background_tasks.add_task(connection_manager.broadcast_status_update)
+        return GitCommandResponse(message=result.get("message"), details=result)
+    except Exception as e:
+        background_tasks.add_task(connection_manager.broadcast_status_update)
+        handle_git_exception(e, action_name, manager)
+
+
+@router.post("/restore-file", response_model=GitCommandResponse)
+async def restore_file_from_commit(
+    background_tasks: BackgroundTasks,
+    request: GitRestoreFileRequest,
+    manager: GitManager = Depends(get_git_manager),
+):
+    action_name = f"Restore file '{request.filepath}'"
+    try:
+        manager.checkout_file_from_commit(request.commit_hash, request.filepath)
+        message = f"File '{request.filepath}' restored to state from commit {request.commit_hash[:7]}."
+        add_git_log(LogLevel.WARN, message, "Working directory file was overwritten.")
+        background_tasks.add_task(connection_manager.broadcast_status_update)
+        return GitCommandResponse(message=message)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        background_tasks.add_task(connection_manager.broadcast_status_update)
         handle_git_exception(e, action_name, manager)
 
 
@@ -394,32 +494,15 @@ def set_resume_auto_sync():
     return {"paused": False}
 
 
-@router.post("/reset-to-remote", response_model=GitCommandResponse)
-def reset_to_remote(manager: GitManager = Depends(get_git_manager)):
-    action_name = "Reset to Remote"
+@router.websocket("/ws/status")
+async def websocket_endpoint(websocket: WebSocket):
+    """Handles WebSocket connections for real-time status updates."""
+    await connection_manager.connect(websocket)
     try:
-        result = manager.reset_to_remote()
-        add_git_log(
-            LogLevel.WARN,
-            "Local branch was hard reset to remote state.",
-            details=result,
-        )
-        return GitCommandResponse(message=result.get("message"), details=result)
-    except Exception as e:
-        handle_git_exception(e, action_name, manager)
-
-
-@router.post("/restore-file", response_model=GitCommandResponse)
-def restore_file_from_commit(
-    request: GitRestoreFileRequest, manager: GitManager = Depends(get_git_manager)
-):
-    action_name = f"Restore file '{request.filepath}'"
-    try:
-        manager.checkout_file_from_commit(request.commit_hash, request.filepath)
-        message = f"File '{request.filepath}' restored to state from commit {request.commit_hash[:7]}."
-        add_git_log(LogLevel.WARN, message, "Working directory file was overwritten.")
-        return GitCommandResponse(message=message)
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        handle_git_exception(e, action_name, manager)
+        while True:
+            # This loop keeps the connection alive.
+            # We primarily rely on server-to-client broadcasts,
+            # so we just wait for the client to disconnect.
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        connection_manager.disconnect(websocket)

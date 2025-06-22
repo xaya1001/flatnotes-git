@@ -1,17 +1,13 @@
 // client/git-integration/stores/statusStore.js
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
-import { useToast } from "primevue/usetoast";
 import { useRouter } from "vue-router";
 import * as gitApi from "../gitApi";
 import { useConflictStore } from "./conflictStore";
 import eventBus from "../eventBus";
 import { GIT_OPERATION, GIT_CONFLICT } from "../events";
 
-const POLLING_INTERVAL_MS = 30000;
-
 export const useStatusStore = defineStore("git-status", () => {
-  const toast = useToast();
   const router = useRouter();
   const conflictStore = useConflictStore();
 
@@ -22,7 +18,6 @@ export const useStatusStore = defineStore("git-status", () => {
   const summaryError = ref(null);
   const branchName = ref("");
   const filesChangedCount = ref(0);
-  const pollingTimer = ref(null);
   const commitsAhead = ref(0);
   const commitsBehind = ref(0);
   const isTrackingUpstream = ref(true);
@@ -46,11 +41,11 @@ export const useStatusStore = defineStore("git-status", () => {
       }
       return `Error: ${summaryError.value}.`;
     }
-    if (repositoryState.value.startsWith("REBASING")) {
-      return "Conflict: Rebase in progress. Click to resolve.";
-    }
-    if (repositoryState.value.startsWith("MERGING")) {
-      return "Conflict: Merge in progress. Click to resolve.";
+    if (repositoryState.value.includes("CONFLICT")) {
+      const type = repositoryState.value.startsWith("REBASING")
+        ? "Rebase"
+        : "Merge";
+      return `Conflict: ${type} in progress. Click to resolve.`;
     }
     let parts = [];
     if (!isTrackingUpstream.value) {
@@ -82,10 +77,7 @@ export const useStatusStore = defineStore("git-status", () => {
       summaryError.value = null;
 
       const state = repositoryState.value;
-      if (
-        (state.startsWith("REBASING") || state.startsWith("MERGING")) &&
-        !conflictStore.isInConflict
-      ) {
+      if (state.includes("CONFLICT") && !conflictStore.isInConflict) {
         const errorData = {
           state: state,
           conflicted_files: data.files
@@ -93,40 +85,17 @@ export const useStatusStore = defineStore("git-status", () => {
             .map((f) => f.path),
         };
         conflictStore.enterConflictMode(errorData, { silent: true });
-      } else if (
-        !state.startsWith("REBASING") &&
-        !state.startsWith("MERGING") &&
-        conflictStore.isInConflict
-      ) {
+      } else if (!state.includes("CONFLICT") && conflictStore.isInConflict) {
         conflictStore.exitConflictMode();
       }
     } catch (err) {
       if (err.response?.status === 428) {
         summaryError.value = "Git repository not initialized";
-      } else {
-        toast.add({
-          severity: "error",
-          summary: "Error Fetching Detailed Status",
-          detail: err.response?.data?.detail || err.message,
-          life: 3000,
-        });
       }
       gitStatus.value = { files: [] };
     } finally {
       isLoading.value = false;
       isInitialLoadComplete.value = true;
-    }
-  }
-
-  function startPolling() {
-    if (pollingTimer.value) return;
-    pollingTimer.value = setInterval(fetchStatus, POLLING_INTERVAL_MS);
-  }
-
-  function stopPolling() {
-    if (pollingTimer.value) {
-      clearInterval(pollingTimer.value);
-      pollingTimer.value = null;
     }
   }
 
@@ -167,8 +136,6 @@ export const useStatusStore = defineStore("git-status", () => {
     repositoryState,
     isInitialLoadComplete,
     fetchStatus,
-    startPolling,
-    stopPolling,
     openNoteInEditor,
     clearCommitMessage,
   };
