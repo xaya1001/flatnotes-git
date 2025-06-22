@@ -5,6 +5,8 @@ import { useToast } from "primevue/usetoast";
 import { useRouter } from "vue-router";
 import * as gitApi from "../gitApi";
 import { useConflictStore } from "./conflictStore";
+import eventBus from "../eventBus";
+import { GIT_OPERATION, GIT_CONFLICT } from "../events";
 
 const POLLING_INTERVAL_MS = 30000;
 
@@ -25,7 +27,7 @@ export const useStatusStore = defineStore("git-status", () => {
   const commitsBehind = ref(0);
   const isTrackingUpstream = ref(true);
   const repositoryState = ref("CLEAN");
-  const isInitialLoadComplete = ref(false); // Manages initial loading state
+  const isInitialLoadComplete = ref(false);
 
   // --- GETTERS ---
   const stagedFiles = computed(() =>
@@ -80,29 +82,23 @@ export const useStatusStore = defineStore("git-status", () => {
       repositoryState.value = data.repository_state;
       summaryError.value = null;
 
-      // App startup conflict state recovery.
-      // This is the ONLY place where a status fetch can INITIATE conflict mode.
       const state = repositoryState.value;
       if (
         (state.startsWith("REBASING") || state.startsWith("MERGING")) &&
         !conflictStore.isInConflict
       ) {
-        // Construct a mock errorData object that matches the API response structure.
         const errorData = {
-          state: state, // e.g., "REBASING_CONFLICT" or "MERGING_CONFLICT"
+          state: state,
           conflicted_files: data.files
             .filter((f) => f.index_status === "U" || f.work_tree_status === "U")
             .map((f) => f.path),
         };
-        // Enter conflict mode silently on page load.
         conflictStore.enterConflictMode(errorData, { silent: true });
       } else if (
         !state.startsWith("REBASING") &&
         !state.startsWith("MERGING") &&
         conflictStore.isInConflict
       ) {
-        // If the repo state is clean but the UI is still in conflict mode, exit it.
-        // This handles cases where the conflict was resolved outside the UI.
         conflictStore.exitConflictMode();
       }
     } catch (err) {
@@ -140,13 +136,21 @@ export const useStatusStore = defineStore("git-status", () => {
     router.push({
       name: "note",
       params: { title },
-      query: { t: Date.now() }, // Force re-render of the component
+      query: { t: Date.now() },
     });
   }
 
   function clearCommitMessage() {
     commitMessage.value = "";
   }
+
+  // --- Event Listeners ---
+  const refreshEvents = [GIT_OPERATION.DID_SUCCEED, GIT_CONFLICT.RESOLVED];
+  refreshEvents.forEach((eventName) => {
+    eventBus.on(eventName, () => {
+      fetchStatus();
+    });
+  });
 
   return {
     gitStatus,

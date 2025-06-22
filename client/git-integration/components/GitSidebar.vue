@@ -194,6 +194,7 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from "vue";
+import { v4 as uuidv4 } from "uuid";
 import Sidebar from "primevue/sidebar";
 import TabView from "primevue/tabview";
 import TabPanel from "primevue/tabpanel";
@@ -208,6 +209,8 @@ import { useHistoryStore } from "../stores/historyStore";
 import { useActionsStore } from "../stores/actionsStore";
 import { useLogStore } from "../stores/logStore";
 import { useConflictStore } from "../stores/conflictStore";
+import eventBus from "../eventBus";
+import { GIT_OPERATION } from "../events";
 
 import GitStatusIndicator from "./GitStatusIndicator.vue";
 import ConfirmModal from "../../components/ConfirmModal.vue";
@@ -255,7 +258,10 @@ function handleSidebarShow() {
 
 async function refreshAll() {
   isRefreshing.value = true;
-  const pendingLogId = logStore.addPendingLog("Refreshing all data...");
+  const actionName = "Refresh All Data";
+  const operationId = uuidv4();
+  eventBus.emit(GIT_OPERATION.WILL_START, { actionName, operationId });
+
   try {
     await Promise.all([
       statusStore.fetchStatus(),
@@ -263,16 +269,19 @@ async function refreshAll() {
       logStore.fetchActivityLog(),
     ]);
 
-    logStore.updateLog(pendingLogId, {
-      level: "success",
-      message: "All data refreshed.",
-      details: null,
+    const response = {
+      details: { message: "All data refreshed successfully." },
+    };
+    eventBus.emit(GIT_OPERATION.DID_SUCCEED, {
+      actionName,
+      operationId,
+      response,
     });
   } catch (e) {
-    logStore.updateLog(pendingLogId, {
-      level: "error",
-      message: "Failed to refresh data.",
-      details: e.message,
+    eventBus.emit(GIT_OPERATION.DID_FAIL, {
+      actionName,
+      operationId,
+      err: e,
     });
   } finally {
     isRefreshing.value = false;
