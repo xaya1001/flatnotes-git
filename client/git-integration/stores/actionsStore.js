@@ -163,14 +163,14 @@ export const useActionsStore = defineStore("git-actions", () => {
   }
 
   async function getBranches() {
+    const operationId = uuidv4();
+    eventBus.emit(GIT_OPERATION.WILL_START, {
+      actionName: "Fetch Branches",
+      operationId,
+    });
     try {
       return await gitApi.getBranches();
     } catch (error) {
-      const operationId = uuidv4();
-      eventBus.emit(GIT_OPERATION.WILL_START, {
-        actionName: "Fetch Branches",
-        operationId,
-      });
       eventBus.emit(GIT_OPERATION.DID_FAIL, {
         actionName: "Fetch Branches",
         operationId,
@@ -180,7 +180,7 @@ export const useActionsStore = defineStore("git-actions", () => {
     }
   }
 
-  function switchBranch(branchName) {
+  async function switchBranch(branchName) {
     return performGitAction(gitApi.switchBranch, [branchName], "Switch Branch");
   }
 

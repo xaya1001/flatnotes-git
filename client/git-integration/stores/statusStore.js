@@ -46,13 +46,12 @@ export const useStatusStore = defineStore("git-status", () => {
       }
       return `Error: ${summaryError.value}.`;
     }
-    if (repositoryState.value.includes("CONFLICT")) {
-      const type = repositoryState.value.includes("REBASE")
-        ? "Rebase"
-        : "Merge";
-      return `Conflict: ${type} in progress. Click to resolve.`;
+    if (repositoryState.value.startsWith("REBASING")) {
+      return "Conflict: Rebase in progress. Click to resolve.";
     }
-
+    if (repositoryState.value.startsWith("MERGING")) {
+      return "Conflict: Merge in progress. Click to resolve.";
+    }
     let parts = [];
     if (!isTrackingUpstream.value) {
       parts.push("Branch not tracking remote");
