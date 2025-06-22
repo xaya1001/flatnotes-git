@@ -159,7 +159,7 @@ export const useLogStore = defineStore("git-log", () => {
       toast.add({
         severity: "success",
         summary: "Operation Complete",
-        detail: payload.response.message,
+        detail: payload.response.message || message,
         life: 4000,
       });
     }
