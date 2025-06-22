@@ -77,7 +77,6 @@ class GitPullParams(BaseModel):
 class GitPushParams(BaseModel):
     remote: Optional[str] = None
     branch: Optional[str] = None
-    force: bool = False
 
 
 # --- Additional Info Endpoint (Example) ---

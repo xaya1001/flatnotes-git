@@ -2,22 +2,21 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import { useToast } from "primevue/usetoast";
+import { v4 as uuidv4 } from "uuid";
 import * as gitApi from "../gitApi";
-import { useLogStore } from "./logStore";
-import { useStatusStore } from "./statusStore";
-import { useHistoryStore } from "./historyStore";
+import eventBus from "../eventBus";
+import { GIT_OPERATION, GIT_CONFLICT } from "../events";
 import { useActionsStore } from "./actionsStore";
 
 export const useConflictStore = defineStore("git-conflict", () => {
   const toast = useToast();
-  const logStore = useLogStore();
 
   const isInConflict = ref(false);
   const conflictedFiles = ref([]);
 
   function enterConflictMode(errorData, options = {}) {
     isInConflict.value = true;
-    conflictedFiles.value = errorData.conflicted_files;
+    conflictedFiles.value = errorData.conflicted_files || [];
 
     const conflictType = errorData.state.includes("REBASING")
       ? "Rebase"
@@ -31,12 +30,6 @@ export const useConflictStore = defineStore("git-conflict", () => {
         life: 6000,
       });
     }
-
-    logStore.addLog({
-      level: "warn",
-      message: `${conflictType} conflict detected.`,
-      details: `Files with conflicts: ${errorData.conflicted_files.join(", ")}`,
-    });
   }
 
   function exitConflictMode() {
@@ -47,50 +40,24 @@ export const useConflictStore = defineStore("git-conflict", () => {
   async function handleContinue() {
     const actionsStore = useActionsStore();
     actionsStore.isActionLoading = true;
-    const pendingLogId = logStore.addPendingLog("Finalizing operation...");
+    const operationId = uuidv4();
+    const actionName = "Continue Operation";
+    eventBus.emit(GIT_OPERATION.WILL_START, { actionName, operationId });
+
     try {
       const response = await gitApi.gitConflictContinue();
-      toast.add({
-        severity: "success",
-        summary: "Operation Complete",
-        detail: response.message,
-        life: 4000,
-      });
-      logStore.updateLog(pendingLogId, {
-        level: "success",
-        message: "Operation finished successfully.",
-        details: response.details || response.stdout,
-      });
       exitConflictMode();
-      // Full refresh
-      const statusStore = useStatusStore();
-      const historyStore = useHistoryStore();
-      await Promise.all([
-        statusStore.fetchStatus(),
-        historyStore.fetchGitLog(),
-      ]);
+      eventBus.emit(GIT_CONFLICT.RESOLVED, {
+        actionName,
+        operationId,
+        response,
+      });
     } catch (err) {
       const errorData = err.response?.data?.detail;
       if (err.response?.status === 409 && errorData?.state) {
-        enterConflictMode(errorData); // Re-enter conflict mode with new data
-        logStore.updateLog(pendingLogId, {
-          level: "warn",
-          message: "Operation paused with new conflicts.",
-          details: errorData.message,
-        });
+        eventBus.emit(GIT_CONFLICT.DETECTED, { operationId, errorData });
       } else {
-        const errorMessage = errorData?.message || errorData || err.message;
-        toast.add({
-          severity: "error",
-          summary: "Operation Failed",
-          detail: errorMessage,
-          life: 5000,
-        });
-        logStore.updateLog(pendingLogId, {
-          level: "error",
-          message: "Failed to continue operation.",
-          details: errorMessage,
-        });
+        eventBus.emit(GIT_OPERATION.DID_FAIL, { actionName, operationId, err });
       }
     } finally {
       actionsStore.isActionLoading = false;
@@ -100,47 +67,29 @@ export const useConflictStore = defineStore("git-conflict", () => {
   async function handleAbort() {
     const actionsStore = useActionsStore();
     actionsStore.isActionLoading = true;
-    const pendingLogId = logStore.addPendingLog("Aborting operation...");
+    const operationId = uuidv4();
+    const actionName = "Abort Operation";
+    eventBus.emit(GIT_OPERATION.WILL_START, { actionName, operationId });
+
     try {
       const response = await gitApi.gitConflictAbort();
-      toast.add({
-        severity: "info",
-        summary: "Operation Aborted",
-        detail:
-          response.message ||
-          "The repository has been returned to a previous state.",
-        life: 4000,
-      });
-      logStore.updateLog(pendingLogId, {
-        level: "warn",
-        message: "Operation aborted by user.",
-        details: response.stdout,
-      });
       exitConflictMode();
-      // Full refresh
-      const statusStore = useStatusStore();
-      const historyStore = useHistoryStore();
-      await Promise.all([
-        statusStore.fetchStatus(),
-        historyStore.fetchGitLog(),
-      ]);
+      eventBus.emit(GIT_CONFLICT.RESOLVED, {
+        actionName,
+        operationId,
+        response,
+      });
     } catch (err) {
-      const errorMessage = err.response?.data?.detail || err.message;
-      toast.add({
-        severity: "error",
-        summary: "Abort Failed",
-        detail: errorMessage,
-        life: 5000,
-      });
-      logStore.updateLog(pendingLogId, {
-        level: "error",
-        message: "Failed to abort operation.",
-        details: errorMessage,
-      });
+      eventBus.emit(GIT_OPERATION.DID_FAIL, { actionName, operationId, err });
     } finally {
       actionsStore.isActionLoading = false;
     }
   }
+
+  // --- Event Listeners ---
+  eventBus.on(GIT_CONFLICT.DETECTED, (payload) => {
+    enterConflictMode(payload.errorData);
+  });
 
   return {
     isInConflict,

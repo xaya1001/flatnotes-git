@@ -125,7 +125,7 @@
 
                 <!-- Restore file button -->
                 <button
-                  @click.stop="historyStore.restoreFile(commit.hash, file.path)"
+                  @click.stop="handleRestoreFile(commit.hash, file.path)"
                   class="p-1 text-theme-text-muted hover:text-theme-text disabled:cursor-not-allowed disabled:opacity-50"
                   :disabled="conflictStore.isInConflict"
                   title="Restore this file to the version in this commit"
@@ -169,7 +169,7 @@
           </p>
           <button
             v-if="statusStore.commitsAhead > 0 || statusStore.commitsBehind > 0"
-            @click="actionsStore.handleResetToRemote"
+            @click="handleReset"
             :disabled="
               actionsStore.isActionLoading || conflictStore.isInConflict
             "
@@ -192,6 +192,7 @@ import { useHistoryStore } from "../../stores/historyStore";
 import { useActionsStore } from "../../stores/actionsStore";
 import { useStatusStore } from "../../stores/statusStore";
 import { useConflictStore } from "../../stores/conflictStore";
+import { usePanelUiStore } from "../../stores/panelUiStore";
 import { getCommitFileStatusClass, getStatusLabel } from "../../gitUtils";
 import SvgIcon from "@jamescoyle/vue-icon";
 import OverlayPanel from "primevue/overlaypanel";
@@ -204,10 +205,37 @@ const historyStore = useHistoryStore();
 const actionsStore = useActionsStore();
 const statusStore = useStatusStore();
 const conflictStore = useConflictStore();
+const panelUiStore = usePanelUiStore();
 
 const settingsPanel = ref();
 const toggleSettingsPanel = (event) => {
   statusStore.fetchStatus();
   settingsPanel.value.toggle(event);
 };
+
+async function handleRestoreFile(commitHash, filepath) {
+  const confirmed = await panelUiStore.showConfirmation({
+    title: "Confirm File Restore",
+    message: `This will overwrite your current version of '${filepath}' with the version from commit ${commitHash.substring(0, 7)}. This cannot be undone. Are you sure?`,
+    confirmButtonText: "Yes, Restore File",
+    confirmButtonStyle: "danger",
+  });
+  if (confirmed) {
+    await actionsStore.handleRestoreFile(commitHash, filepath);
+  }
+}
+
+async function handleReset() {
+  const confirmed = await panelUiStore.showConfirmation({
+    title: "Confirm Hard Reset",
+    message:
+      "This will permanently delete all unpushed commits and any uncommitted changes in your workspace. This action cannot be undone. Are you sure you want to match the remote state?",
+    confirmButtonText: "Yes, Reset My Branch",
+    confirmButtonStyle: "danger",
+  });
+
+  if (confirmed) {
+    await actionsStore.handleResetToRemote();
+  }
+}
 </script>
