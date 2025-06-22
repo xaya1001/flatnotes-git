@@ -1,318 +1,129 @@
 // client/git-integration/stores/actionsStore.js
 import { defineStore } from "pinia";
 import { ref } from "vue";
-import { useToast } from "primevue/usetoast";
+import { v4 as uuidv4 } from "uuid";
 import * as gitApi from "../gitApi";
-import { useLogStore } from "./logStore";
-import { useStatusStore } from "./statusStore";
-import { useHistoryStore } from "./historyStore";
-import { usePanelUiStore } from "./panelUiStore";
-import { useConflictStore } from "./conflictStore";
+import eventBus from "../eventBus";
+import { GIT_OPERATION, GIT_CONFLICT } from "../events";
 
 export const useActionsStore = defineStore("git-actions", () => {
-  const toast = useToast();
-  const logStore = useLogStore();
-  const statusStore = useStatusStore();
-  const historyStore = useHistoryStore();
-  const panelUiStore = usePanelUiStore();
-  const conflictStore = useConflictStore();
-
   const isActionLoading = ref(false);
   const isAutoSyncPaused = ref(false);
 
-  async function refreshAllStores() {
-    await Promise.all([statusStore.fetchStatus(), historyStore.fetchGitLog()]);
-  }
-
-  // This helper is for simple actions that don't have complex error states like conflicts.
-  async function performGitAction(
-    actionFunc,
-    args,
-    actionName,
-    successMessage,
-  ) {
+  async function performGitAction(actionFunc, args, actionName) {
     isActionLoading.value = true;
-    const pendingLogId = logStore.addPendingLog(`${actionName}...`);
+    const operationId = uuidv4();
+    eventBus.emit(GIT_OPERATION.WILL_START, { actionName, operationId });
+
     try {
       const response = await actionFunc(...args);
-      toast.add({
-        severity: "success",
-        summary: "Success",
-        detail: successMessage,
-        life: 3000,
+      eventBus.emit(GIT_OPERATION.DID_SUCCEED, {
+        actionName,
+        operationId,
+        response,
       });
-      logStore.updateLog(pendingLogId, {
-        level: "success",
-        message: successMessage,
-        details: response.details || null,
-      });
-      await refreshAllStores();
       return true;
     } catch (err) {
-      const errorData = err.response?.data?.detail;
-      // Special handling for 409 errors
-      if (err.response?.status === 409 && errorData?.state) {
-        if (errorData.state === "PUSH_REJECTED_NON_FAST_FORWARD") {
-          logStore.updateLog(pendingLogId, {
-            level: "warn",
-            message: `Failed: ${actionName} - Push Rejected`,
-            details: errorData.message,
-          });
-          toast.add({
-            severity: "warn",
-            summary: "Push Rejected",
-            detail: "The remote has changes you need to pull first.",
-            life: 6000,
-          });
-        } else {
-          // Generic 409 handler for other conflicts
-          logStore.updateLog(pendingLogId, {
-            level: "error",
-            message: `Failed: ${actionName} - Conflict`,
-            details: errorData.message || "An unknown conflict occurred.",
-          });
-          toast.add({
-            severity: "error",
-            summary: `Conflict: ${actionName}`,
-            detail: errorData.message || "An unknown conflict occurred.",
-            life: 5000,
-          });
-        }
-      } else {
-        // Generic error handler for non-409 errors
-        const errorMessage = errorData?.message || errorData || err.message;
-        toast.add({
-          severity: "error",
-          summary: `Error: ${actionName}`,
-          detail: errorMessage,
-          life: 5000,
-        });
-        logStore.updateLog(pendingLogId, {
-          level: "error",
-          message: `Failed: ${actionName}`,
-          details: errorMessage,
-        });
-      }
-      await refreshAllStores(); // Refresh even on failure to show the resulting state
+      eventBus.emit(GIT_OPERATION.DID_FAIL, { actionName, operationId, err });
       return false;
     } finally {
       isActionLoading.value = false;
     }
   }
 
-  // --- handlers for complex actions like sync and pull ---
-
-  async function handleSync() {
-    const message = statusStore.commitMessage;
+  async function handleComplexAction(actionFunc, args, actionName) {
     isActionLoading.value = true;
-    const pendingLogId = logStore.addPendingLog("Commit & Sync...");
+    const operationId = uuidv4();
+    eventBus.emit(GIT_OPERATION.WILL_START, { actionName, operationId });
+
     try {
-      const response = await gitApi.gitSyncWorkspace(message);
-      toast.add({
-        severity: "success",
-        summary: "Success",
-        detail: "Workspace synced.",
-        life: 3000,
+      const response = await actionFunc(...args);
+      eventBus.emit(GIT_OPERATION.DID_SUCCEED, {
+        actionName,
+        operationId,
+        response,
       });
-      logStore.updateLog(pendingLogId, {
-        level: "success",
-        message: "Workspace synced.",
-        details: response.details,
-      });
-      statusStore.clearCommitMessage();
-      await refreshAllStores();
+      return true;
     } catch (err) {
       const errorData = err.response?.data?.detail;
-      // Check for a 409 conflict and dispatch to the correct handler.
       if (err.response?.status === 409 && errorData?.state) {
         if (errorData.state.includes("CONFLICT")) {
-          logStore.updateLog(pendingLogId, {
-            level: "warn",
-            message: `Sync failed: ${errorData.state}.`,
-            details: errorData.message,
-          });
-          conflictStore.enterConflictMode(errorData);
-          statusStore.fetchStatus();
-        } else if (errorData.state === "PUSH_REJECTED_NON_FAST_FORWARD") {
-          logStore.updateLog(pendingLogId, {
-            level: "warn",
-            message: "Sync partially failed: Push rejected.",
-            details: errorData.message,
-          });
-          toast.add({
-            severity: "warn",
-            summary: "Push Rejected",
-            detail: "The remote has changes you need to pull first.",
-            life: 6000,
-          });
-          await refreshAllStores(); // Refresh to show the new ahead/behind state
+          eventBus.emit(GIT_CONFLICT.DETECTED, { operationId, errorData });
         } else {
-          // Handle other potential 409 errors if they arise
-          const errorMessage = errorData?.message || errorData || err.message;
-          toast.add({
-            severity: "error",
-            summary: "Sync Error",
-            detail: errorMessage,
-            life: 5000,
+          // Handle other specific 409s like non-fast-forward
+          eventBus.emit(GIT_OPERATION.DID_FAIL, {
+            actionName,
+            operationId,
+            err,
           });
-          logStore.updateLog(pendingLogId, {
-            level: "error",
-            message: "Sync failed with unknown 409 error.",
-            details: errorMessage,
-          });
-          await refreshAllStores();
         }
       } else {
-        const errorMessage = errorData?.message || errorData || err.message;
-        toast.add({
-          severity: "error",
-          summary: "Error: Commit & Sync",
-          detail: errorMessage,
-          life: 5000,
+        eventBus.emit(GIT_OPERATION.DID_FAIL, {
+          actionName,
+          operationId,
+          err,
         });
-        logStore.updateLog(pendingLogId, {
-          level: "error",
-          message: "Failed: Commit & Sync",
-          details: errorMessage,
-        });
-        await refreshAllStores(); // Refresh to show the resulting state
       }
+      return false;
     } finally {
       isActionLoading.value = false;
     }
   }
 
-  async function handlePull() {
-    isActionLoading.value = true;
-    const pendingLogId = logStore.addPendingLog("Pulling changes...");
-    try {
-      const response = await gitApi.gitPull();
-      toast.add({
-        severity: "success",
-        summary: "Success",
-        detail: "Pull operation completed.",
-        life: 3000,
-      });
-      logStore.updateLog(pendingLogId, {
-        level: "success",
-        message: "Pull completed.",
-        details: response.details,
-      });
-      await refreshAllStores();
-    } catch (err) {
-      const errorData = err.response?.data?.detail;
-      if (
-        err.response?.status === 409 &&
-        errorData?.state?.includes("CONFLICT")
-      ) {
-        logStore.updateLog(pendingLogId, {
-          level: "warn",
-          message: `Pull failed: ${errorData.state}.`,
-          details: errorData.message,
-        });
-        conflictStore.enterConflictMode(errorData);
-        statusStore.fetchStatus();
-      } else {
-        const errorMessage = errorData?.message || errorData || err.message;
-        toast.add({
-          severity: "error",
-          summary: "Error: Pull",
-          detail: errorMessage,
-          life: 5000,
-        });
-        logStore.updateLog(pendingLogId, {
-          level: "error",
-          message: "Failed: Pull",
-          details: errorMessage,
-        });
-        await refreshAllStores();
-      }
-    } finally {
-      isActionLoading.value = false;
-    }
+  function handleSync(message) {
+    return handleComplexAction(
+      gitApi.gitSyncWorkspace,
+      [message],
+      "Commit & Sync",
+    );
   }
 
-  // --- Other action handlers ---
+  function handlePull() {
+    return handleComplexAction(gitApi.gitPull, [], "Pull");
+  }
 
   function handleStageFile(filepath) {
-    performGitAction(
+    return performGitAction(
       gitApi.gitStageFile,
       [filepath],
-      "Stage File",
-      `File '${filepath}' staged.`,
+      `Stage File: ${filepath.split("/").pop()}`,
     );
   }
 
   function handleStageAll() {
-    performGitAction(gitApi.gitAddAll, [], "Stage All", "All changes staged.");
+    return performGitAction(gitApi.gitAddAll, [], "Stage All");
   }
 
   function handleUnstageFile(filepath) {
-    performGitAction(
+    return performGitAction(
       gitApi.gitUnstageFile,
       [filepath],
-      "Unstage File",
-      `File '${filepath}' unstaged.`,
+      `Unstage File: ${filepath.split("/").pop()}`,
     );
   }
 
   function handleUnstageAll() {
-    performGitAction(
-      gitApi.gitUnstageAll,
-      [],
-      "Unstage All",
-      "All staged changes unstaged.",
+    return performGitAction(gitApi.gitUnstageAll, [], "Unstage All");
+  }
+
+  function handleDiscardFile(filepath) {
+    return performGitAction(
+      gitApi.gitDiscardFile,
+      [filepath],
+      `Discard File: ${filepath.split("/").pop()}`,
     );
   }
 
-  async function handleDiscardFile(filepath) {
-    const confirmed = await panelUiStore.showConfirmation({
-      title: "Confirm Discard",
-      message: `Discard changes to '${filepath}'? This cannot be undone.`,
-      confirmButtonText: "Discard",
-    });
-    if (confirmed) {
-      performGitAction(
-        gitApi.gitDiscardFile,
-        [filepath],
-        "Discard File",
-        `Changes to '${filepath}' discarded.`,
-      );
-    }
+  function handleDiscardAll() {
+    return performGitAction(gitApi.gitDiscardAll, [], "Discard All");
   }
 
-  async function handleDiscardAll() {
-    const confirmed = await panelUiStore.showConfirmation({
-      title: "Confirm Discard All",
-      message: `Discard ALL unstaged changes? This will delete new files and cannot be undone.`,
-      confirmButtonText: "Discard All",
-    });
-    if (confirmed) {
-      performGitAction(
-        gitApi.gitDiscardAll,
-        [],
-        "Discard All",
-        "All unstaged changes discarded.",
-      );
-    }
-  }
-
-  async function handleCommit() {
-    const message = statusStore.commitMessage;
-    if (!message.trim()) return;
-    const success = await performGitAction(
-      gitApi.gitCommit,
-      [message],
-      "Commit",
-      "Changes committed.",
-    );
-    if (success) {
-      statusStore.clearCommitMessage();
-    }
+  function handleCommit(message) {
+    return performGitAction(gitApi.gitCommit, [message], "Commit");
   }
 
   function handlePush() {
-    performGitAction(gitApi.gitPush, [], "Push", "Push operation completed.");
+    return performGitAction(gitApi.gitPush, [], "Push");
   }
 
   async function fetchAutoSyncState() {
@@ -323,6 +134,7 @@ export const useActionsStore = defineStore("git-actions", () => {
       console.error("Failed to get initial auto-sync state", error);
     }
   }
+
   async function toggleAutoSyncPause() {
     const action = isAutoSyncPaused.value
       ? gitApi.resumeAutoSync
@@ -330,87 +142,58 @@ export const useActionsStore = defineStore("git-actions", () => {
     const actionName = isAutoSyncPaused.value
       ? "Resume Auto-Sync"
       : "Pause Auto-Sync";
-    const successMessage = `Auto-sync ${isAutoSyncPaused.value ? "resumed" : "paused"}.`;
 
     isActionLoading.value = true;
-    const pendingLogId = logStore.addPendingLog(`${actionName}...`);
+    const operationId = uuidv4();
+    eventBus.emit(GIT_OPERATION.WILL_START, { actionName, operationId });
+
     try {
       const response = await action();
       isAutoSyncPaused.value = response.paused;
-      toast.add({
-        severity: "info",
-        summary: "Auto-Sync",
-        detail: successMessage,
-        life: 3000,
+      eventBus.emit(GIT_OPERATION.DID_SUCCEED, {
+        actionName,
+        operationId,
+        response,
       });
-      // Explicitly set details to null to clear the "Executing..." message.
-      const updatePayload = {
-        level: "success",
-        message: successMessage,
-        details: null,
-      };
-      logStore.updateLog(pendingLogId, updatePayload);
     } catch (err) {
-      const errorMessage =
-        err.response?.data?.detail || "Failed to update auto-sync state.";
-      toast.add({
-        severity: "error",
-        summary: "Error",
-        detail: errorMessage,
-        life: 3000,
-      });
-      const errorPayload = {
-        level: "error",
-        message: `Failed: ${actionName}`,
-        details: errorMessage,
-      };
-      logStore.updateLog(pendingLogId, errorPayload);
+      eventBus.emit(GIT_OPERATION.DID_FAIL, { actionName, operationId, err });
     } finally {
       isActionLoading.value = false;
     }
   }
 
   async function getBranches() {
+    const operationId = uuidv4();
+    eventBus.emit(GIT_OPERATION.WILL_START, {
+      actionName: "Fetch Branches",
+      operationId,
+    });
     try {
-      // Backend now fetches before listing, so this is correct.
       return await gitApi.getBranches();
     } catch (error) {
-      toast.add({
-        severity: "error",
-        summary: "Error Fetching Branches",
-        detail: error.response?.data?.detail || "Could not load branches.",
-        life: 4000,
+      eventBus.emit(GIT_OPERATION.DID_FAIL, {
+        actionName: "Fetch Branches",
+        operationId,
+        err: error,
       });
       return { branches: [], current_branch: "Error" };
     }
   }
 
-  function switchBranch(branchName) {
-    performGitAction(
-      gitApi.switchBranch,
-      [branchName],
-      "Switch Branch",
-      `Switched to branch '${branchName}'.`,
-    );
+  async function switchBranch(branchName) {
+    return performGitAction(gitApi.switchBranch, [branchName], "Switch Branch");
   }
 
-  async function handleResetToRemote() {
-    const confirmed = await panelUiStore.showConfirmation({
-      title: "Confirm Hard Reset",
-      message:
-        "This will permanently delete all unpushed commits and any uncommitted changes in your workspace. This action cannot be undone. Are you sure you want to match the remote state?",
-      confirmButtonText: "Yes, Reset My Branch",
-      confirmButtonStyle: "danger",
-    });
+  function handleResetToRemote() {
+    return performGitAction(gitApi.gitResetToRemote, [], "Reset to Remote");
+  }
 
-    if (confirmed) {
-      await performGitAction(
-        gitApi.gitResetToRemote,
-        [],
-        "Reset to Remote",
-        "Local branch has been reset to match the remote.",
-      );
-    }
+  function handleRestoreFile(commitHash, filepath) {
+    return performGitAction(
+      gitApi.gitRestoreFile,
+      [commitHash, filepath],
+      "Restore File",
+    );
   }
 
   return {
@@ -431,6 +214,6 @@ export const useActionsStore = defineStore("git-actions", () => {
     getBranches,
     switchBranch,
     handleResetToRemote,
-    performGitAction,
+    handleRestoreFile,
   };
 });

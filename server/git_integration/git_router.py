@@ -239,7 +239,7 @@ def push_git_changes(
 ):
     try:
         result = manager.push_local_changes(
-            remote_name=params.remote, branch=params.branch, force=params.force
+            remote_name=params.remote, branch=params.branch
         )
         message = "Push operation completed."
         add_git_log(LogLevel.SUCCESS, message, details=result)

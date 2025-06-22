@@ -4,26 +4,15 @@ import { ref } from "vue";
 import { v4 as uuidv4 } from "uuid";
 import { useToast } from "primevue/usetoast";
 import * as gitApi from "../gitApi";
-import { usePanelUiStore } from "./panelUiStore";
+import eventBus from "../eventBus";
+import { GIT_OPERATION, GIT_CONFLICT } from "../events";
 
-/**
- * Manages the state for the Git activity log. It is populated by other stores
- * and can be refreshed manually.
- */
 export const useLogStore = defineStore("git-log", () => {
   const toast = useToast();
-  const panelUiStore = usePanelUiStore();
 
-  // -- STATE --
   const logs = ref([]);
+  const operationIdToLogIdMap = ref({});
 
-  // -- ACTIONS --
-  /**
-   * @param {object} logData
-   * @param {'info'|'success'|'warn'|'error'} logData.level
-   * @param {string} logData.message
-   * @param {any} [logData.details]
-   */
   function addLog(logData) {
     const newLog = {
       id: uuidv4(),
@@ -62,7 +51,6 @@ export const useLogStore = defineStore("git-log", () => {
   async function fetchActivityLog() {
     try {
       const backendLogs = await gitApi.getGitActivityLog();
-      // Replace the current log state with the latest from the server.
       logs.value = backendLogs.map((log) => ({ ...log, status: "completed" }));
     } catch (error) {
       console.error("Failed to fetch activity log from backend:", error);
@@ -75,51 +63,119 @@ export const useLogStore = defineStore("git-log", () => {
   }
 
   async function clearAllLogs() {
-    const confirmed = await panelUiStore.showConfirmation({
-      title: "Confirm Clear Log",
-      message:
-        "This will permanently delete all activity log entries from the server. This cannot be undone.",
-      confirmButtonText: "Yes, Clear Log",
-      confirmButtonStyle: "danger",
-    });
-
-    if (confirmed) {
-      try {
-        await gitApi.clearGitActivityLog();
-        // Instead of clearing locally, we fetch from the single source of truth,
-        // which we know is now empty. This is safer against race conditions.
-        await fetchActivityLog();
-        toast.add({
-          severity: "success",
-          summary: "Success",
-          detail: "Activity log cleared.",
-          life: 3000,
-        });
-      } catch (err) {
-        toast.add({
-          severity: "error",
-          summary: "Error",
-          detail: "Failed to clear activity log.",
-          life: 5000,
-        });
-      }
+    try {
+      await gitApi.clearGitActivityLog();
+      await fetchActivityLog();
+      toast.add({
+        severity: "success",
+        summary: "Success",
+        detail: "Activity log cleared.",
+        life: 3000,
+      });
+    } catch (err) {
+      toast.add({
+        severity: "error",
+        summary: "Error",
+        detail: "Failed to clear activity log.",
+        life: 5000,
+      });
     }
   }
 
+  // --- Event Listeners ---
+  eventBus.on(GIT_OPERATION.WILL_START, (payload) => {
+    const logId = addPendingLog(payload.actionName);
+    operationIdToLogIdMap.value[payload.operationId] = logId;
+  });
+
+  eventBus.on(GIT_OPERATION.DID_SUCCEED, (payload) => {
+    const logId = operationIdToLogIdMap.value[payload.operationId];
+    if (logId) {
+      const successMessage = `${payload.actionName} successful.`;
+      updateLog(logId, {
+        level: "success",
+        message: successMessage,
+        details: payload.response.details || null,
+      });
+      delete operationIdToLogIdMap.value[payload.operationId];
+
+      // Show toast for user-facing actions
+      toast.add({
+        severity: "success",
+        summary: "Success",
+        detail: successMessage,
+        life: 3000,
+      });
+    }
+  });
+
+  eventBus.on(GIT_OPERATION.DID_FAIL, (payload) => {
+    const logId = operationIdToLogIdMap.value[payload.operationId];
+    if (logId) {
+      const errorData = payload.err.response?.data?.detail;
+      const errorMessage =
+        errorData?.message || errorData || payload.err.message;
+      updateLog(logId, {
+        level: "error",
+        message: `Failed: ${payload.actionName}`,
+        details: errorMessage,
+      });
+      delete operationIdToLogIdMap.value[payload.operationId];
+
+      toast.add({
+        severity: "error",
+        summary: `Error: ${payload.actionName}`,
+        detail: errorMessage,
+        life: 5000,
+      });
+    }
+  });
+
+  eventBus.on(GIT_CONFLICT.DETECTED, (payload) => {
+    const logId = operationIdToLogIdMap.value[payload.operationId];
+    if (logId) {
+      const { state, conflicted_files } = payload.errorData;
+      const conflictType = state.includes("REBASING") ? "Rebase" : "Merge";
+      updateLog(logId, {
+        level: "warn",
+        message: `Sync failed: ${conflictType} Conflict.`,
+        details: `Files with conflicts: ${conflicted_files.join(", ")}`,
+      });
+      delete operationIdToLogIdMap.value[payload.operationId];
+    }
+  });
+
+  eventBus.on(GIT_CONFLICT.RESOLVED, (payload) => {
+    const logId = operationIdToLogIdMap.value[payload.operationId];
+    if (logId) {
+      const message = `${payload.actionName} successful.`;
+      updateLog(logId, {
+        level: "success",
+        message: message,
+        details: payload.response.details || payload.response.stdout,
+      });
+      delete operationIdToLogIdMap.value[payload.operationId];
+
+      toast.add({
+        severity: "success",
+        summary: "Operation Complete",
+        detail: payload.response.message || message,
+        life: 4000,
+      });
+    }
+  });
+
   function initialize() {
-    // Fetch initial logs when the application loads.
     fetchActivityLog();
   }
 
   function cleanup() {
-    // No-op. There are no connections or intervals to clear.
+    // No-op.
   }
 
   return {
     logs,
     addLog,
-    addPendingLog,
-    updateLog,
     initialize,
     cleanup,
     fetchActivityLog,

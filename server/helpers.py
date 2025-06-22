@@ -2,7 +2,7 @@ import os
 import re
 import sys
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from logger import logger
 
@@ -19,8 +19,7 @@ def is_valid_filename(value):
     invalid_chars = r'<>:"/\|?*'
     if any(invalid_char in value for invalid_char in invalid_chars):
         raise ValueError(
-            "title cannot include any of the following characters: "
-            + invalid_chars
+            "title cannot include any of the following characters: " + invalid_chars
         )
     return value
 
@@ -31,9 +30,7 @@ def strip_whitespace(value):
     return value.strip()
 
 
-def get_env(
-    key, mandatory=False, default=None, cast_int=False, cast_bool=False
-):
+def get_env(key, mandatory=False, default=None, cast_int=False, cast_bool=False):
     """Get an environment variable. If `mandatory` is True and environment
     variable isn't set, exit the program"""
     value = os.environ.get(key)
@@ -77,7 +74,8 @@ def replace_base_href(html_file, path_prefix):
 
 
 class CustomBaseModel(BaseModel):
-    class Config:
-        alias_generator = camel_case
-        populate_by_name = True
-        from_attributes = True
+    model_config = ConfigDict(
+        alias_generator=camel_case,
+        populate_by_name=True,
+        from_attributes=True,
+    )

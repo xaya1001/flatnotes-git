@@ -1,3 +1,4 @@
+<!-- client/git-integration/components/tabs/ConflictView.vue -->
 <template>
   <div class="flex h-full flex-col">
     <!-- Header -->

@@ -49,7 +49,7 @@
 
           <!-- Row 2: Commit Actions -->
           <button
-            @click="actionsStore.handleCommit"
+            @click="actionsStore.handleCommit(statusStore.commitMessage)"
             :disabled="isCommitStagedDisabled"
             :title="commitStagedButtonTitle"
             class="rounded bg-theme-background p-2 text-sm font-semibold hover:bg-theme-border disabled:cursor-not-allowed disabled:opacity-50"
@@ -57,7 +57,7 @@
             Commit Staged
           </button>
           <button
-            @click="actionsStore.handleSync"
+            @click="actionsStore.handleSync(statusStore.commitMessage)"
             :disabled="isSyncDisabled"
             :title="syncButtonTitle"
             class="rounded p-2 text-sm font-semibold text-white transition-colors duration-200 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
@@ -148,7 +148,7 @@
             :is-loading="statusStore.isLoading"
             @open="statusStore.openNoteInEditor($event)"
             @action:primary="actionsStore.handleStageFile($event)"
-            @action:secondary="actionsStore.handleDiscardFile($event)"
+            @action:secondary="handleDiscardFile($event)"
             action-primary-icon="stage"
             action-secondary-icon="discard"
           />
@@ -157,7 +157,7 @@
             class="mt-4 border-t border-theme-border pt-4"
           >
             <button
-              @click="actionsStore.handleDiscardAll"
+              @click="handleDiscardAll"
               :disabled="actionsStore.isActionLoading"
               class="w-full rounded border border-theme-danger p-2 text-sm font-semibold text-theme-danger hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -300,6 +300,7 @@ import { ref, onMounted, onUnmounted, computed } from "vue";
 import OverlayPanel from "primevue/overlaypanel";
 import { useStatusStore } from "../../stores/statusStore";
 import { useActionsStore } from "../../stores/actionsStore";
+import { usePanelUiStore } from "../../stores/panelUiStore";
 import FileTable from "../shared/FileTable.vue";
 import SvgIcon from "@jamescoyle/vue-icon";
 import {
@@ -316,10 +317,34 @@ import {
 
 const statusStore = useStatusStore();
 const actionsStore = useActionsStore();
+const panelUiStore = usePanelUiStore();
 
 const isBranchMenuVisible = ref(false);
 const branchData = ref({ branches: [], current_branch: "" });
 const upstreamWarningPanel = ref();
+
+// --- Action Wrappers ---
+async function handleDiscardFile(filepath) {
+  const confirmed = await panelUiStore.showConfirmation({
+    title: "Confirm Discard",
+    message: `Discard changes to '${filepath}'? This cannot be undone.`,
+    confirmButtonText: "Discard",
+  });
+  if (confirmed) {
+    await actionsStore.handleDiscardFile(filepath);
+  }
+}
+
+async function handleDiscardAll() {
+  const confirmed = await panelUiStore.showConfirmation({
+    title: "Confirm Discard All",
+    message: `Discard ALL unstaged changes? This will delete new files and cannot be undone.`,
+    confirmButtonText: "Discard All",
+  });
+  if (confirmed) {
+    await actionsStore.handleDiscardAll();
+  }
+}
 
 // --- .gitignore Helper ---
 const gitignoreFile = computed(() => {
@@ -330,8 +355,8 @@ const showGitignoreHelper = computed(() => {
   return gitignoreFile.value && gitignoreFile.value.work_tree_status !== " ";
 });
 
-function stageAndPrefillCommit() {
-  actionsStore.handleStageFile(".gitignore");
+async function stageAndPrefillCommit() {
+  await actionsStore.handleStageFile(".gitignore");
   if (!statusStore.commitMessage) {
     statusStore.commitMessage = "chore: Initialize .gitignore";
   }
@@ -380,9 +405,8 @@ const pushButtonStyle = computed(() => {
 });
 
 const syncButtonStyle = computed(() => {
-  // Sync button is primary only if there are no pending pulls or pushes.
   if (statusStore.commitsBehind > 0 || statusStore.commitsAhead > 0) {
-    return "bg-gray-500"; // A neutral, less prominent color
+    return "bg-gray-500";
   }
   return "bg-theme-brand";
 });
@@ -392,12 +416,15 @@ const isPullDisabled = computed(
   () =>
     isActionInProgress.value ||
     isNotTracking.value ||
-    statusStore.commitsBehind === 0,
+    statusStore.commitsBehind === 0 ||
+    hasUncommittedChanges.value,
 );
 const pullButtonTitle = computed(() => {
   if (isActionInProgress.value) return "Action in progress...";
   if (isNotTracking.value)
     return "Current branch is not tracking a remote branch.";
+  if (hasUncommittedChanges.value)
+    return "Commit or discard your local changes before pulling.";
   if (statusStore.commitsBehind === 0) return "No incoming changes to pull.";
   return `Pull ${statusStore.commitsBehind} commits from remote`;
 });
@@ -442,12 +469,10 @@ const syncButtonTitle = computed(() => {
   return "Commit all changes and sync with remote";
 });
 
-// Unstage All Button
 const isUnstageAllDisabled = computed(
   () => isActionInProgress.value || noStagedFiles.value,
 );
 
-// Stage All Button
 const isStageAllDisabled = computed(
   () => isActionInProgress.value || noUnstagedFiles.value,
 );
@@ -467,9 +492,9 @@ const toggleUpstreamWarning = (event) => {
   upstreamWarningPanel.value.toggle(event);
 };
 
-const handleBranchSelect = (branch) => {
+const handleBranchSelect = async (branch) => {
   if (!branch.is_active) {
-    actionsStore.switchBranch(branch.name);
+    await actionsStore.switchBranch(branch.name);
   }
   isBranchMenuVisible.value = false;
 };

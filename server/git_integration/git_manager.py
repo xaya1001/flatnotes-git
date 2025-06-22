@@ -145,6 +145,13 @@ class GitManager:
         """
         env = os.environ.copy()
         env["GIT_EDITOR"] = "true"
+        if self.author:
+            env["GIT_AUTHOR_NAME"] = self.author.name
+            env["GIT_AUTHOR_EMAIL"] = self.author.email
+        if self.committer:
+            env["GIT_COMMITTER_NAME"] = self.committer.name
+            env["GIT_COMMITTER_EMAIL"] = self.committer.email
+
         try:
             process = subprocess.run(
                 ["git"] + command,

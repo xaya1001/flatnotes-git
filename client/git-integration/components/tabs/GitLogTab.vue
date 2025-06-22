@@ -22,7 +22,7 @@
         </button>
       </div>
       <button
-        @click="logStore.clearAllLogs"
+        @click="handleClearLogs"
         :disabled="logStore.logs.length === 0"
         class="flex items-center space-x-1 rounded-full bg-theme-background px-3 py-1 text-xs font-semibold text-theme-text-muted transition-colors duration-200 hover:bg-theme-border hover:text-theme-danger disabled:cursor-not-allowed disabled:opacity-50"
         title="Clear all log entries"
@@ -61,12 +61,14 @@
 <script setup>
 import { ref, computed } from "vue";
 import { useLogStore } from "../../stores/logStore";
+import { usePanelUiStore } from "../../stores/panelUiStore";
 import { getLogLevelBgClass, getLogLevelTextColorClass } from "../../gitUtils";
 import LogDetail from "../shared/LogDetail.vue";
 import SvgIcon from "@jamescoyle/vue-icon";
 import { mdiDeleteSweep } from "@mdi/js";
 
 const logStore = useLogStore();
+const panelUiStore = usePanelUiStore();
 
 const activeLogLevelFilter = ref("all");
 const logLevelOptions = ref([
@@ -88,5 +90,19 @@ const filteredLogs = computed(() => {
 
 function setLogLevelFilter(level) {
   activeLogLevelFilter.value = level;
+}
+
+async function handleClearLogs() {
+  const confirmed = await panelUiStore.showConfirmation({
+    title: "Confirm Clear Log",
+    message:
+      "This will permanently delete all activity log entries from the server. This cannot be undone.",
+    confirmButtonText: "Yes, Clear Log",
+    confirmButtonStyle: "danger",
+  });
+
+  if (confirmed) {
+    await logStore.clearAllLogs();
+  }
 }
 </script>

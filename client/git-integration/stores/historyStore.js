@@ -4,17 +4,12 @@ import { ref } from "vue";
 import { useToast } from "primevue/usetoast";
 import { useRouter } from "vue-router";
 import * as gitApi from "../gitApi";
-import { useActionsStore } from "./actionsStore";
-import { usePanelUiStore } from "./panelUiStore";
-import { useLogStore } from "./logStore";
-import { useStatusStore } from "./statusStore";
+import eventBus from "../eventBus";
+import { GIT_OPERATION, GIT_CONFLICT } from "../events";
 
 export const useHistoryStore = defineStore("git-history", () => {
   const toast = useToast();
   const router = useRouter();
-  const panelUiStore = usePanelUiStore();
-  const logStore = useLogStore();
-  const statusStore = useStatusStore();
 
   const gitLog = ref([]);
   const isLoading = ref(false);
@@ -73,52 +68,26 @@ export const useHistoryStore = defineStore("git-history", () => {
     router.push({ name: "note", params: { title } });
   }
 
-  async function restoreFile(commitHash, filepath) {
-    const actionsStore = useActionsStore();
-
-    const confirmed = await panelUiStore.showConfirmation({
-      title: "Confirm File Restore",
-      message: `This will overwrite your current version of '${filepath}' with the version from commit ${commitHash.substring(0, 7)}. This cannot be undone. Are you sure?`,
-      confirmButtonText: "Yes, Restore File",
-      confirmButtonStyle: "danger",
-    });
-
-    if (confirmed) {
-      actionsStore.isActionLoading = true;
-      const pendingLogId = logStore.addPendingLog(`Restoring '${filepath}'...`);
-      try {
-        await gitApi.gitRestoreFile(commitHash, filepath);
-
-        toast.add({
-          severity: "success",
-          summary: "Success",
-          detail: `File '${filepath}' restored.`,
-          life: 3000,
-        });
-        logStore.updateLog(pendingLogId, {
-          level: "success",
-          message: `File '${filepath}' restored.`,
-        });
-
-        await statusStore.fetchStatus();
-      } catch (err) {
-        const errorMessage = err.response?.data?.detail || err.message;
-        toast.add({
-          severity: "error",
-          summary: "Error Restoring File",
-          detail: errorMessage,
-          life: 5000,
-        });
-        logStore.updateLog(pendingLogId, {
-          level: "error",
-          message: `Failed to restore '${filepath}'.`,
-          details: errorMessage,
-        });
-      } finally {
-        actionsStore.isActionLoading = false;
+  // --- Event Listeners ---
+  const refreshEvents = [GIT_OPERATION.DID_SUCCEED, GIT_CONFLICT.RESOLVED];
+  refreshEvents.forEach((eventName) => {
+    eventBus.on(eventName, (payload) => {
+      // Only refresh on actions that change history
+      const relevantActions = [
+        "Commit & Sync",
+        "Pull",
+        "Push",
+        "Commit",
+        "Continue Operation",
+        "Abort Operation",
+        "Switch Branch",
+        "Reset to Remote",
+      ];
+      if (relevantActions.includes(payload.actionName)) {
+        fetchGitLog();
       }
-    }
-  }
+    });
+  });
 
   return {
     gitLog,
@@ -130,6 +99,5 @@ export const useHistoryStore = defineStore("git-history", () => {
     fetchGitLog,
     toggleCommitExpansion,
     openNoteInEditor,
-    restoreFile,
   };
 });
