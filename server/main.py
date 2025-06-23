@@ -61,21 +61,21 @@ async def lifespan(app: FastAPI):
     if git_config.GIT_ENABLED:
         logger.info("Git integration is enabled.")
 
-        # Determine the active automatic sync method
-        if git_config.GIT_WEBHOOK_SECRET:
+        # --- Sync Logic ---
+        # Determine the active automatic sync method. Webhook takes precedence.
+        if git_config.GIT_WEBHOOK_ACTIVE:
             logger.info("Sync Mode: Real-time fetch via Webhook is active.")
 
         elif git_config.GIT_AUTO_FETCH_INTERVAL > 0:
             interval = git_config.GIT_AUTO_FETCH_INTERVAL
             logger.info(
-                f"Sync Mode: Scheduled fetch is active with an interval of {interval} minutes."
+                f"Sync Mode: Scheduled fetch is active with an interval of {interval} minutes (fallback mode)."
             )
 
             scheduler = BackgroundScheduler(daemon=True)
 
             async def scheduled_fetch_job():
                 """A lightweight job that only performs a git fetch."""
-
                 logger.debug("Executing scheduled git fetch...")
                 try:
                     manager = get_git_manager()
@@ -85,7 +85,7 @@ async def lifespan(app: FastAPI):
                         LogLevel.SUCCESS,
                         "Scheduled fetch successful",
                         details="Remote changes (if any) have been fetched.",
-                        persist=False,  # Don't persist success to save disk space
+                        persist=False,
                         log_id=AUTO_FETCH_LOG_ID,
                     )
                 except Exception as e:
@@ -370,7 +370,7 @@ def get_config():
         quick_access_limit=global_config.quick_access_limit,
         flatnotes_git_enabled=global_config.flatnotes_git_enabled,
         flatnotes_git_auto_fetch_interval=global_config.flatnotes_git_auto_fetch_interval,
-        flatnotes_git_webhook_configured=global_config.flatnotes_git_webhook_configured,
+        flatnotes_git_webhook_active=global_config.flatnotes_git_webhook_active,
         frontend_image_compression_enabled=global_config.frontend_image_compression_enabled,
         frontend_image_compression_quality=global_config.frontend_image_compression_quality,
         frontend_image_max_width=global_config.frontend_image_max_width,

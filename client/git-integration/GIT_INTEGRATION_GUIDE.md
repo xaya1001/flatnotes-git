@@ -16,7 +16,7 @@ While Flatnotes provides a great web interface, integrating Git offers powerful 
 The Git integration adds a dedicated panel to the Flatnotes UI with three main tabs:
 
 - **Workspace:** View and manage your current changes. Stage, unstage, commit, and discard changes to files. This is where you'll find the main `Commit & Sync` button.
-- **History:** Browse your repository's commit history. See who changed what and when. You can also view the files in each commit and restore a file to a previous version.
+- **History:** Browse your repository's commit history. See who changed what and when. You can also view the files in each commit.
 - **Log:** A real-time log of all Git operations performed by the application, useful for troubleshooting.
 
 ## Getting Started: Build & Run with Docker
@@ -184,9 +184,9 @@ Restart the container with `docker compose down && docker compose up -d`. Flatno
 
 ---
 
-## Optional: Real-time Sync with Webhooks
+## Optional: Real-time Fetch with Webhooks
 
-By default, Flatnotes only knows about remote changes when you click "Pull" or when the auto-sync timer runs. To make Flatnotes aware of remote changes instantly (e.g., when you `push` from a local editor), you can set up a webhook.
+By default, Flatnotes only knows about remote changes when you click "Pull" or when the auto-fetch timer runs. To make Flatnotes aware of remote changes instantly (e.g., when you `push` from a local editor), you can set up a webhook.
 
 This feature enables Flatnotes to automatically `git fetch` in the background. This is a **safe, read-only operation** that will not modify your notes. Instead, it will update the UI to show that new changes are available to be pulled.
 
@@ -228,4 +228,72 @@ Here are instructions for GitHub. The process is similar for GitLab or other pro
 3.  Check the **Recent Deliveries** tab in your GitHub webhook settings. You should see a recent delivery with a green checkmark and a `202 Accepted` response code.
 4.  Open the Flatnotes web UI. The Git status indicator should automatically update to show that there are incoming changes to pull.
 
-You now have a fully real-time, bi-directional Git sync setup for your notes!
+---
+
+## Bonus: Decoupling Attachments with S3/R2 Storage
+
+For advanced users, Flatnotes supports storing attachments (like images) in an S3-compatible object storage service instead of the local filesystem.
+
+### Why Use S3/R2?
+
+- **Keeps Your Git Repository Lean:** By storing large image files outside of your Git repository, your repository size remains small, making `git clone`, `pull`, and `push` operations significantly faster.
+- **Scalability & Cost-Effectiveness:** Object storage is designed for massive scale and is often cheaper for storing large amounts of data than block storage (disks).
+- **Performance:** Serve images from a global, high-performance network (like AWS S3 or Cloudflare R2's CDN) instead of your small Flatnotes server, improving load times for you and your users.
+- **Durability & Backup:** Services like S3 provide industry-leading data durability, automatically replicating your data across multiple devices and facilities.
+
+### How to Configure
+
+To enable S3 storage, you need to set several environment variables.
+
+#### Step 1: Set the Storage Provider
+
+First, you must tell Flatnotes to use the `s3` provider.
+
+```yaml
+environment:
+  # ...
+  FLATNOTES_ATTACHMENT_STORAGE_PROVIDER: "s3"
+```
+
+#### Step 2: Configure S3/R2 Credentials and Settings
+
+Add the following variables to your `environment` block, customized for your provider.
+
+| Variable                         | Description                                                                                                                                                |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `FLATNOTES_S3_ENDPOINT_URL`      | **(Required for R2/MinIO)** The full endpoint URL. For Cloudflare R2: `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`. For AWS S3, leave this blank.       |
+| `FLATNOTES_S3_ACCESS_KEY_ID`     | **(Required)** Your S3 Access Key ID.                                                                                                                      |
+| `FLATNOTES_S3_SECRET_ACCESS_KEY` | **(Required)** Your S3 Secret Access Key.                                                                                                                  |
+| `FLATNOTES_S3_BUCKET_NAME`       | **(Required)** The name of the S3 bucket where files will be stored.                                                                                       |
+| `FLATNOTES_S3_REGION`            | **(Required)** The AWS region of your bucket (e.g., `us-east-1`). For Cloudflare R2, set this to `auto`.                                                   |
+| `FLATNOTES_S3_PATH_PREFIX`       | (Optional) A prefix to add to all uploaded file paths within the bucket (e.g., `images/flatnotes`).                                                        |
+| `FLATNOTES_S3_PUBLIC_URL_BASE`   | (Optional) A custom public URL base for your files. This is highly recommended for Cloudflare R2's public buckets. Example: `https://pub-xxxxxxxx.r2.dev`. |
+
+#### Example: Cloudflare R2 Configuration
+
+```yaml
+# In your docker-compose.yml environment section:
+environment:
+  FLATNOTES_ATTACHMENT_STORAGE_PROVIDER: "s3"
+  FLATNOTES_S3_ENDPOINT_URL: "https://<YOUR_ACCOUNT_ID>.r2.cloudflarestorage.com"
+  FLATNOTES_S3_ACCESS_KEY_ID: "<YOUR_R2_ACCESS_KEY>"
+  FLATNOTES_S3_SECRET_ACCESS_KEY: "<YOUR_R2_SECRET_KEY>"
+  FLATNOTES_S3_BUCKET_NAME: "my-flatnotes-attachments"
+  FLATNOTES_S3_REGION: "auto"
+  FLATNOTES_S3_PUBLIC_URL_BASE: "https://pub-....r2.dev" # Your R2 bucket's public domain
+```
+
+#### Example: AWS S3 Configuration
+
+```yaml
+# In your docker-compose.yml environment section:
+environment:
+  FLATNOTES_ATTACHMENT_STORAGE_PROVIDER: "s3"
+  # ENDPOINT_URL is not set for AWS S3
+  FLATNOTES_S3_ACCESS_KEY_ID: "<YOUR_AWS_IAM_ACCESS_KEY>"
+  FLATNOTES_S3_SECRET_ACCESS_KEY: "<YOUR_AWS_IAM_SECRET_KEY>"
+  FLATNOTES_S3_BUCKET_NAME: "my-flatnotes-attachments-bucket"
+  FLATNOTES_S3_REGION: "us-west-2" # Your bucket's region
+```
+
+After adding these variables, restart your container (`docker compose restart`). New attachments will now be uploaded to your S3-compatible provider.

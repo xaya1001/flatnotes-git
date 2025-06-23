@@ -42,7 +42,7 @@
           <div
             class="flex flex-grow items-center justify-center space-x-1 text-xs text-theme-text-muted"
           >
-            <template v-if="globalConfig?.flatnotesGitWebhookConActive">
+            <template v-if="globalConfig?.flatnotesGitWebhookActive">
               <SvgIcon type="mdi" :path="mdiLanConnect" :size="14" />
               <span>Real-time Fetch Active</span>
             </template>

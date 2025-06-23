@@ -743,7 +743,7 @@ class GitManager:
             return {"message": "Fetch successful.", "stdout": output}
         except GitManagerError as e:
             # Re-raise to be handled by the router's exception handler.
-            raise GitManagerError(f"Fetch operation failed: {e}")
+            raise GitManagerError(f"Fetch operation failed: {e}") from e
 
     def fetch_and_list_branches(self) -> Dict[str, Any]:
         try:

@@ -51,7 +51,7 @@ class GlobalConfig:
         self.flatnotes_git_auto_fetch_interval: int = get_env(
             "FLATNOTES_GIT_AUTO_FETCH_INTERVAL",
             mandatory=False,
-            default=1,
+            default=0,
             cast_int=True,
         )
         self.flatnotes_git_auto_init: bool = get_env(
@@ -61,9 +61,17 @@ class GlobalConfig:
             "FLATNOTES_GIT_PULL_STRATEGY", mandatory=False, default="rebase"
         )
 
-        self.flatnotes_git_webhook_active: bool = bool(
-            self.flatnotes_git_webhook_secret
-        )
+        # --- Secure Webhook Activation Logic ---
+        MIN_WEBHOOK_SECRET_LENGTH = 16
+        self.flatnotes_git_webhook_active: bool = False
+        if self.flatnotes_git_webhook_secret:
+            if len(self.flatnotes_git_webhook_secret) >= MIN_WEBHOOK_SECRET_LENGTH:
+                self.flatnotes_git_webhook_active = True
+            else:
+                logger.warning(
+                    f"FLATNOTES_GIT_WEBHOOK_SECRET is set but is shorter than {MIN_WEBHOOK_SECRET_LENGTH} characters. "
+                    "The webhook endpoint has been disabled for security."
+                )
 
         # --- Attachment Config ---
         self.attachment_storage_provider: StorageProviderType = (
