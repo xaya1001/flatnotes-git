@@ -1,5 +1,4 @@
 from contextlib import asynccontextmanager
-from datetime import datetime
 from typing import List, Literal
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -37,7 +36,10 @@ router = APIRouter()
 git_integration_router = None
 if global_config.flatnotes_git_enabled:
     try:
-        from git_integration import git_config as git_config
+        from git_integration import git_config
+        from git_integration.git_config import initialize_git_config
+
+        initialize_git_config(global_config)
         from git_integration.git_logger import LogLevel, add_git_log
         from git_integration.git_router import get_git_manager
         from git_integration.git_router import router as git_integration_router
@@ -52,75 +54,47 @@ async def lifespan(app: FastAPI):
     """Handles application startup and shutdown events."""
     logger.info("Application startup...")
 
-    if git_integration_router:
-        try:
-            if global_config.flatnotes_git_auto_sync_interval > 0:
-                logger.info(
-                    f"Initializing scheduled auto-sync for every {global_config.flatnotes_git_auto_sync_interval} minutes."
-                )
-                scheduler = BackgroundScheduler(daemon=True)
+    if git_config.GIT_ENABLED:
+        logger.info("Git integration is enabled.")
 
-                def scheduled_sync_job():
-                    if git_config.is_auto_sync_paused():
-                        logger.debug("Auto-sync is paused, skipping scheduled job.")
-                        return
+        # Determine the active automatic sync method
+        if git_config.GIT_WEBHOOK_SECRET:
+            logger.info("Sync Mode: Real-time fetch via Webhook is active.")
 
-                    try:
-                        manager = get_git_manager()
-                        repo_state = manager.get_repository_state()
-                        if not repo_state.startswith("CLEAN"):
-                            logger.info(
-                                f"Skipping auto-sync: Repository is in '{repo_state}' state, requires manual intervention."
-                            )
-                            # Optionally add a log entry for the user to see in the UI
-                            add_git_log(
-                                LogLevel.WARN,
-                                "Auto-sync skipped",
-                                f"Cannot sync while repository state is '{repo_state}'.",
-                            )
-                            return
-                    except Exception as e:
-                        logger.error(
-                            f"Auto-sync failed during pre-check: {e}", exc_info=True
-                        )
-                        add_git_log(
-                            LogLevel.ERROR,
-                            "Auto-sync pre-check failed.",
-                            details=str(e),
-                        )
-                        return
-
-                    logger.info("Executing scheduled git sync...")
-                    add_git_log(LogLevel.INFO, "Scheduled auto-sync: Task started.")
-                    try:
-                        # Re-get manager inside the thread for safety
-                        sync_manager = get_git_manager()
-                        commit_message = f"chore: automatic sync at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-                        sync_manager.sync_workspace(commit_message)
-                        add_git_log(
-                            LogLevel.SUCCESS, "Scheduled auto-sync: Successful."
-                        )
-                    except Exception as e:
-                        logger.error(f"Scheduled git sync failed: {e}", exc_info=True)
-                        add_git_log(
-                            LogLevel.ERROR,
-                            "Scheduled auto-sync: Failed.",
-                            details=str(e),
-                        )
-
-                scheduler.add_job(
-                    scheduled_sync_job,
-                    "interval",
-                    minutes=global_config.flatnotes_git_auto_sync_interval,
-                )
-                scheduler.start()
-                app.state.scheduler = scheduler
-                logger.info("Scheduler for auto-sync started.")
-
-        except Exception as e:
-            logger.error(
-                f"Failed to initialize GitManager during application startup: {e}"
+        elif git_config.GIT_AUTO_FETCH_INTERVAL > 0:
+            interval = git_config.GIT_AUTO_FETCH_INTERVAL
+            logger.info(
+                f"Sync Mode: Scheduled fetch is active with an interval of {interval} minutes."
             )
+
+            scheduler = BackgroundScheduler(daemon=True)
+
+            async def scheduled_fetch_job():
+                """A lightweight job that only performs a git fetch."""
+                if git_config.is_auto_sync_paused():
+                    return
+
+                logger.debug("Executing scheduled git fetch...")
+                try:
+                    manager = get_git_manager()
+                    manager.fetch_only()
+                    await connection_manager.broadcast_status_update()
+                except Exception as e:
+                    logger.error(f"Scheduled git fetch failed: {e}")
+                    add_git_log(
+                        LogLevel.ERROR,
+                        "Scheduled fetch failed",
+                        details=str(e),
+                        persist=True,
+                    )
+
+            scheduler.add_job(scheduled_fetch_job, "interval", minutes=interval)
+            scheduler.start()
+            app.state.scheduler = scheduler
+            logger.info("Scheduler for auto-fetch started.")
+
+        else:
+            logger.info("Sync Mode: Manual sync only. No automatic fetch configured.")
 
     yield
 
@@ -385,7 +359,8 @@ def get_config():
         quick_access_sort=global_config.quick_access_sort,
         quick_access_limit=global_config.quick_access_limit,
         flatnotes_git_enabled=global_config.flatnotes_git_enabled,
-        flatnotes_git_auto_sync_interval=global_config.flatnotes_git_auto_sync_interval,
+        flatnotes_GIT_AUTO_FETCH_INTERVAL=global_config.flatnotes_GIT_AUTO_FETCH_INTERVAL,
+        flatnotes_git_webhook_configured=global_config.flatnotes_git_webhook_configured,
         frontend_image_compression_enabled=global_config.frontend_image_compression_enabled,
         frontend_image_compression_quality=global_config.frontend_image_compression_quality,
         frontend_image_max_width=global_config.frontend_image_max_width,

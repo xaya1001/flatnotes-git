@@ -418,10 +418,8 @@ class GitManager:
         parent = commit.parents[0] if commit.parents else None
 
         if parent:
-            # If there's a parent, diff against its tree
-            return commit.tree.diff_to_tree(parent.tree)
+            return parent.tree.diff_to_tree(commit.tree)
         else:
-            # This is the initial commit, diff against an empty tree
             return commit.tree.diff_to_tree()
 
     def commit(self, message: Optional[str]) -> Dict[str, Any]:

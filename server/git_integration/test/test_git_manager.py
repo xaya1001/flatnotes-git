@@ -558,3 +558,60 @@ class TestReadOnlyOperations:
         manager, _ = manager_local  # Unpack to match the fixture's return signature
         with pytest.raises(BranchNotFoundError):
             manager.switch_branch("non-existent-branch")
+
+    def test_get_files_in_commit_returns_correct_statuses_for_amd(self, manager_local):
+        """
+        Regression test: Ensures that added, modified, and deleted files in a
+        commit have the correct 'A', 'M', and 'D' statuses respectively.
+        This verifies the diff direction is correct (parent -> commit).
+        """
+        manager, repo_path = manager_local
+
+        # --- 1. Setup: Create the base commit ---
+        path_to_modify = os.path.join(repo_path, "file-to-modify.md")
+        path_to_delete = os.path.join(repo_path, "file-to-delete.md")
+
+        with open(path_to_modify, "w") as f:
+            f.write("Initial content")
+        with open(path_to_delete, "w") as f:
+            f.write("This file will be deleted")
+
+        run_git(repo_path, ["add", "."])
+        run_git(repo_path, ["commit", "-m", "Base state for AMD test"])
+
+        # --- 2. Setup: Create the target commit with A, M, and D changes ---
+        # Add a new file
+        with open(os.path.join(repo_path, "new-file.md"), "w") as f:
+            f.write("This is a new file")
+        run_git(repo_path, ["add", "new-file.md"])
+
+        # Modify an existing file
+        with open(path_to_modify, "w") as f:
+            f.write("Modified content")
+        run_git(repo_path, ["add", path_to_modify])
+
+        # Delete a file
+        os.remove(path_to_delete)
+        run_git(repo_path, ["rm", "file-to-delete.md"])
+
+        run_git(repo_path, ["commit", "-m", "Test commit with A, M, D changes"])
+        target_commit_hash = run_git(repo_path, ["rev-parse", "HEAD"])
+
+        # --- 3. Act: Get the files from the manager ---
+        files_in_commit = manager.get_files_in_commit(target_commit_hash)
+
+        # --- 4. Assert: Check the status of each file ---
+        # For easier assertion, convert the list of dicts to a dict of path -> status
+        statuses = {f["path"]: f["status"] for f in files_in_commit}
+
+        assert "new-file.md" in statuses
+        assert statuses["new-file.md"] == "A", "Newly created file should be 'A'"
+
+        assert "file-to-modify.md" in statuses
+        assert statuses["file-to-modify.md"] == "M", "Modified file should be 'M'"
+
+        assert "file-to-delete.md" in statuses
+        assert statuses["file-to-delete.md"] == "D", "Deleted file should be 'D'"
+
+        # Also assert the total number of changes
+        assert len(files_in_commit) == 3

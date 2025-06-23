@@ -475,25 +475,6 @@ def delete_git_activity_log():
         raise HTTPException(status_code=500, detail="Failed to clear activity logs.")
 
 
-@router.get("/auto-sync/state", response_model=dict, dependencies=auth_deps)
-def get_auto_sync_state():
-    return {"paused": git_config.is_auto_sync_paused()}
-
-
-@router.post("/auto-sync/pause", response_model=dict, dependencies=auth_deps)
-def set_pause_auto_sync():
-    git_config.pause_auto_sync()
-    add_git_log(LogLevel.INFO, "Auto-sync: Paused by user.")
-    return {"paused": True}
-
-
-@router.post("/auto-sync/resume", response_model=dict, dependencies=auth_deps)
-def set_resume_auto_sync():
-    git_config.resume_auto_sync()
-    add_git_log(LogLevel.INFO, "Auto-sync: Resumed by user.")
-    return {"paused": False}
-
-
 @router.websocket("/ws/status")
 async def websocket_endpoint(websocket: WebSocket):
     """Handles WebSocket connections for real-time status updates."""

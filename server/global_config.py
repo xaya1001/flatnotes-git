@@ -1,5 +1,6 @@
 import sys
 from enum import Enum
+from typing import Optional
 
 from helpers import CustomBaseModel, get_env
 from logger import logger
@@ -21,38 +22,70 @@ class GlobalConfig:
         self.quick_access_limit: int = self._quick_access_limit()
         self.path_prefix: str = self._load_path_prefix()
 
+        # --- Git Integration Config ---
+        self.flatnotes_path: str = get_env("FLATNOTES_PATH", mandatory=True)
+
         self.flatnotes_git_enabled: bool = get_env(
             "FLATNOTES_GIT_ENABLED", mandatory=False, default=False, cast_bool=True
         )
-        self.flatnotes_git_auto_sync_interval: int = (
-            get_env(
-                "FLATNOTES_GIT_AUTO_SYNC_INTERVAL",
-                mandatory=False,
-                default=0,
-                cast_int=True,
-            )
-            if self.flatnotes_git_enabled
-            else 0
+        self.flatnotes_git_webhook_secret: Optional[str] = get_env(
+            "FLATNOTES_GIT_WEBHOOK_SECRET", mandatory=False
+        )
+        self.flatnotes_git_remote_name: str = get_env(
+            "FLATNOTES_GIT_REMOTE_NAME", mandatory=False, default="origin"
+        )
+        self.flatnotes_git_default_branch: str = get_env(
+            "FLATNOTES_GIT_DEFAULT_BRANCH", mandatory=False, default="main"
+        )
+        self.flatnotes_git_commit_user_name: str = get_env(
+            "FLATNOTES_GIT_COMMIT_USER_NAME", mandatory=False, default="flatnotes-bot"
+        )
+        self.flatnotes_git_commit_user_email: str = get_env(
+            "FLATNOTES_GIT_COMMIT_USER_EMAIL",
+            mandatory=False,
+            default="bot@flatnotes.local",
+        )
+        self.flatnotes_git_ssh_command: Optional[str] = get_env(
+            "FLATNOTES_GIT_SSH_COMMAND", mandatory=False
+        )
+        self.flatnotes_GIT_AUTO_FETCH_INTERVAL: int = get_env(
+            "FLATNOTES_GIT_AUTO_FETCH_INTERVAL",
+            mandatory=False,
+            default=1,
+            cast_int=True,
+        )
+        self.flatnotes_git_auto_init: bool = get_env(
+            "FLATNOTES_GIT_AUTO_INIT", mandatory=False, default=False, cast_bool=True
+        )
+        self.flatnotes_git_pull_strategy: str = get_env(
+            "FLATNOTES_GIT_PULL_STRATEGY", mandatory=False, default="rebase"
         )
 
+        self.flatnotes_git_webhook_configured: bool = bool(
+            self.flatnotes_git_webhook_secret
+        )
+
+        # --- Attachment Config ---
         self.attachment_storage_provider: StorageProviderType = (
             self._load_attachment_storage_provider()
         )
-        self.s3_endpoint_url: str = get_env(
+        self.s3_endpoint_url: Optional[str] = get_env(
             "FLATNOTES_S3_ENDPOINT_URL", mandatory=False
         )
-        self.s3_access_key_id: str = get_env(
+        self.s3_access_key_id: Optional[str] = get_env(
             "FLATNOTES_S3_ACCESS_KEY_ID", mandatory=False
         )
-        self.s3_secret_access_key: str = get_env(
+        self.s3_secret_access_key: Optional[str] = get_env(
             "FLATNOTES_S3_SECRET_ACCESS_KEY", mandatory=False
         )
-        self.s3_bucket_name: str = get_env("FLATNOTES_S3_BUCKET_NAME", mandatory=False)
-        self.s3_region: str = get_env("FLATNOTES_S3_REGION", mandatory=False)
+        self.s3_bucket_name: Optional[str] = get_env(
+            "FLATNOTES_S3_BUCKET_NAME", mandatory=False
+        )
+        self.s3_region: Optional[str] = get_env("FLATNOTES_S3_REGION", mandatory=False)
         self.s3_path_prefix: str = get_env(
             "FLATNOTES_S3_PATH_PREFIX", mandatory=False, default=""
         )
-        self.s3_public_url_base: str = get_env(
+        self.s3_public_url_base: Optional[str] = get_env(
             "FLATNOTES_S3_PUBLIC_URL_BASE", mandatory=False
         )
         self.s3_presigned_url_expiration: int = get_env(
@@ -62,6 +95,7 @@ class GlobalConfig:
             cast_int=True,
         )
 
+        # --- Frontend Image Processing Config ---
         self.frontend_image_compression_enabled: bool = get_env(
             "FLATNOTES_FRONTEND_IMAGE_COMPRESSION_ENABLED",
             mandatory=False,
@@ -112,9 +146,7 @@ class GlobalConfig:
 
     def _load_auth_type(self):
         key = "FLATNOTES_AUTH_TYPE"
-        auth_type = get_env(
-            key, mandatory=False, default=AuthType.PASSWORD.value
-        )
+        auth_type = get_env(key, mandatory=False, default=AuthType.PASSWORD.value)
         try:
             auth_type = AuthType(auth_type.lower())
         except ValueError:
@@ -206,8 +238,6 @@ class GlobalConfig:
             logger.warning(f"Invalid value for {key}. Using default value: {default}")
             return default
 
-    # --- END: CORRECTED ADDITIONS ---
-
 
 class AuthType(str, Enum):
     NONE = "none"
@@ -224,7 +254,8 @@ class GlobalConfigResponseModel(CustomBaseModel):
     quick_access_sort: str
     quick_access_limit: int
     flatnotes_git_enabled: bool
-    flatnotes_git_auto_sync_interval: int
+    flatnotes_GIT_AUTO_FETCH_INTERVAL: int
+    flatnotes_git_webhook_configured: bool
     frontend_image_compression_enabled: bool
     frontend_image_compression_quality: float
     frontend_image_max_width: int
