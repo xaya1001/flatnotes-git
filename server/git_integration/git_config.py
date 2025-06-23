@@ -1,14 +1,12 @@
-import os
-import sys
+# server/git_integration/git_config.py
+
 from enum import Enum
-from threading import Lock
 
-import pygit2
-
-from helpers import get_env
 from logger import logger
 
-logger.debug("Loading Git integration config...")
+# This file acts as a centralized module for Git-related configuration constants.
+# It is populated once at application startup by the GlobalConfig object.
+# It does NOT read environment variables itself.
 
 
 class PullStrategy(str, Enum):
@@ -16,99 +14,62 @@ class PullStrategy(str, Enum):
     MERGE = "merge"
 
 
-GIT_ENABLED: bool = get_env(
-    "FLATNOTES_GIT_ENABLED", mandatory=False, default=False, cast_bool=True
-)
+# --- Configuration Constants ---
+# These are initialized with placeholder/default values and will be
+# overwritten by the _initialize_git_config function at startup.
 
-GIT_REPO_PATH: str = get_env(
-    "FLATNOTES_PATH",  # Using the same env var as the main notes path
-    mandatory=True,  # If Git is enabled, this path must be set
-)
+GIT_ENABLED: bool = False
+GIT_REPO_PATH: str = ""
+GIT_REMOTE_NAME: str = "origin"
+GIT_DEFAULT_BRANCH: str = "main"
+GIT_COMMIT_USER_NAME: str = "flatnotes-bot"
+GIT_COMMIT_USER_EMAIL: str = "bot@flatnotes.local"
+GIT_SSH_COMMAND: str = None
+GIT_AUTO_INIT: bool = False
+GIT_PULL_STRATEGY: PullStrategy = PullStrategy.REBASE
 
-GIT_REMOTE_NAME: str = get_env(
-    "FLATNOTES_GIT_REMOTE_NAME", mandatory=False, default="origin"
-)
-
-GIT_DEFAULT_BRANCH: str = get_env(
-    "FLATNOTES_GIT_DEFAULT_BRANCH", mandatory=False, default="main"
-)
-
-GIT_COMMIT_USER_NAME: str = get_env(
-    "FLATNOTES_GIT_COMMIT_USER_NAME", mandatory=False, default="flatnotes-bot"
-)
-
-GIT_COMMIT_USER_EMAIL: str = get_env(
-    "FLATNOTES_GIT_COMMIT_USER_EMAIL", mandatory=False, default="bot@flatnotes.local"
-)
-
-GIT_SSH_COMMAND: str = get_env(
-    "FLATNOTES_GIT_SSH_COMMAND",
-    mandatory=False,
-    default=None,  # e.g., "ssh -i /path/to/key -o IdentitiesOnly=yes"
-)
-
-GIT_AUTO_SYNC_INTERVAL: int = get_env(
-    "FLATNOTES_GIT_AUTO_SYNC_INTERVAL", mandatory=False, default=0, cast_int=True
-)
-
-GIT_AUTO_INIT: bool = get_env(
-    "FLATNOTES_GIT_AUTO_INIT", mandatory=False, default=False, cast_bool=True
-)
-
-GIT_PULL_STRATEGY_STR: str = get_env(
-    "FLATNOTES_GIT_PULL_STRATEGY", mandatory=False, default="rebase"
-)
-try:
-    GIT_PULL_STRATEGY: PullStrategy = PullStrategy(GIT_PULL_STRATEGY_STR.lower())
-except ValueError:
-    logger.error(
-        f"Invalid value '{GIT_PULL_STRATEGY_STR}' for FLATNOTES_GIT_PULL_STRATEGY. "
-        "Must be one of 'rebase' or 'merge'. Defaulting to 'rebase'."
-    )
-    GIT_PULL_STRATEGY: PullStrategy = PullStrategy.REBASE
+# --- Sync Strategy Constants ---
+GIT_WEBHOOK_SECRET: str = None
+GIT_WEBHOOK_ACTIVE: bool = False  # NEW: Flag to indicate if webhook is truly active
+GIT_AUTO_FETCH_INTERVAL: int = 0
 
 
-_auto_sync_paused_lock = Lock()
-_is_auto_sync_paused: bool = False
+def initialize_git_config(global_config):
+    """
+    Populates the git configuration constants from the global_config object.
+    This function should be called only once at application startup from main.py.
+    """
+    # Use 'global' to modify the module-level variables
+    global GIT_ENABLED, GIT_REPO_PATH, GIT_REMOTE_NAME, GIT_DEFAULT_BRANCH
+    global GIT_COMMIT_USER_NAME, GIT_COMMIT_USER_EMAIL, GIT_SSH_COMMAND
+    global GIT_AUTO_INIT, GIT_PULL_STRATEGY, GIT_WEBHOOK_SECRET
+    global GIT_AUTO_FETCH_INTERVAL, GIT_WEBHOOK_ACTIVE
 
+    GIT_ENABLED = global_config.flatnotes_git_enabled
+    if not GIT_ENABLED:
+        return
 
-def is_auto_sync_paused() -> bool:
-    """Thread-safely check if auto-sync is paused."""
-    with _auto_sync_paused_lock:
-        return _is_auto_sync_paused
+    # These are only relevant if Git is enabled
+    GIT_REPO_PATH = global_config.flatnotes_path
+    GIT_REMOTE_NAME = global_config.flatnotes_git_remote_name
+    GIT_DEFAULT_BRANCH = global_config.flatnotes_git_default_branch
+    GIT_COMMIT_USER_NAME = global_config.flatnotes_git_commit_user_name
+    GIT_COMMIT_USER_EMAIL = global_config.flatnotes_git_commit_user_email
+    GIT_SSH_COMMAND = global_config.flatnotes_git_ssh_command
+    GIT_AUTO_INIT = global_config.flatnotes_git_auto_init
 
+    # Sync Strategy
+    GIT_WEBHOOK_SECRET = global_config.flatnotes_git_webhook_secret
+    GIT_WEBHOOK_ACTIVE = global_config.flatnotes_git_webhook_active
+    GIT_AUTO_FETCH_INTERVAL = global_config.flatnotes_git_auto_fetch_interval
 
-def pause_auto_sync():
-    """Thread-safely pause the auto-sync feature."""
-    with _auto_sync_paused_lock:
-        global _is_auto_sync_paused
-        _is_auto_sync_paused = True
-    logger.info("Auto-sync has been paused via API.")
-
-
-def resume_auto_sync():
-    """Thread-safely resume the auto-sync feature."""
-    with _auto_sync_paused_lock:
-        global _is_auto_sync_paused
-        _is_auto_sync_paused = False
-    logger.info("Auto-sync has been resumed via API.")
-
-
-if GIT_ENABLED:
-    logger.info("Git integration is enabled.")
-    logger.info(f"Using pull strategy: {GIT_PULL_STRATEGY.value}")
-    if not os.path.isdir(GIT_REPO_PATH):
+    try:
+        GIT_PULL_STRATEGY = PullStrategy(
+            global_config.flatnotes_git_pull_strategy.lower()
+        )
+    except ValueError:
         logger.error(
-            f"FLATNOTES_PATH (GIT_REPO_PATH) '{GIT_REPO_PATH}' is not a valid directory. Git integration functionality may fail."
+            f"Invalid value '{global_config.flatnotes_git_pull_strategy}' for pull strategy. "
+            "Defaulting to 'rebase'."
         )
-    elif not pygit2.discover_repository(GIT_REPO_PATH) and GIT_AUTO_INIT:
-        logger.warning(
-            f"No Git repository found in '{GIT_REPO_PATH}'. "
-            f"FLATNOTES_GIT_AUTO_INIT is true, attempting to initialize a new repository."
-        )
-    if GIT_AUTO_SYNC_INTERVAL > 0:
-        logger.info(
-            f"Auto-sync is enabled with an interval of {GIT_AUTO_SYNC_INTERVAL} minutes."
-        )
-else:
-    logger.info("Git integration is disabled.")
+        GIT_PULL_STRATEGY = PullStrategy.REBASE

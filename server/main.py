@@ -1,9 +1,16 @@
 from contextlib import asynccontextmanager
-from datetime import datetime
 from typing import List, Literal
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, UploadFile
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    HTTPException,
+    Request,
+    UploadFile,
+)
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -29,12 +36,19 @@ router = APIRouter()
 git_integration_router = None
 if global_config.flatnotes_git_enabled:
     try:
-        from git_integration import git_config as git_config
-        from git_integration.git_logger import LogLevel, add_git_log
-        from git_integration.git_router import (
-            get_git_manager,
+        from git_integration import git_config
+        from git_integration.git_config import initialize_git_config
+
+        initialize_git_config(global_config)
+        from git_integration.git_logger import (
+            AUTO_FETCH_LOG_ID,
+            LogLevel,
+            add_git_log,
         )
+        from git_integration.git_router import get_git_manager
         from git_integration.git_router import router as git_integration_router
+        from git_integration.webhook_handler import verify_github_signature
+        from git_integration.websockets import connection_manager
     except ImportError as e:
         logger.error(f"FLATNOTES_GIT_ENABLED is true, but a module failed to load: {e}")
 
@@ -44,75 +58,53 @@ async def lifespan(app: FastAPI):
     """Handles application startup and shutdown events."""
     logger.info("Application startup...")
 
-    if git_integration_router:
-        try:
-            if global_config.flatnotes_git_auto_sync_interval > 0:
-                logger.info(
-                    f"Initializing scheduled auto-sync for every {global_config.flatnotes_git_auto_sync_interval} minutes."
-                )
-                scheduler = BackgroundScheduler(daemon=True)
+    if git_config.GIT_ENABLED:
+        logger.info("Git integration is enabled.")
 
-                def scheduled_sync_job():
-                    if git_config.is_auto_sync_paused():
-                        logger.debug("Auto-sync is paused, skipping scheduled job.")
-                        return
+        # --- Sync Logic ---
+        # Determine the active automatic sync method. Webhook takes precedence.
+        if git_config.GIT_WEBHOOK_ACTIVE:
+            logger.info("Sync Mode: Real-time fetch via Webhook is active.")
 
-                    try:
-                        manager = get_git_manager()
-                        repo_state = manager.get_repository_state()
-                        if not repo_state.startswith("CLEAN"):
-                            logger.info(
-                                f"Skipping auto-sync: Repository is in '{repo_state}' state, requires manual intervention."
-                            )
-                            # Optionally add a log entry for the user to see in the UI
-                            add_git_log(
-                                LogLevel.WARN,
-                                "Auto-sync skipped",
-                                f"Cannot sync while repository state is '{repo_state}'.",
-                            )
-                            return
-                    except Exception as e:
-                        logger.error(
-                            f"Auto-sync failed during pre-check: {e}", exc_info=True
-                        )
-                        add_git_log(
-                            LogLevel.ERROR,
-                            "Auto-sync pre-check failed.",
-                            details=str(e),
-                        )
-                        return
-
-                    logger.info("Executing scheduled git sync...")
-                    add_git_log(LogLevel.INFO, "Scheduled auto-sync: Task started.")
-                    try:
-                        # Re-get manager inside the thread for safety
-                        sync_manager = get_git_manager()
-                        commit_message = f"chore: automatic sync at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-                        sync_manager.sync_workspace(commit_message)
-                        add_git_log(
-                            LogLevel.SUCCESS, "Scheduled auto-sync: Successful."
-                        )
-                    except Exception as e:
-                        logger.error(f"Scheduled git sync failed: {e}", exc_info=True)
-                        add_git_log(
-                            LogLevel.ERROR,
-                            "Scheduled auto-sync: Failed.",
-                            details=str(e),
-                        )
-
-                scheduler.add_job(
-                    scheduled_sync_job,
-                    "interval",
-                    minutes=global_config.flatnotes_git_auto_sync_interval,
-                )
-                scheduler.start()
-                app.state.scheduler = scheduler
-                logger.info("Scheduler for auto-sync started.")
-
-        except Exception as e:
-            logger.error(
-                f"Failed to initialize GitManager during application startup: {e}"
+        elif git_config.GIT_AUTO_FETCH_INTERVAL > 0:
+            interval = git_config.GIT_AUTO_FETCH_INTERVAL
+            logger.info(
+                f"Sync Mode: Scheduled fetch is active with an interval of {interval} minutes (fallback mode)."
             )
+
+            scheduler = BackgroundScheduler(daemon=True)
+
+            async def scheduled_fetch_job():
+                """A lightweight job that only performs a git fetch."""
+                logger.debug("Executing scheduled git fetch...")
+                try:
+                    manager = get_git_manager()
+                    manager.fetch_only()
+                    await connection_manager.broadcast_status_update()
+                    add_git_log(
+                        LogLevel.SUCCESS,
+                        "Scheduled fetch successful",
+                        details="Remote changes (if any) have been fetched.",
+                        persist=False,
+                        log_id=AUTO_FETCH_LOG_ID,
+                    )
+                except Exception as e:
+                    logger.error(f"Scheduled git fetch failed: {e}")
+                    add_git_log(
+                        LogLevel.ERROR,
+                        "Scheduled fetch failed",
+                        details=str(e),
+                        persist=True,
+                        log_id=AUTO_FETCH_LOG_ID,
+                    )
+
+            scheduler.add_job(scheduled_fetch_job, "interval", minutes=interval)
+            scheduler.start()
+            app.state.scheduler = scheduler
+            logger.info("Scheduler for auto-fetch started.")
+
+        else:
+            logger.info("Sync Mode: Manual sync only. No automatic fetch configured.")
 
     yield
 
@@ -128,6 +120,89 @@ app = FastAPI(
     openapi_url=global_config.path_prefix + "/openapi.json",
     lifespan=lifespan,
 )
+
+
+# --- Webhook Endpoint ---
+if git_integration_router:
+
+    @app.post(
+        f"{global_config.path_prefix}/api/git/webhook/github",
+        # The endpoint itself has no dependencies, we check inside.
+        include_in_schema=False,
+    )
+    async def github_webhook_receiver(
+        request: Request,
+        background_tasks: BackgroundTasks,
+    ):
+        """
+        Receives webhook events from GitHub.
+        If a secret is configured, it verifies the signature.
+        On a valid 'push' event, it triggers a 'git fetch'.
+        """
+        # 1. Check if the feature is configured to be active.
+        if not git_config.GIT_WEBHOOK_SECRET:
+            logger.info(
+                "Webhook received but ignored: FLATNOTES_GIT_WEBHOOK_SECRET is not set."
+            )
+            raise HTTPException(
+                status_code=412,
+                detail="Webhook feature is disabled: secret is not configured on the server.",
+            )
+
+        # 2. Verify the signature (now that we know a secret exists).
+        await verify_github_signature(
+            request, request.headers.get("x-hub-signature-256")
+        )
+
+        # 3. Process the event.
+        event_type = request.headers.get("X-GitHub-Event")
+        if event_type != "push":
+            return {
+                "status": "event_ignored",
+                "reason": f"Event type '{event_type}' is not 'push'.",
+            }
+
+        try:
+            payload = await request.json()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid JSON payload.")
+
+        expected_ref = f"refs/heads/{git_config.GIT_DEFAULT_BRANCH}"
+        if payload.get("ref") != expected_ref:
+            return {
+                "status": "push_ignored",
+                "reason": f"Push was not to the default branch ('{git_config.GIT_DEFAULT_BRANCH}').",
+            }
+
+        pusher_name = payload.get("pusher", {}).get("name", "unknown")
+        logger.info(
+            f"Webhook: Received valid push event from '{pusher_name}'. Triggering fetch."
+        )
+        add_git_log(
+            LogLevel.INFO,
+            "Webhook: Push event received",
+            details={"pusher": pusher_name},
+        )
+
+        async def fetch_and_broadcast_task():
+            """The actual git fetch operation, run in the background."""
+            try:
+                manager = get_git_manager()
+                result = manager.fetch_only()  # <--- CALLING FETCH_ONLY
+                add_git_log(
+                    LogLevel.SUCCESS, "Webhook: Fetch successful", details=result
+                )
+            except Exception as e:
+                logger.error(f"Webhook fetch task failed: {e}")
+                add_git_log(LogLevel.ERROR, "Webhook: Fetch failed", details=str(e))
+            finally:
+                # Always broadcast, so the UI can update its ahead/behind status.
+                await connection_manager.broadcast_status_update()
+
+        background_tasks.add_task(fetch_and_broadcast_task)
+
+        return {"status": "accepted", "detail": "Fetch operation scheduled."}
+
 
 # Conditionally include the Git integration router
 if git_integration_router:
@@ -294,7 +369,8 @@ def get_config():
         quick_access_sort=global_config.quick_access_sort,
         quick_access_limit=global_config.quick_access_limit,
         flatnotes_git_enabled=global_config.flatnotes_git_enabled,
-        flatnotes_git_auto_sync_interval=global_config.flatnotes_git_auto_sync_interval,
+        flatnotes_git_auto_fetch_interval=global_config.flatnotes_git_auto_fetch_interval,
+        flatnotes_git_webhook_active=global_config.flatnotes_git_webhook_active,
         frontend_image_compression_enabled=global_config.frontend_image_compression_enabled,
         frontend_image_compression_quality=global_config.frontend_image_compression_quality,
         frontend_image_max_width=global_config.frontend_image_max_width,

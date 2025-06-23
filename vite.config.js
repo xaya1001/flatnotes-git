@@ -31,6 +31,11 @@ export default defineConfig({
         target: devApiUrl,
         changeOrigin: true,
       },
+      "/api/git/ws/status": {
+        target: devApiUrl,
+        changeOrigin: true,
+        ws: true,
+      },
     },
   },
   test: {

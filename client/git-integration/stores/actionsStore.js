@@ -8,7 +8,6 @@ import { GIT_OPERATION, GIT_CONFLICT } from "../events";
 
 export const useActionsStore = defineStore("git-actions", () => {
   const isActionLoading = ref(false);
-  const isAutoSyncPaused = ref(false);
 
   async function performGitAction(actionFunc, args, actionName) {
     isActionLoading.value = true;
@@ -126,42 +125,6 @@ export const useActionsStore = defineStore("git-actions", () => {
     return performGitAction(gitApi.gitPush, [], "Push");
   }
 
-  async function fetchAutoSyncState() {
-    try {
-      const state = await gitApi.getAutoSyncState();
-      isAutoSyncPaused.value = state.paused;
-    } catch (error) {
-      console.error("Failed to get initial auto-sync state", error);
-    }
-  }
-
-  async function toggleAutoSyncPause() {
-    const action = isAutoSyncPaused.value
-      ? gitApi.resumeAutoSync
-      : gitApi.pauseAutoSync;
-    const actionName = isAutoSyncPaused.value
-      ? "Resume Auto-Sync"
-      : "Pause Auto-Sync";
-
-    isActionLoading.value = true;
-    const operationId = uuidv4();
-    eventBus.emit(GIT_OPERATION.WILL_START, { actionName, operationId });
-
-    try {
-      const response = await action();
-      isAutoSyncPaused.value = response.paused;
-      eventBus.emit(GIT_OPERATION.DID_SUCCEED, {
-        actionName,
-        operationId,
-        response,
-      });
-    } catch (err) {
-      eventBus.emit(GIT_OPERATION.DID_FAIL, { actionName, operationId, err });
-    } finally {
-      isActionLoading.value = false;
-    }
-  }
-
   async function getBranches() {
     const operationId = uuidv4();
     eventBus.emit(GIT_OPERATION.WILL_START, {
@@ -198,7 +161,6 @@ export const useActionsStore = defineStore("git-actions", () => {
 
   return {
     isActionLoading,
-    isAutoSyncPaused,
     handleStageFile,
     handleStageAll,
     handleUnstageFile,
@@ -209,8 +171,6 @@ export const useActionsStore = defineStore("git-actions", () => {
     handleSync,
     handlePull,
     handlePush,
-    fetchAutoSyncState,
-    toggleAutoSyncPause,
     getBranches,
     switchBranch,
     handleResetToRemote,

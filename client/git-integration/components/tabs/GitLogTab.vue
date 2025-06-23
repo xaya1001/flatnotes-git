@@ -79,13 +79,50 @@ const logLevelOptions = ref([
   { name: "Warn", value: "warn" },
 ]);
 
-const filteredLogs = computed(() => {
-  if (activeLogLevelFilter.value === "all") {
-    return logStore.logs;
+const condensedLogs = computed(() => {
+  if (logStore.logs.length === 0) return [];
+
+  const result = [];
+  let lastLog = null;
+  let consecutiveCount = 0;
+
+  for (const log of logStore.logs) {
+    // Check for consecutive, identical, successful auto-sync logs
+    if (
+      lastLog &&
+      log.id === "auto-fetch-task" &&
+      lastLog.id === "auto-fetch-task" &&
+      log.level === "success" &&
+      lastLog.level === "success"
+    ) {
+      consecutiveCount++;
+    } else {
+      if (lastLog && consecutiveCount > 0) {
+        // Update the last log's message before moving on
+        const lastPushed = result[result.length - 1];
+        lastPushed.message = `${lastPushed.message} (x${consecutiveCount + 1})`;
+      }
+      result.push({ ...log }); // Push a copy
+      consecutiveCount = 0;
+    }
+    lastLog = log;
   }
-  return logStore.logs.filter(
-    (log) => log.level === activeLogLevelFilter.value,
-  );
+
+  // Handle the very last log if it was part of a sequence
+  if (lastLog && consecutiveCount > 0) {
+    const lastPushed = result[result.length - 1];
+    lastPushed.message = `${lastPushed.message} (x${consecutiveCount + 1})`;
+  }
+
+  return result;
+});
+
+const filteredLogs = computed(() => {
+  const logsToFilter = condensedLogs.value; // Use the condensed logs
+  if (activeLogLevelFilter.value === "all") {
+    return logsToFilter;
+  }
+  return logsToFilter.filter((log) => log.level === activeLogLevelFilter.value);
 });
 
 function setLogLevelFilter(level) {

@@ -38,26 +38,27 @@
               />
             </button>
           </div>
+
           <div
-            class="flex flex-grow items-center justify-center space-x-2 text-xs text-theme-text-muted"
+            class="flex flex-grow items-center justify-center space-x-1 text-xs text-theme-text-muted"
           >
-            <template v-if="globalConfig?.flatnotesGitAutoSyncInterval > 0">
-              <span>
-                Auto Sync (every
-                {{ globalConfig.flatnotesGitAutoSyncInterval }} min)
-              </span>
-              <Toggle
-                :isOn="
-                  !actionsStore.isAutoSyncPaused && !conflictStore.isInConflict
-                "
-                :label="autoSyncLabel"
-                @click="actionsStore.toggleAutoSyncPause"
-                :disabled="isAutoSyncToggleDisabled"
-                :title="autoSyncToggleTitle"
-              />
+            <template v-if="globalConfig?.flatnotesGitWebhookActive">
+              <SvgIcon type="mdi" :path="mdiLanConnect" :size="14" />
+              <span>Real-time Fetch Active</span>
             </template>
-            <span v-else>Automatic Sync Disabled</span>
+            <template
+              v-else-if="globalConfig?.flatnotesGitAutoFetchInterval > 0"
+            >
+              <SvgIcon type="mdi" :path="mdiTimerSyncOutline" :size="14" />
+              <span>
+                Auto-Fetch Active ({{
+                  globalConfig.flatnotesGitAutoFetchInterval
+                }}
+                min)
+              </span>
+            </template>
           </div>
+
           <div class="flex flex-shrink-0 items-center space-x-1">
             <button
               @click="panelUiStore.togglePin()"
@@ -81,7 +82,6 @@
         </div>
 
         <!-- Initial Loading State -->
-
         <div
           v-if="!statusStore.isInitialLoadComplete && !statusStore.summaryError"
           class="flex flex-grow items-center justify-center"
@@ -142,7 +142,7 @@
             @reject="() => panelUiStore.resolveConfirmation(false)"
           />
 
-          <!-- Main TabView with 3 Tabs (shown only when NOT in conflict) -->
+          <!-- Main TabView -->
           <TabView
             class="main-tabview flex min-h-0 flex-grow flex-col"
             :pt="{
@@ -200,13 +200,17 @@ import TabView from "primevue/tabview";
 import TabPanel from "primevue/tabpanel";
 import SvgIcon from "@jamescoyle/vue-icon";
 import { mdilRefresh, mdilPin, mdilPinOff } from "@mdi/light-js";
-import { mdiClose, mdiSourceRepository } from "@mdi/js";
+import {
+  mdiClose,
+  mdiSourceRepository,
+  mdiLanConnect,
+  mdiTimerSyncOutline,
+} from "@mdi/js";
 
 import { useGlobalStore } from "../../globalStore";
 import { usePanelUiStore } from "../stores/panelUiStore";
 import { useStatusStore } from "../stores/statusStore";
 import { useHistoryStore } from "../stores/historyStore";
-import { useActionsStore } from "../stores/actionsStore";
 import { useLogStore } from "../stores/logStore";
 import { useConflictStore } from "../stores/conflictStore";
 import eventBus from "../eventBus";
@@ -214,7 +218,6 @@ import { GIT_OPERATION } from "../events";
 
 import GitStatusIndicator from "./GitStatusIndicator.vue";
 import ConfirmModal from "../../components/ConfirmModal.vue";
-import Toggle from "../../components/Toggle.vue";
 import WorkspaceTab from "./tabs/WorkspaceTab.vue";
 import GitLogTab from "./tabs/GitLogTab.vue";
 import GitHistoryTab from "./tabs/GitHistoryTab.vue";
@@ -224,50 +227,40 @@ const globalStore = useGlobalStore();
 const panelUiStore = usePanelUiStore();
 const statusStore = useStatusStore();
 const historyStore = useHistoryStore();
-const actionsStore = useActionsStore();
 const logStore = useLogStore();
 const conflictStore = useConflictStore();
 
 const isRefreshing = ref(false);
 const globalConfig = computed(() => globalStore.config.value);
 
-const autoSyncLabel = computed(() => {
-  if (conflictStore.isInConflict) {
-    return "Paused (Conflict)";
-  }
-  return actionsStore.isAutoSyncPaused ? "Paused" : "Enabled";
-});
-
-const isAutoSyncToggleDisabled = computed(
-  () => actionsStore.isActionLoading || conflictStore.isInConflict,
-);
-
-const autoSyncToggleTitle = computed(() => {
-  if (conflictStore.isInConflict)
-    return "Auto-sync is disabled during a conflict.";
-  if (actionsStore.isActionLoading)
-    return "Cannot change setting while an action is in progress.";
-  return actionsStore.isAutoSyncPaused
-    ? "Click to resume auto-sync"
-    : "Click to pause auto-sync";
-});
+// This function will now be the single point of entry for fetching all sidebar data.
+function fetchAllSidebarData() {
+  // We fetch status, history, and log all at once when the sidebar becomes visible.
+  // This ensures all tabs have data ready.
+  return Promise.all([
+    statusStore.fetchStatus(),
+    historyStore.fetchGitLog(),
+    logStore.fetchActivityLog(),
+  ]);
+}
 
 function handleSidebarShow() {
-  statusStore.fetchStatus();
+  // When the sidebar is shown, fetch all necessary data.
+  fetchAllSidebarData();
 }
 
 async function refreshAll() {
   isRefreshing.value = true;
   const actionName = "Refresh All Data";
   const operationId = uuidv4();
-  eventBus.emit(GIT_OPERATION.WILL_START, { actionName, operationId });
+  eventBus.emit(GIT_OPERATION.WILL_START, {
+    actionName,
+    operationId,
+    persist: false,
+  });
 
   try {
-    await Promise.all([
-      statusStore.fetchStatus(),
-      historyStore.fetchGitLog(),
-      logStore.fetchActivityLog(),
-    ]);
+    await fetchAllSidebarData(); // Reuse the same data fetching logic
 
     const response = {
       details: { message: "All data refreshed successfully." },
@@ -289,25 +282,18 @@ async function refreshAll() {
 }
 
 onMounted(() => {
-  if (globalConfig.value?.flatnotesGitEnabled) {
+  // Initialize the log store once when the component is mounted.
+  if (globalStore.config.value?.flatnotesGitEnabled) {
     logStore.initialize();
-
-    statusStore.fetchStatus().then(() => {
-      historyStore.fetchGitLog();
-      if (globalConfig.value.flatnotesGitAutoSyncInterval > 0) {
-        actionsStore.fetchAutoSyncState();
-      }
-    });
   }
 });
 
 onUnmounted(() => {
-  if (globalConfig.value?.flatnotesGitEnabled) {
+  if (globalStore.config.value?.flatnotesGitEnabled) {
     logStore.cleanup();
   }
 });
 </script>
-
 <style scoped>
 /* PrimeVue sidebar custom styling */
 .p-sidebar {
@@ -318,7 +304,7 @@ onUnmounted(() => {
   transform: translateX(100%);
 }
 
-/* --- Main TabView Styling (Final Version Based on User Feedback) --- */
+/* --- Main TabView Styling --- */
 :deep(.main-tabview .main-tabview-nav) {
   @apply flex flex-row justify-center border-b border-theme-border;
 }

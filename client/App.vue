@@ -43,6 +43,7 @@ import router from "./router.js";
 
 import GitSidebar from "./git-integration/components/GitSidebar.vue";
 import { useStatusStore } from "./git-integration/stores/statusStore.js";
+import { gitWebSocketService } from "./git-integration/gitWebSocketService.js";
 
 const globalStore = useGlobalStore();
 const statusStore = useStatusStore();
@@ -91,7 +92,7 @@ onMounted(() => {
       loadingIndicator.value.setLoaded();
       if (data.flatnotesGitEnabled) {
         statusStore.fetchStatus();
-        statusStore.startPolling();
+        gitWebSocketService.connect();
       }
     })
     .catch((error) => {
@@ -105,17 +106,14 @@ onMounted(() => {
 
 onUnmounted(() => {
   document.removeEventListener("visibilitychange", handleVisibilityChange);
-  statusStore.stopPolling();
+  if (gitIntegrationEnabled.value) {
+    gitWebSocketService.disconnect();
+  }
 });
 
 function handleVisibilityChange() {
-  if (document.hidden) {
-    statusStore.stopPolling();
-  } else {
-    if (gitIntegrationEnabled.value) {
-      statusStore.fetchStatus();
-      statusStore.startPolling();
-    }
+  if (!document.hidden && gitIntegrationEnabled.value) {
+    statusStore.fetchStatus();
   }
 }
 

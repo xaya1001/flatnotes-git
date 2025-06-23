@@ -100,30 +100,6 @@ export async function gitSyncWorkspace(message) {
     return Promise.reject(error);
   }
 }
-export async function getAutoSyncState() {
-  try {
-    const response = await api.get("api/git/auto-sync/state");
-    return response.data;
-  } catch (error) {
-    return Promise.reject(error);
-  }
-}
-export async function pauseAutoSync() {
-  try {
-    const response = await api.post("api/git/auto-sync/pause");
-    return response.data;
-  } catch (error) {
-    return Promise.reject(error);
-  }
-}
-export async function resumeAutoSync() {
-  try {
-    const response = await api.post("api/git/auto-sync/resume");
-    return response.data;
-  } catch (error) {
-    return Promise.reject(error);
-  }
-}
 export async function getGitActivityLog() {
   try {
     const response = await api.get("api/git/activity-log");

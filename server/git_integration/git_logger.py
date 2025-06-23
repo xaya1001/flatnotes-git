@@ -43,25 +43,8 @@ class LogEntry(BaseModel):
 _log_storage: Deque[LogEntry] = deque(maxlen=MAX_LOG_ENTRIES)
 _lock = Lock()
 
-
-def _ensure_log_dir_exists():
-    """Ensures the directory for the log file exists."""
-    log_dir = os.path.dirname(LOG_FILE_PATH)
-    if not os.path.exists(log_dir):
-        try:
-            os.makedirs(log_dir, exist_ok=True)
-        except OSError as e:
-            logger.error(f"Could not create log directory at {log_dir}: {e}")
-
-
-def _persist_log_entry(entry: LogEntry):
-    """Appends a single log entry to the persistent log file."""
-    try:
-        # Using model_dump_json for direct, reliable JSON conversion
-        with open(LOG_FILE_PATH, "a") as f:
-            f.write(entry.model_dump_json() + "\n")
-    except IOError as e:
-        logger.error(f"Failed to write to persistent git log file: {e}")
+# --- Special ID for the auto-fetch task ---
+AUTO_FETCH_LOG_ID = "auto-fetch-task"
 
 
 def add_git_log(
@@ -69,38 +52,47 @@ def add_git_log(
     message: str,
     details: Optional[Any] = None,
     persist: bool = True,
+    log_id: Optional[str] = None,
 ) -> None:
     """
-    Adds a new entry to the in-memory Git log storage and optionally persists it.
-
-    Args:
-        level: The severity level of the log entry.
-        message: The main log message.
-        details: Optional additional structured data about the operation.
-        persist: If True, the log will be saved to the persistent log file.
-                 Set to False for transient logs like "refresh".
+    Adds or updates an entry in the Git log storage.
+    If a log_id is provided and exists, it updates it. Otherwise, it adds a new entry.
     """
     with _lock:
-        entry = LogEntry(
-            id=str(uuid.uuid4()),
+        # If a specific log_id is given, try to find and update it.
+        if log_id:
+            # Find the entry to update
+            if existing_entry := next(
+                (entry for entry in _log_storage if entry.id == log_id), None
+            ):
+                # Update existing entry in-place
+                existing_entry.timestamp = datetime.now(timezone.utc).isoformat()
+                existing_entry.level = level
+                existing_entry.message = message
+                existing_entry.details = details
+
+                # If this update should be persisted (e.g., a failure), persist it.
+                if persist:
+                    _persist_log_entry(existing_entry)
+                return
+
+        # If no update occurred, create a new entry.
+        entry_id = log_id or str(uuid.uuid4())
+        new_entry = LogEntry(
+            id=entry_id,
             timestamp=datetime.now(timezone.utc).isoformat(),
             level=level,
             message=message,
             details=details,
         )
-        _log_storage.appendleft(entry)
+        _log_storage.appendleft(new_entry)
 
         if persist:
-            _persist_log_entry(entry)
+            _persist_log_entry(new_entry)
 
 
 def get_all_logs() -> List[LogEntry]:
-    """
-    Retrieves a copy of all current log entries.
-
-    Returns:
-        A list of all log entries, from newest to oldest.
-    """
+    """Retrieves a copy of all current log entries."""
     with _lock:
         return list(_log_storage)
 
@@ -115,8 +107,28 @@ def clear_all_logs():
                 logger.info(f"Persistent log file deleted: {LOG_FILE_PATH}")
             except OSError as e:
                 logger.error(f"Failed to delete persistent log file: {e}")
-                # We raise the error so the API can report a failure
                 raise e
+
+
+def _ensure_log_dir_exists():
+    """Ensures the directory for the log file exists."""
+    log_dir = os.path.dirname(LOG_FILE_PATH)
+    if not os.path.exists(log_dir):
+        try:
+            os.makedirs(log_dir, exist_ok=True)
+        except OSError as e:
+            logger.error(f"Could not create log directory at {log_dir}: {e}")
+
+
+def _persist_log_entry(entry: LogEntry):
+    """Appends a single log entry to the persistent log file."""
+    # This function is now simpler as it just writes. The decision to call it is made in add_git_log.
+    _ensure_log_dir_exists()
+    try:
+        with open(LOG_FILE_PATH, "a") as f:
+            f.write(entry.model_dump_json() + "\n")
+    except IOError as e:
+        logger.error(f"Failed to write to persistent git log file: {e}")
 
 
 def _load_logs_from_disk():
@@ -129,7 +141,6 @@ def _load_logs_from_disk():
     with _lock:
         try:
             with open(LOG_FILE_PATH, "r") as f:
-                # Read all lines and take the last MAX_LOG_ENTRIES
                 all_lines = f.readlines()
                 relevant_lines = all_lines[-MAX_LOG_ENTRIES:]
                 for line in relevant_lines:
@@ -140,7 +151,7 @@ def _load_logs_from_disk():
                         logger.warning(
                             f"Skipping corrupt log line: {line.strip()}. Error: {e}"
                         )
-            # Sort by timestamp descending to ensure newest are first
+
             loaded_entries.sort(key=lambda x: x.timestamp, reverse=True)
             _log_storage.clear()
             _log_storage.extend(loaded_entries)
