@@ -40,7 +40,11 @@ if global_config.flatnotes_git_enabled:
         from git_integration.git_config import initialize_git_config
 
         initialize_git_config(global_config)
-        from git_integration.git_logger import LogLevel, add_git_log
+        from git_integration.git_logger import (
+            AUTO_FETCH_LOG_ID,
+            LogLevel,
+            add_git_log,
+        )
         from git_integration.git_router import get_git_manager
         from git_integration.git_router import router as git_integration_router
         from git_integration.webhook_handler import verify_github_signature
@@ -71,14 +75,19 @@ async def lifespan(app: FastAPI):
 
             async def scheduled_fetch_job():
                 """A lightweight job that only performs a git fetch."""
-                if git_config.is_auto_sync_paused():
-                    return
 
                 logger.debug("Executing scheduled git fetch...")
                 try:
                     manager = get_git_manager()
                     manager.fetch_only()
                     await connection_manager.broadcast_status_update()
+                    add_git_log(
+                        LogLevel.SUCCESS,
+                        "Scheduled fetch successful",
+                        details="Remote changes (if any) have been fetched.",
+                        persist=False,  # Don't persist success to save disk space
+                        log_id=AUTO_FETCH_LOG_ID,
+                    )
                 except Exception as e:
                     logger.error(f"Scheduled git fetch failed: {e}")
                     add_git_log(
@@ -86,6 +95,7 @@ async def lifespan(app: FastAPI):
                         "Scheduled fetch failed",
                         details=str(e),
                         persist=True,
+                        log_id=AUTO_FETCH_LOG_ID,
                     )
 
             scheduler.add_job(scheduled_fetch_job, "interval", minutes=interval)
@@ -359,7 +369,7 @@ def get_config():
         quick_access_sort=global_config.quick_access_sort,
         quick_access_limit=global_config.quick_access_limit,
         flatnotes_git_enabled=global_config.flatnotes_git_enabled,
-        flatnotes_GIT_AUTO_FETCH_INTERVAL=global_config.flatnotes_GIT_AUTO_FETCH_INTERVAL,
+        flatnotes_git_auto_fetch_interval=global_config.flatnotes_git_auto_fetch_interval,
         flatnotes_git_webhook_configured=global_config.flatnotes_git_webhook_configured,
         frontend_image_compression_enabled=global_config.frontend_image_compression_enabled,
         frontend_image_compression_quality=global_config.frontend_image_compression_quality,

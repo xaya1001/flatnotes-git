@@ -8,7 +8,6 @@ import { GIT_OPERATION, GIT_CONFLICT } from "../events";
 
 export const useActionsStore = defineStore("git-actions", () => {
   const isActionLoading = ref(false);
-  const isAutoSyncPaused = ref(false);
 
   async function performGitAction(actionFunc, args, actionName) {
     isActionLoading.value = true;
@@ -162,7 +161,6 @@ export const useActionsStore = defineStore("git-actions", () => {
 
   return {
     isActionLoading,
-    isAutoSyncPaused,
     handleStageFile,
     handleStageAll,
     handleUnstageFile,

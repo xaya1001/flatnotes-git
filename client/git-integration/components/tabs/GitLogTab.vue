@@ -90,8 +90,8 @@ const condensedLogs = computed(() => {
     // Check for consecutive, identical, successful auto-sync logs
     if (
       lastLog &&
-      log.id === "auto-sync-task" &&
-      lastLog.id === "auto-sync-task" &&
+      log.id === "auto-fetch-task" &&
+      lastLog.id === "auto-fetch-task" &&
       log.level === "success" &&
       lastLog.level === "success"
     ) {

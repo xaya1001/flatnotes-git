@@ -48,7 +48,7 @@ class GlobalConfig:
         self.flatnotes_git_ssh_command: Optional[str] = get_env(
             "FLATNOTES_GIT_SSH_COMMAND", mandatory=False
         )
-        self.flatnotes_GIT_AUTO_FETCH_INTERVAL: int = get_env(
+        self.flatnotes_git_auto_fetch_interval: int = get_env(
             "FLATNOTES_GIT_AUTO_FETCH_INTERVAL",
             mandatory=False,
             default=1,
@@ -61,7 +61,7 @@ class GlobalConfig:
             "FLATNOTES_GIT_PULL_STRATEGY", mandatory=False, default="rebase"
         )
 
-        self.flatnotes_git_webhook_configured: bool = bool(
+        self.flatnotes_git_webhook_active: bool = bool(
             self.flatnotes_git_webhook_secret
         )
 
@@ -254,8 +254,8 @@ class GlobalConfigResponseModel(CustomBaseModel):
     quick_access_sort: str
     quick_access_limit: int
     flatnotes_git_enabled: bool
-    flatnotes_GIT_AUTO_FETCH_INTERVAL: int
-    flatnotes_git_webhook_configured: bool
+    flatnotes_git_auto_fetch_interval: int
+    flatnotes_git_webhook_active: bool
     frontend_image_compression_enabled: bool
     frontend_image_compression_quality: float
     frontend_image_max_width: int

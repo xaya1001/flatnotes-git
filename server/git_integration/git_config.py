@@ -53,7 +53,7 @@ def initialize_git_config(global_config):
     GIT_COMMIT_USER_NAME = global_config.flatnotes_git_commit_user_name
     GIT_COMMIT_USER_EMAIL = global_config.flatnotes_git_commit_user_email
     GIT_SSH_COMMAND = global_config.flatnotes_git_ssh_command
-    GIT_AUTO_FETCH_INTERVAL = global_config.flatnotes_GIT_AUTO_FETCH_INTERVAL
+    GIT_AUTO_FETCH_INTERVAL = global_config.flatnotes_git_auto_fetch_interval
     GIT_AUTO_INIT = global_config.flatnotes_git_auto_init
 
     try:

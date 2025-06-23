@@ -43,8 +43,8 @@ class LogEntry(BaseModel):
 _log_storage: Deque[LogEntry] = deque(maxlen=MAX_LOG_ENTRIES)
 _lock = Lock()
 
-# --- Special ID for the auto-sync task ---
-AUTO_SYNC_LOG_ID = "auto-sync-task"
+# --- Special ID for the auto-fetch task ---
+AUTO_FETCH_LOG_ID = "auto-fetch-task"
 
 
 def add_git_log(
@@ -62,11 +62,9 @@ def add_git_log(
         # If a specific log_id is given, try to find and update it.
         if log_id:
             # Find the entry to update
-            existing_entry = next(
+            if existing_entry := next(
                 (entry for entry in _log_storage if entry.id == log_id), None
-            )
-
-            if existing_entry:
+            ):
                 # Update existing entry in-place
                 existing_entry.timestamp = datetime.now(timezone.utc).isoformat()
                 existing_entry.level = level

@@ -39,27 +39,25 @@
             </button>
           </div>
 
-          <!-- START: Simplified Sync Status Display -->
           <div
             class="flex flex-grow items-center justify-center space-x-1 text-xs text-theme-text-muted"
           >
-            <template v-if="globalConfig?.flatnotesGitWebhookConfigured">
+            <template v-if="globalConfig?.flatnotesGitWebhookConActive">
               <SvgIcon type="mdi" :path="mdiLanConnect" :size="14" />
-              <span>Real-time Sync Active</span>
+              <span>Real-time Fetch Active</span>
             </template>
             <template
-              v-else-if="globalConfig?.flatnotesGitAutoSyncInterval > 0"
+              v-else-if="globalConfig?.flatnotesGitAutoFetchInterval > 0"
             >
               <SvgIcon type="mdi" :path="mdiTimerSyncOutline" :size="14" />
               <span>
-                Auto-Sync Active ({{
-                  globalConfig.flatnotesGitAutoSyncInterval
+                Auto-Fetch Active ({{
+                  globalConfig.flatnotesGitAutoFetchInterval
                 }}
                 min)
               </span>
             </template>
           </div>
-          <!-- END: Simplified Sync Status Display -->
 
           <div class="flex flex-shrink-0 items-center space-x-1">
             <button

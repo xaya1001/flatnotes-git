@@ -41,7 +41,9 @@ async def verify_github_signature(
         )
     except Exception as e:
         logger.error(f"Error computing HMAC signature: {e}")
-        raise HTTPException(status_code=500, detail="Could not compute signature.")
+        raise HTTPException(
+            status_code=500, detail="Could not compute signature."
+        ) from e
 
     # Compare signatures securely
     if not hmac.compare_digest(expected_signature, x_hub_signature_256):

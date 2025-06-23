@@ -447,7 +447,7 @@ async def restore_file_from_commit(
         background_tasks.add_task(connection_manager.broadcast_status_update)
         return GitCommandResponse(message=message)
     except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
         background_tasks.add_task(connection_manager.broadcast_status_update)
         handle_git_exception(e, action_name, manager)
@@ -472,7 +472,9 @@ def delete_git_activity_log():
         # Avoid the generic handler so we don't add a new log entry
         # right after clearing them.
         logger.error(f"Failed to clear activity logs: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Failed to clear activity logs.")
+        raise HTTPException(
+            status_code=500, detail="Failed to clear activity logs."
+        ) from e
 
 
 @router.websocket("/ws/status")
