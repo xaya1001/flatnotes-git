@@ -13,6 +13,9 @@ from logger import logger
 from . import git_config
 from .git_config import PullStrategy
 
+# --- Constants ---
+TEMP_NOTE_REF = "refs/notes/flatnotes-sync"
+
 
 # --- Custom Exceptions for Clearer Error Handling ---
 class GitManagerError(Exception):
@@ -48,6 +51,7 @@ class NoChangesError(GitManagerError):
 
 
 class GitManager:
+    # region: REPOSITORY INITIALIZATION & MAINTENANCE
     def __init__(
         self,
         repo_path: str,
@@ -57,9 +61,7 @@ class GitManager:
         user_name: Optional[str] = None,
         user_email: Optional[str] = None,
     ):
-        """
-        Initializes the GitManager and ensures the .flatnotes directory is ignored.
-        """
+        """Initializes the GitManager."""
         self.repo_path = repo_path
         self.default_branch = default_branch
         self.default_remote = default_remote
@@ -89,7 +91,7 @@ class GitManager:
             else:
                 self.repo = pygit2.Repository(git_repo_path)
 
-            self._ensure_flatnotes_ignored()
+            self._enforce_gitignore_rule()
 
         except GitError as e:
             raise RepositoryInvalidError(
@@ -98,11 +100,8 @@ class GitManager:
 
         logger.info(f"GitManager initialized for repository at: {self.repo.path}")
 
-    def _ensure_flatnotes_ignored(self):
-        """
-        Ensures that the .flatnotes/ directory is present in the .gitignore file.
-        This is a critical function to prevent the app's cache from being committed.
-        """
+    def _enforce_gitignore_rule(self):
+        """Ensures that the .flatnotes/ directory is present in the .gitignore file."""
         gitignore_path = os.path.join(self.repo.workdir, ".gitignore")
         preferred_rule = ".flatnotes/"
         valid_rules = {".flatnotes", ".flatnotes/"}
@@ -120,7 +119,6 @@ class GitManager:
                 lines = f.readlines()
                 full_content = "".join(lines)
                 for line in lines:
-                    # Check each line, ignoring comments and whitespace.
                     cleaned_line = line.strip()
                     if cleaned_line in valid_rules:
                         rule_exists = True
@@ -138,11 +136,48 @@ class GitManager:
                         f"\n# Added by Flatnotes to ignore its cache\n{preferred_rule}\n"
                     )
 
-    def _run_git_command(self, command: List[str]) -> str:
-        """
-        Runs a git command using subprocess, centralizing error handling and
-        intelligently detecting conflict scenarios.
-        """
+    def _refresh_repository_state(self):
+        """Force-reloads critical pygit2 state caches after an external command."""
+        try:
+            self.repo.index.read()
+            self.repo.head  # Accessing .head re-reads the reference from disk
+            logger.debug("Pygit2 repository state cache refreshed.")
+        except GitError as e:
+            logger.warning(f"Non-critical state refresh failed: {e}")
+
+    def _reopen_repository(self):
+        """Fully reopens the repository object to ensure absolute state consistency."""
+        try:
+            git_repo_path = pygit2.discover_repository(self.repo_path)
+            self.repo = pygit2.Repository(git_repo_path)
+            logger.debug("Repository reopened after a major state-changing operation.")
+        except GitError as e:
+            raise RepositoryInvalidError(
+                f"Failed to reopen repository at '{self.repo_path}': {e}"
+            ) from e
+
+    # endregion
+
+    # region: TEMPORARY NOTE MANAGEMENT
+    def _cleanup_temp_notes(self):
+        """Safely and atomically removes the entire temporary note reference."""
+        try:
+            note_ref = self.repo.references.get(TEMP_NOTE_REF)
+            if note_ref:
+                note_ref.delete()
+                logger.info(
+                    f"Successfully cleaned up temporary note ref: '{TEMP_NOTE_REF}'"
+                )
+        except (KeyError, GitError) as e:
+            logger.debug(
+                f"Could not clean up note ref (it may not exist or an error occurred): {e}"
+            )
+
+    # endregion
+
+    # region: GIT COMMAND EXECUTION (SUBPROCESS BRIDGE)
+    def _execute_git_command(self, command: List[str]) -> str:
+        """Runs a git command using subprocess, with centralized error handling."""
         env = os.environ.copy()
         env["GIT_EDITOR"] = "true"
         if self.author:
@@ -161,70 +196,44 @@ class GitManager:
                 check=True,
                 env=env,
             )
+            self._refresh_repository_state()
             return process.stdout
 
         except subprocess.CalledProcessError as e:
-            # Combine stdout and stderr for a comprehensive search, as different
-            # git commands report conflicts in different streams.
             output_lower = (e.stdout + e.stderr).lower()
-
             logger.error(
                 f"Git command `{' '.join(command)}` failed.\n"
                 f"STDOUT: {e.stdout}\n"
                 f"STDERR: {e.stderr}"
             )
 
-            # Check for push rejections first, as they are a specific failure case.
             if command[0] == "push" and (
                 "non-fast-forward" in output_lower
                 or "updates were rejected" in output_lower
             ):
                 raise PushRejectedError(e.stderr or e.stdout)
 
-            # Check for a broad set of conflict indicators.
             if (
                 "automatic merge failed" in output_lower
                 or "conflict" in output_lower
                 or "unmerged paths" in output_lower
             ):
-                # This is a conflict scenario.
                 raise MergeConflictError(e.stderr or e.stdout)
-            else:
-                # This is a different kind of Git error.
-                raise GitManagerError(e.stderr or e.stdout)
 
-    def get_conflicted_files(self) -> List[str]:
-        """
-        Gets a list of conflicted file paths using the pygit2 index.
-        This is reliable and avoids subprocess parsing.
-        """
-        conflicted_paths = set()
-        try:
-            # Re-read the index to ensure it's in sync with the repository state
-            self.repo.index.read()
-            if self.repo.index.conflicts is None:
-                return []
+            raise GitManagerError(e.stderr or e.stdout)
 
-            for ancestor, ours, theirs in self.repo.index.conflicts:
-                if ours:
-                    conflicted_paths.add(ours.path)
-                elif theirs:
-                    conflicted_paths.add(theirs.path)
-        except (GitError, TypeError) as e:
-            logger.error(f"Error reading conflicts from pygit2 index: {e}")
-            return []
-        return sorted(list(conflicted_paths))
+    # endregion
 
+    # region: STATE INSPECTION & QUERIES (PYGIT2)
     def get_repository_state(self) -> str:
-        """
-        Determines the repository's detailed state using pygit2's state method,
-        with custom logic to differentiate our required sub-states.
-        """
+        """Determines the repository's detailed state using pygit2."""
         try:
-            state_value = self.repo.state()  # self.repo.state is a method!
+            state_value = (
+                self.repo.state()
+            )  # IMPORTANT: state is a method, not a property.
         except GitError as e:
             logger.error(f"Error getting repository state: {e}")
-            return "ERROR"  # Return a generic error state
+            return "ERROR"
 
         rebase_states = (
             RepositoryState.REBASE,
@@ -238,322 +247,35 @@ class GitManager:
                 if self.get_conflicted_files()
                 else "REBASING_CONTINUE"
             )
-
         if state_value == RepositoryState.MERGE:
             return "MERGING_CONFLICT" if self.get_conflicted_files() else "MERGING"
-
         if state_value == RepositoryState.NONE:
             return "CLEAN"
 
         try:
-            # Fallback for other known states
             return RepositoryState(state_value).name
         except ValueError:
-            logger.error(f"Pygit2 returned an unknown state value: {state_value}")
             return "UNKNOWN"
 
-    def pull_remote_changes(
-        self, remote_name: Optional[str] = None, branch: Optional[str] = None
-    ) -> Dict[str, Any]:
-        remote = remote_name or self.default_remote
-        branch_to_pull = branch or self.get_current_branch()
-        if self.repo.head_is_detached or branch_to_pull.startswith("DETACHED"):
-            raise GitManagerError("Cannot pull in a detached HEAD state.")
-
-        old_head_oid = self.repo.head.target
-
-        command = ["pull", remote, branch_to_pull]
-        if self.pull_strategy == PullStrategy.REBASE:
-            command.append("--rebase")
-
-        output = self._run_git_command(command)
-        new_head_oid = self.repo.head.target
-
-        # Generate rich details about the pull
-        commits_received = 0
-        files_updated = []
-        if old_head_oid != new_head_oid:
-            # Count new commits
-            for commit in self.repo.walk(new_head_oid, SortMode.TOPOLOGICAL):
-                if commit.id == old_head_oid:
-                    break
-                commits_received += 1
-
-            # Get list of changed files
-            diff = self.repo.diff(
-                self.repo.get(old_head_oid), self.repo.get(new_head_oid)
-            )
-            files_updated = self._get_diff_files(diff)
-
-        return {
-            "message": "Pull successful.",
-            "stdout": output,
-            "commits_received": commits_received,
-            "files_updated": files_updated,
-        }
-
-    def sync_workspace(
-        self, commit_message: str, remote_name: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """
-        Performs the full "Commit & Sync" operation: add, commit, pull, push.
-        Returns a dictionary with structured results of each step.
-        """
-        results = {}
-        if self.repo.status():
-            self.add_all()
-            try:
-                results["commit"] = self.commit(message=commit_message)
-            except NoChangesError:
-                results["commit"] = {"message": "No changes to commit."}
-        else:
-            results["commit"] = {"message": "No local changes."}
-
-        # The pull operation is the one that can raise MergeConflictError
-        results["pull"] = self.pull_remote_changes(remote_name=remote_name)
-        results["push"] = self.push_local_changes(remote_name=remote_name)
-        return results
-
-    def continue_conflict_resolution(self) -> Dict[str, Any]:
-        """Unified function to continue a conflict resolution process."""
-        state = self.get_repository_state()
-        if state == "REBASING_CONTINUE":
-            # This is a rebase, so we use 'rebase --continue'
-            continue_output = self._run_git_command(["rebase", "--continue"])
-            push_output = self.push_local_changes()
-            return {
-                "message": "Rebase finished and pushed successfully.",
-                "details": f"Rebase: {continue_output}\nPush: {push_output}",
-            }
-        elif state == "MERGING":
-            # This is a merge. The "continue" action is to make a commit.
-            # We will use the default merge message prepared by Git.
-            commit_result = self.commit(message=None)  # Let pygit2 use MERGE_MSG
-            push_result = self.push_local_changes()
-            return {
-                "message": "Merge finalized and pushed successfully.",
-                "commit": commit_result,
-                "push": push_result,
-            }
-        else:
-            raise GitManagerError(
-                f"No conflict resolution to continue in state '{state}'."
-            )
-
-    def abort_conflict_resolution(self) -> str:
-        """
-        Aborts the current conflict state (rebase or merge) AND safely attempts
-        to soft-reset the last-made "sync" commit, returning its changes to the
-        staging area.
-        """
-        state = self.get_repository_state()
-        operation_name = "unknown operation"
-
-        # Step 1: Abort the Git operation (rebase or merge) using subprocess
-        abort_command = None
-        if state.startswith("REBASING"):
-            operation_name = "rebase"
-            abort_command = ["rebase", "--abort"]
-        elif state.startswith("MERGING"):
-            operation_name = "merge"
-            abort_command = ["merge", "--abort"]
-
-        if abort_command:
-            try:
-                self._run_git_command(abort_command)
-                logger.info(f"Successfully aborted {operation_name} operation.")
-            except GitManagerError as e:
-                # If the primary abort command fails, this is a critical failure.
-                raise GitManagerError(
-                    f"Failed to abort the {operation_name} operation: {e}"
-                )
-
-        # At this point, the conflict state should be cleared.
-
-        # Step 2: Safely attempt to soft reset the last commit, also using subprocess for consistency.
+    def get_conflicted_files(self) -> List[str]:
+        """Gets a list of conflicted file paths using the pygit2 index."""
+        conflicted_paths = set()
         try:
-            head_commit = self.repo.head.peel()
-
-            if not head_commit.parents:
-                # This was the initial commit. We cannot reset it.
-                logger.warning(
-                    f"Conflict abort successful, but the last commit was the initial commit and cannot be reset."
-                )
-                return (
-                    f"The {operation_name} was aborted, but the initial commit was left in place. "
-                    "Your files are safe in that commit."
-                )
-
-            # Use subprocess for the reset to avoid pygit2 state issues.
-            self._run_git_command(["reset", "--soft", "HEAD~1"])
-
-            success_message = (
-                f"The {operation_name} was successfully aborted. "
-                "The last sync commit has been undone and your changes have been returned to the staging area."
-            )
-            logger.info(success_message)
-            return success_message
-
-        except GitManagerError as e:
-            # This catches failure from the `git reset` command.
-            # This is a partial failure, but we must report it as an error.
-            error_message = (
-                f"The {operation_name} was aborted, but an error occurred while trying to undo the last commit: {e}. "
-                "Please check your repository's state manually."
-            )
-            logger.error(error_message)
-            # Raise an exception so the router returns a non-200 status code.
-            raise GitManagerError(error_message)
-        except GitError as e:
-            # This catches pygit2 errors (e.g., peeling HEAD).
-            error_message = f"Failed to inspect repository for reset after abort: {e}"
-            logger.error(error_message)
-            raise GitManagerError(error_message)
-
-    def _get_commit_diff(self, commit: pygit2.Commit) -> pygit2.Diff:
-        """
-        A helper method to get the diff of a commit against its parent.
-        It correctly handles the initial commit case (which has no parent).
-        """
-        parent = commit.parents[0] if commit.parents else None
-
-        if parent:
-            return parent.tree.diff_to_tree(commit.tree)
-        else:
-            return commit.tree.diff_to_tree()
-
-    def commit(self, message: Optional[str]) -> Dict[str, Any]:
-        """
-        Creates a commit and returns structured data about it.
-        If message is None, it attempts to use a default message
-        from .git/MERGE_MSG for merge commits.
-        """
-        if message is None:
-            # This is for finalizing a merge commit
-            try:
-                with open(os.path.join(self.repo.path, "MERGE_MSG")) as f:
-                    message = f.read().strip()
-            except FileNotFoundError:
-                raise ValueError("Cannot finalize merge: MERGE_MSG not found.")
-
-        if not message.strip():
-            raise ValueError("Commit message cannot be empty.")
-
-        try:
-            head_tree = self.repo.head.peel().tree
-            diff = self.repo.index.diff_to_tree(head_tree)
-            if not diff:
-                raise NoChangesError("No changes staged for commit.")
-        except GitError:
-            if len(self.repo.index) == 0:
-                raise NoChangesError("No changes staged for commit.")
-
-        tree = self.repo.index.write_tree()
-        parents = [] if self.repo.head_is_unborn else [self.repo.head.target]
-
-        merge_head_path = os.path.join(self.repo.path, "MERGE_HEAD")
-        if os.path.exists(merge_head_path):
-            with open(merge_head_path) as f:
-                merge_parent_oid = pygit2.Oid(hex=f.read().strip())
-                if merge_parent_oid not in parents:
-                    parents.append(merge_parent_oid)
-
-        commit_oid = self.repo.create_commit(
-            "HEAD", self.author, self.committer, message, tree, parents
-        )
-        self.repo.index.write()
-
-        if os.path.exists(merge_head_path):
-            os.remove(merge_head_path)
-
-        new_commit = self.repo.get(commit_oid)
-        commit_diff = self._get_commit_diff(new_commit)
-        files_changed = self._get_diff_files(commit_diff)
-
-        return {
-            "hash": str(commit_oid),
-            "message": message,
-            "files_changed": files_changed,
-        }
-
-    def _get_diff_files(self, diff: pygit2.Diff) -> List[Dict[str, Any]]:
-        """Helper to extract a structured file list from a diff object.
-        Handles renames and copies distinctly, including both old and new paths.
-        """
-        diff.find_similar()  # This is crucial to detect renames/copies
-        files = []
-        for patch in diff:
-            delta = patch.delta
-            status = delta.status_char()
-            # pygit2 defines status codes: 'A' (added), 'D' (deleted), 'M' (modified), 'R' (renamed), 'C' (copied), etc.
-            if status in ("R", "C"):
-                files.append(
-                    {
-                        "status": status,
-                        "old_path": delta.old_file.path,
-                        "path": delta.new_file.path,
-                    }
-                )
-            else:
-                path = delta.new_file.path if status != "D" else delta.old_file.path
-                files.append(
-                    {
-                        "status": status,
-                        "path": path,
-                    }
-                )
-        return files
-
-    def _format_remote_url_for_web(self, url: str) -> Optional[str]:
-        if not url:
-            return None
-        if url.startswith("git@"):
-            path = url.split("@", 1)[1].replace(":", "/", 1)
-            base_url = f"https://{path}"
-            return base_url.removesuffix(".git").removesuffix("/")
-        if url.startswith(("http://", "https://")):
-            return url.removesuffix(".git").removesuffix("/")
-        logger.warning(f"Could not parse remote URL format: {url}")
-        return None
-
-    def _map_status_flags(self, status_flags: FileStatus) -> Dict[str, str]:
-        index_char, work_tree_char = " ", " "
-        if status_flags & FileStatus.INDEX_NEW:
-            index_char = "A"
-        elif status_flags & FileStatus.INDEX_MODIFIED:
-            index_char = "M"
-        elif status_flags & FileStatus.INDEX_DELETED:
-            index_char = "D"
-        elif status_flags & FileStatus.INDEX_RENAMED:
-            index_char = "R"
-        if status_flags & FileStatus.WT_NEW:
-            work_tree_char = "?"
-        elif status_flags & FileStatus.WT_MODIFIED:
-            work_tree_char = "M"
-        elif status_flags & FileStatus.WT_DELETED:
-            work_tree_char = "D"
-        elif status_flags & FileStatus.WT_RENAMED:
-            work_tree_char = "R"
-        if status_flags & FileStatus.CONFLICTED:
-            index_char, work_tree_char = "U", "U"
-        if work_tree_char == "?":
-            index_char = "?"
-        return {"index_status": index_char, "work_tree_status": work_tree_char}
-
-    def get_ahead_behind(self) -> Tuple[int, int]:
-        if self.repo.head_is_unborn or self.repo.head_is_detached:
-            return 0, 0
-        try:
-            local_branch = self.repo.branches.local[self.repo.head.shorthand]
-            if not local_branch.upstream:
-                return 0, 0
-            return self.repo.ahead_behind(
-                local_branch.target, local_branch.upstream.target
-            )
-        except (GitError, KeyError):
-            return 0, 0
+            self.repo.index.read()
+            if self.repo.index.conflicts is None:
+                return []
+            for _, ours, theirs in self.repo.index.conflicts:
+                if ours:
+                    conflicted_paths.add(ours.path)
+                elif theirs:
+                    conflicted_paths.add(theirs.path)
+        except (GitError, TypeError) as e:
+            logger.error(f"Error reading conflicts from pygit2 index: {e}")
+            return []
+        return sorted(list(conflicted_paths))
 
     def get_status(self) -> Dict[str, Any]:
+        """Gets the repository status, including file changes and branch sync state."""
         all_files = [
             {"path": filepath, **self._map_status_flags(flags), "original_path": None}
             for filepath, flags in self.repo.status().items()
@@ -578,7 +300,58 @@ class GitManager:
             "files_changed_count": len(all_files),
         }
 
+    def get_ahead_behind(self) -> Tuple[int, int]:
+        """Gets the number of commits the local branch is ahead/behind its upstream."""
+        if self.repo.head_is_unborn or self.repo.head_is_detached:
+            return 0, 0
+        try:
+            local_branch = self.repo.branches.local[self.repo.head.shorthand]
+            if not local_branch.upstream:
+                return 0, 0
+            return self.repo.ahead_behind(
+                local_branch.target, local_branch.upstream.target
+            )
+        except (GitError, KeyError):
+            return 0, 0
+
+    def get_current_branch(self) -> Optional[str]:
+        """Gets the current branch name, or a detached HEAD indicator."""
+        if self.repo.head_is_unborn:
+            return self.default_branch
+        if self.repo.head_is_detached:
+            return f"DETACHED ({str(self.repo.head.target)[:7]})"
+        return self.repo.head.shorthand
+
+    def _map_status_flags(self, status_flags: FileStatus) -> Dict[str, str]:
+        """Maps pygit2's bitmask status to a dict of status characters."""
+        index_char, work_tree_char = " ", " "
+        if status_flags & FileStatus.INDEX_NEW:
+            index_char = "A"
+        elif status_flags & FileStatus.INDEX_MODIFIED:
+            index_char = "M"
+        elif status_flags & FileStatus.INDEX_DELETED:
+            index_char = "D"
+        elif status_flags & FileStatus.INDEX_RENAMED:
+            index_char = "R"
+        if status_flags & FileStatus.WT_NEW:
+            work_tree_char = "?"
+        elif status_flags & FileStatus.WT_MODIFIED:
+            work_tree_char = "M"
+        elif status_flags & FileStatus.WT_DELETED:
+            work_tree_char = "D"
+        elif status_flags & FileStatus.WT_RENAMED:
+            work_tree_char = "R"
+        if status_flags & FileStatus.CONFLICTED:
+            index_char, work_tree_char = "U", "U"
+        if work_tree_char == "?":
+            index_char = "?"
+        return {"index_status": index_char, "work_tree_status": work_tree_char}
+
+    # endregion
+
+    # region: FILE OPERATIONS (PYGIT2)
     def add_file(self, filepath: str):
+        """Stages a single file."""
         if (self.repo.status().get(filepath) or 0) & FileStatus.WT_DELETED:
             self.repo.index.remove(filepath)
         else:
@@ -586,10 +359,12 @@ class GitManager:
         self.repo.index.write()
 
     def add_all(self):
+        """Stages all changes."""
         self.repo.index.add_all()
         self.repo.index.write()
 
     def unstage_file(self, filepath: str):
+        """Unstages a single file."""
         if self.repo.head_is_unborn:
             try:
                 self.repo.index.remove(filepath)
@@ -607,6 +382,7 @@ class GitManager:
         self.repo.index.write()
 
     def unstage_all(self):
+        """Unstages all files."""
         if self.repo.head_is_unborn:
             self.repo.index.clear()
         else:
@@ -614,6 +390,7 @@ class GitManager:
         self.repo.index.write()
 
     def discard_file(self, filepath: str):
+        """Discards changes to a single file in the working directory."""
         if (self.repo.status().get(filepath) or 0) & FileStatus.WT_NEW:
             full_path = os.path.join(self.repo.workdir, filepath)
             if os.path.exists(full_path):
@@ -622,14 +399,186 @@ class GitManager:
             self.repo.checkout(strategy=pygit2.GIT_CHECKOUT_FORCE, paths=[filepath])
 
     def discard_all(self):
+        """Discards all changes in the working directory."""
         self.repo.checkout(strategy=pygit2.GIT_CHECKOUT_FORCE)
-        self._run_git_command(["clean", "-fd"])
+        self._execute_git_command(["clean", "-fd"])
+
+    # endregion
+
+    # region: COMMIT MANAGEMENT (PYGIT2)
+    def commit(self, message: Optional[str]) -> Dict[str, Any]:
+        """Creates a commit and returns structured data about it."""
+        if message is None:
+            try:
+                with open(os.path.join(self.repo.path, "MERGE_MSG")) as f:
+                    message = f.read().strip()
+            except FileNotFoundError:
+                raise ValueError("Cannot finalize merge: MERGE_MSG not found.")
+
+        if not message.strip():
+            raise ValueError("Commit message cannot be empty.")
+
+        try:
+            if not self.repo.index.diff_to_tree(self.repo.head.peel().tree):
+                raise NoChangesError("No changes staged for commit.")
+        except GitError:
+            if len(self.repo.index) == 0:
+                raise NoChangesError("No changes staged for commit.")
+
+        tree = self.repo.index.write_tree()
+        parents = [] if self.repo.head_is_unborn else [self.repo.head.target]
+
+        merge_head_path = os.path.join(self.repo.path, "MERGE_HEAD")
+        if os.path.exists(merge_head_path):
+            with open(merge_head_path) as f:
+                merge_parent_oid = pygit2.Oid(hex=f.read().strip())
+                if merge_parent_oid not in parents:
+                    parents.append(merge_parent_oid)
+
+        commit_oid = self.repo.create_commit(
+            "HEAD", self.author, self.committer, message, tree, parents
+        )
+        self.repo.index.write()
+
+        if os.path.exists(merge_head_path):
+            os.remove(merge_head_path)
+
+        new_commit = self.repo.get(commit_oid)
+        files_changed = self._get_diff_metadata(self._get_commit_diff(new_commit))
+
+        self._refresh_repository_state()
+
+        return {
+            "hash": str(commit_oid),
+            "message": message,
+            "files_changed": files_changed,
+        }
+
+    def _get_commit_diff(self, commit: pygit2.Commit) -> pygit2.Diff:
+        """Helper to get the diff of a commit against its parent."""
+        parent = commit.parents[0] if commit.parents else None
+        return self.repo.diff(parent, commit) if parent else commit.tree.diff_to_tree()
+
+    def _get_diff_metadata(self, diff: pygit2.Diff) -> List[Dict[str, Any]]:
+        """Helper to extract structured file metadata from a diff object."""
+        diff.find_similar()
+        files = []
+        for patch in diff:
+            delta = patch.delta
+            status = delta.status_char()
+            if status in ("R", "C"):
+                files.append(
+                    {
+                        "status": status,
+                        "old_path": delta.old_file.path,
+                        "path": delta.new_file.path,
+                    }
+                )
+            else:
+                path = delta.new_file.path if status != "D" else delta.old_file.path
+                files.append({"status": status, "path": path})
+        return files
+
+    # endregion
+
+    # region: REMOTE SYNC WORKFLOWS
+    def commit_and_sync(
+        self, commit_message: str, remote_name: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Performs the "Commit & Sync" operation with a safe, isolated, ref-based note mechanism.
+        """
+        results = {}
+
+        self._cleanup_temp_notes()
+
+        if self.repo.status():
+            logger.info(
+                "Sync started with a dirty workspace. A temporary commit will be created."
+            )
+            self.add_all()
+            try:
+                commit_result = self.commit(message=commit_message)
+                temp_commit_oid = pygit2.Oid(hex=commit_result["hash"])
+
+                self.repo.create_note(
+                    "flatnotes-temporary-commit",  # message
+                    self.author,  # author
+                    self.committer,  # committer
+                    str(temp_commit_oid),  # annotated_id
+                    TEMP_NOTE_REF,  # ref
+                    True,  # force
+                )
+                logger.info(
+                    f"Attached temporary note in ref '{TEMP_NOTE_REF}' to commit {str(temp_commit_oid)[:7]}"
+                )
+                results["commit"] = commit_result
+            except NoChangesError:
+                results["commit"] = {"message": "No meaningful changes to commit."}
+        else:
+            logger.info(
+                "Sync started with a clean workspace. No temporary commit will be created."
+            )
+            results["commit"] = {
+                "message": "Workspace is clean, proceeding directly to pull."
+            }
+
+        try:
+            results["pull"] = self.pull_remote_changes(remote_name=remote_name)
+            results["push"] = self.push_local_changes(remote_name=remote_name)
+
+            self._cleanup_temp_notes()
+            return results
+        except MergeConflictError:
+            logger.warning(
+                "Merge conflict detected. Temporary note (if any) is preserved for rollback."
+            )
+            raise
+        except Exception:
+            self._cleanup_temp_notes()
+            raise
+
+    def pull_remote_changes(
+        self, remote_name: Optional[str] = None, branch: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Pulls changes from a remote repository."""
+        remote = remote_name or self.default_remote
+        branch_to_pull = branch or self.get_current_branch()
+        if self.repo.head_is_detached or branch_to_pull.startswith("DETACHED"):
+            raise GitManagerError("Cannot pull in a detached HEAD state.")
+
+        old_head_oid = self.repo.head.target
+        command = ["pull", remote, branch_to_pull]
+        if self.pull_strategy == PullStrategy.REBASE:
+            command.append("--rebase")
+
+        output = self._execute_git_command(command)
+        self._reopen_repository()
+        new_head_oid = self.repo.head.target
+
+        commits_received, files_updated = 0, []
+        if old_head_oid != new_head_oid:
+            try:
+                ahead, _ = self.repo.ahead_behind(new_head_oid, old_head_oid)
+                commits_received = ahead
+                diff = self.repo.diff(
+                    self.repo.get(old_head_oid), self.repo.get(new_head_oid)
+                )
+                files_updated = self._get_diff_metadata(diff)
+            except (GitError, ValueError):
+                pass
+
+        return {
+            "message": "Pull successful.",
+            "stdout": output,
+            "commits_received": commits_received,
+            "files_updated": files_updated,
+        }
 
     def push_local_changes(
-        self,
-        remote_name: Optional[str] = None,
-        branch: Optional[str] = None,
+        self, remote_name: Optional[str] = None, branch: Optional[str] = None
     ) -> Dict[str, Any]:
+        """Pushes local commits to a remote repository."""
         remote = remote_name or self.default_remote
         branch_to_push = branch or self.get_current_branch()
         if self.repo.head_is_detached or branch_to_push.startswith("DETACHED"):
@@ -639,14 +588,10 @@ class GitManager:
         if ahead == 0:
             return {"message": "Nothing to push."}
 
-        commits_to_push = []
-        files_changed = []
-
+        commits_to_push, files_changed = [], []
         if ahead > 0:
             local_branch = self.repo.branches.local[self.repo.head.shorthand]
-            upstream_ref = local_branch.upstream
-            if upstream_ref:
-                # Get commits to push
+            if upstream_ref := local_branch.upstream:
                 walker = self.repo.walk(local_branch.target, SortMode.TOPOLOGICAL)
                 for i, commit in enumerate(walker):
                     if i >= ahead:
@@ -654,14 +599,11 @@ class GitManager:
                     commits_to_push.append(
                         {"hash": str(commit.id), "message": commit.message.strip()}
                     )
-
-                # Get files changed in the entire push
                 diff = self.repo.diff(upstream_ref.target, local_branch.target)
-                files_changed = self._get_diff_files(diff)
+                files_changed = self._get_diff_metadata(diff)
 
-        command = ["push", remote, branch_to_push]
-
-        output = self._run_git_command(command)
+        output = self._execute_git_command(["push", remote, branch_to_push])
+        self._reopen_repository()
         return {
             "message": "Push successful.",
             "stdout": output,
@@ -670,21 +612,119 @@ class GitManager:
             "files_changed": files_changed,
         }
 
-    def get_commit_log(self, limit: int = 20, page: int = 1) -> List[Dict[str, Any]]:
+    # endregion
+
+    # region: CONFLICT RESOLUTION
+    def continue_conflict_resolution(self) -> Dict[str, Any]:
+        """Continues a rebase or merge and cleans up any temporary notes."""
+        try:
+            state = self.get_repository_state()
+            if state == "REBASING_CONTINUE":
+                continue_output = self._execute_git_command(["rebase", "--continue"])
+                push_output = self.push_local_changes()
+                self._reopen_repository()
+                return {
+                    "message": "Rebase finished and pushed successfully.",
+                    "details": f"Rebase: {continue_output}\nPush: {push_output}",
+                }
+            elif state == "MERGING":
+                commit_result = self.commit(message=None)
+                push_result = self.push_local_changes()
+                self._reopen_repository()
+                return {
+                    "message": "Merge finalized and pushed successfully.",
+                    "commit": commit_result,
+                    "push": push_result,
+                }
+            else:
+                raise GitManagerError(
+                    f"No conflict resolution to continue in state '{state}'."
+                )
+        finally:
+            self._cleanup_temp_notes()
+
+    def abort_conflict_resolution(self) -> str:
+        """
+        Aborts the current conflict state, safely checking for a git note to identify and reset only temporary commits.
+        """
+        state = self.get_repository_state()
+        operation_name, abort_command = "unknown operation", None
+
+        if state.startswith("REBASING"):
+            operation_name, abort_command = "rebase", ["rebase", "--abort"]
+        elif state.startswith("MERGING"):
+            operation_name, abort_command = "merge", ["merge", "--abort"]
+
+        if not abort_command:
+            return "No operation to abort."
+
+        try:
+            self._execute_git_command(abort_command)
+            logger.info(f"Successfully aborted {operation_name} operation.")
+        except GitManagerError as e:
+            self._cleanup_temp_notes()
+            raise GitManagerError(
+                f"Critical error: Failed to abort {operation_name}: {e}"
+            )
+
+        self._reopen_repository()
+
+        try:
+            head_commit_after_abort = self.repo.head.peel()
+            self.repo.lookup_note(str(head_commit_after_abort.id), TEMP_NOTE_REF)
+
+            logger.info(
+                f"Found temporary commit note on '{str(head_commit_after_abort.id)[:7]}'. Undoing this commit."
+            )
+
+            if not head_commit_after_abort.parents:
+                self._cleanup_temp_notes()
+                return f"The {operation_name} was aborted. The initial temporary commit was left in place."
+
+            self.repo.reset(
+                head_commit_after_abort.parents[0].id, pygit2.GIT_RESET_SOFT
+            )
+            self._reopen_repository()
+
+            self._cleanup_temp_notes()
+            return f"The {operation_name} was aborted. The temporary sync commit has been undone and your changes are now in the staging area."
+        except KeyError:
+            logger.info(
+                "No temporary note found for HEAD. History correctly preserved."
+            )
+            self._cleanup_temp_notes()
+            return (
+                f"The {operation_name} was aborted. Your commit history is untouched."
+            )
+        except GitError as e:
+            logger.error(
+                f"Error during post-abort inspection: {e}. Cleaning up and exiting."
+            )
+            self._cleanup_temp_notes()
+            return f"The {operation_name} was aborted, but a post-check failed. Please verify repository state."
+
+    # endregion
+
+    # region: HISTORY & INSPECTION
+    def get_commit_history(
+        self, limit: int = 20, page: int = 1
+    ) -> List[Dict[str, Any]]:
+        """Gets paginated commit history, attempting to fetch first."""
         if self.repo.head_is_unborn:
             return []
         try:
-            self._run_git_command(["fetch", self.default_remote, "--prune"])
+            self._execute_git_command(["fetch", self.default_remote, "--prune"])
         except GitManagerError:
             pass
+
         walker = self.repo.walk(self.repo.head.target, SortMode.TOPOLOGICAL)
         commits = list(walker)
         paginated_commits = commits[(page - 1) * limit : page * limit]
         upstream_commit_oid = None
         if not self.repo.head_is_detached:
-            local_branch = self.repo.branches.local.get(self.repo.head.shorthand)
-            if local_branch and local_branch.upstream:
-                upstream_commit_oid = local_branch.upstream.target
+            if local_branch := self.repo.branches.local.get(self.repo.head.shorthand):
+                if local_branch.upstream:
+                    upstream_commit_oid = local_branch.upstream.target
         log_entries = []
         for c in paginated_commits:
             is_pushed = False
@@ -708,52 +748,21 @@ class GitManager:
         return log_entries
 
     def get_files_in_commit(self, commit_hash: str) -> List[Dict[str, str]]:
+        """Gets a list of files and their statuses within a specific commit."""
         commit = self.repo.get(commit_hash)
-        if commit is None:
+        if not isinstance(commit, pygit2.Commit):
             raise GitError(f"Object not found for hash '{commit_hash}'")
+        return self._get_diff_metadata(self._get_commit_diff(commit))
 
-        diff = self._get_commit_diff(commit)
+    # endregion
 
-        diff.find_similar()
-
-        return self._get_diff_files(diff)
-
-    def get_remote_url(self, remote_name: Optional[str] = None) -> Optional[str]:
+    # region: BRANCH MANAGEMENT
+    def list_branches(self) -> Dict[str, Any]:
+        """Lists all local and remote branches after a fresh fetch."""
         try:
-            return self.repo.remotes[remote_name or self.default_remote].url
-        except (KeyError, GitError):
-            return None
-
-    def get_current_branch(self) -> Optional[str]:
-        if self.repo.head_is_unborn:
-            return self.default_branch
-        if self.repo.head_is_detached:
-            return f"DETACHED ({str(self.repo.head.target)[:7]})"
-
-        return self.repo.head.shorthand
-
-    def fetch_only(self, remote_name: Optional[str] = None) -> Dict[str, Any]:
-        """
-        Performs a 'git fetch' to download objects and refs from the remote,
-        but does not modify the local branch. This is a safe, read-only operation.
-        """
-        remote = remote_name or self.default_remote
-        try:
-            output = self._run_git_command(["fetch", remote, "--prune"])
-            return {"message": "Fetch successful.", "stdout": output}
-        except GitManagerError as e:
-            # Re-raise to be handled by the router's exception handler.
-            raise GitManagerError(f"Fetch operation failed: {e}") from e
-
-    def fetch_and_list_branches(self) -> Dict[str, Any]:
-        try:
-            self._run_git_command(["fetch", self.default_remote, "--prune"])
+            self._execute_git_command(["fetch", self.default_remote, "--prune"])
         except GitManagerError:
             pass
-
-        return self.list_branches()
-
-    def list_branches(self) -> Dict[str, Any]:
         active_branch_name = self.get_current_branch()
         branches = []
         for name in self.repo.branches.local:
@@ -765,16 +774,17 @@ class GitManager:
                 }
             )
         for name in self.repo.branches.remote:
-            branch_part = name.split("/", 1)[1]
-            if branch_part not in self.repo.branches.local:
-                branches.append(
-                    {"name": branch_part, "is_active": False, "is_remote": True}
-                )
-
+            if not name.endswith("/HEAD"):
+                branch_part = name.split("/", 1)[1]
+                if branch_part not in self.repo.branches.local:
+                    branches.append(
+                        {"name": branch_part, "is_active": False, "is_remote": True}
+                    )
         branches.sort(key=lambda x: (x["is_remote"], x["name"]))
         return {"branches": branches, "current_branch": active_branch_name}
 
     def switch_branch(self, branch_name: str):
+        """Switches to a different local or remote branch."""
         if self.get_repository_state() != "CLEAN":
             raise GitManagerError(
                 f"Cannot switch branch while in '{self.get_repository_state()}' state."
@@ -786,43 +796,40 @@ class GitManager:
         try:
             remote_branch_name = f"{self.default_remote}/{branch_name}"
             remote_branch = self.repo.branches.remote[remote_branch_name]
-
             local_branch = self.repo.create_branch(branch_name, remote_branch.peel())
             local_branch.upstream = remote_branch
             self.repo.checkout(local_branch)
-
         except KeyError:
             raise BranchNotFoundError(
                 f"Branch '{branch_name}' not found locally or on remote '{self.default_remote}'."
             )
 
-    def checkout_file_from_commit(self, commit_hash: str, filepath: str):
-        commit = self.repo.get(commit_hash)
+    def reset_to_remote(
+        self, remote_name: Optional[str] = None, branch_name: Optional[str] = None
+    ):
+        """Hard resets the current branch to its upstream counterpart."""
+        if self.repo.head_is_detached:
+            raise GitManagerError("Cannot reset in detached HEAD state.")
+        local_branch_name = branch_name or self.get_current_branch()
+        local_branch = self.repo.branches.local[local_branch_name]
+        if not local_branch.upstream:
+            raise GitManagerError("Branch has no upstream to reset to.")
 
+        self._execute_git_command(["fetch", remote_name or self.default_remote])
+        upstream_commit = self.repo.lookup_reference(local_branch.upstream.name).peel()
+        self.repo.reset(upstream_commit.id, pygit2.GIT_RESET_HARD)
+        self._reopen_repository()
+        return {"message": f"Reset branch '{local_branch_name}' to remote state."}
+
+    def checkout_file_from_commit(self, commit_hash: str, filepath: str):
+        """Restores a single file to its state from a specific commit."""
+        commit = self.repo.get(commit_hash)
         if not isinstance(commit, pygit2.Commit):
             raise GitError(f"Hash '{commit_hash}' is not a commit.")
-
         if filepath not in commit.tree:
             raise KeyError(f"File '{filepath}' not found in commit '{commit_hash}'")
-
         self.repo.checkout_tree(
             treeish=commit.tree, paths=[filepath], strategy=pygit2.GIT_CHECKOUT_FORCE
         )
 
-    def reset_to_remote(
-        self, remote_name: Optional[str] = None, branch_name: Optional[str] = None
-    ):
-        if self.repo.head_is_detached:
-            raise GitManagerError("Cannot reset in detached HEAD state.")
-
-        local_branch_name = branch_name or self.get_current_branch()
-        local_branch = self.repo.branches.local[local_branch_name]
-
-        if not local_branch.upstream:
-            raise GitManagerError("Branch has no upstream to reset to.")
-
-        self._run_git_command(["fetch", remote_name or self.default_remote])
-        upstream_commit = self.repo.lookup_reference(local_branch.upstream.name).peel()
-        self.repo.reset(upstream_commit.id, pygit2.GIT_RESET_HARD)
-
-        return {"message": f"Reset branch '{local_branch_name}' to remote state."}
+    # endregion
