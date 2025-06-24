@@ -143,8 +143,8 @@ import ToastEditor from "../components/toastui/ToastEditor.vue";
 import ToastViewer from "../components/toastui/ToastViewer.vue";
 import { authTypes } from "../constants.js";
 import { useGlobalStore } from "../globalStore.js";
-import { useStatusStore } from "../git-integration/stores/statusStore.js";
 import { getToastOptions } from "../helpers.js";
+import eventBus from "../git-integration/eventBus.js";
 import Compressor from "compressorjs";
 
 const props = defineProps({
@@ -157,7 +157,6 @@ const canModify = computed(
 let contentChangedTimeout = null;
 const editMode = ref(false);
 const globalStore = useGlobalStore();
-const statusStore = useStatusStore();
 const isSaveChangesModalVisible = ref(false);
 const isDeleteModalVisible = ref(false);
 const isDraftModalVisible = ref(false);
@@ -244,9 +243,7 @@ function deleteConfirmedHandler() {
   deleteNote(note.value.title)
     .then(() => {
       toast.add(getToastOptions("Note deleted ✓", "Success", "success"));
-      if (globalStore.config.value.flatnotesGitEnabled) {
-        statusStore.fetchStatus();
-      }
+      eventBus.emit("note:deleted", { title: note.value.title });
       router.push({ name: "home" });
     })
     .catch((error) => {
@@ -341,9 +338,7 @@ function noteSaveSuccess(close = false) {
   }
   setBeforeUnloadConfirmation(false);
   toast.add(getToastOptions("Note saved successfully ✓", "Success", "success"));
-  if (globalStore.config.value.flatnotesGitEnabled) {
-    statusStore.fetchStatus();
-  }
+  eventBus.emit("note:saved", { title: note.value.title });
 }
 
 // Note Closure
@@ -370,6 +365,7 @@ function uploadAndInsert(fileToUpload, callback) {
   const altTextInputValue = document.getElementById(
     "toastuiAltTextInput",
   )?.value;
+
   // Upload the image then use the callback to insert the URL into the editor
   postAttachment(fileToUpload).then(function (data) {
     if (data) {
