@@ -3,13 +3,11 @@ import { defineStore } from "pinia";
 import { ref, computed } from "vue";
 import { useRouter } from "vue-router";
 import * as gitApi from "../gitApi";
-import { useConflictStore } from "./conflictStore";
 import eventBus from "../eventBus";
 import { GIT_OPERATION, GIT_CONFLICT } from "../events";
 
 export const useStatusStore = defineStore("git-status", () => {
   const router = useRouter();
-  const conflictStore = useConflictStore();
 
   // --- STATE ---
   const gitStatus = ref({ files: [] });
@@ -75,19 +73,6 @@ export const useStatusStore = defineStore("git-status", () => {
       isTrackingUpstream.value = data.is_tracking_upstream;
       repositoryState.value = data.repository_state;
       summaryError.value = null;
-
-      const state = repositoryState.value;
-      if (state.includes("CONFLICT") && !conflictStore.isInConflict) {
-        const errorData = {
-          state: state,
-          conflicted_files: data.files
-            .filter((f) => f.index_status === "U" || f.work_tree_status === "U")
-            .map((f) => f.path),
-        };
-        conflictStore.enterConflictMode(errorData, { silent: true });
-      } else if (!state.includes("CONFLICT") && conflictStore.isInConflict) {
-        conflictStore.exitConflictMode();
-      }
     } catch (err) {
       if (err.response?.status === 428) {
         summaryError.value = "Git repository not initialized";
@@ -118,6 +103,11 @@ export const useStatusStore = defineStore("git-status", () => {
     eventBus.on(eventName, () => {
       fetchStatus();
     });
+  });
+
+  eventBus.on(GIT_CONFLICT.DETECTED, () => {
+    console.log("Conflict detected.");
+    fetchStatus();
   });
 
   return {

@@ -295,7 +295,7 @@ async def push_git_changes(
 
 
 @router.post("/sync", response_model=GitCommandResponse)
-async def sync_workspace(
+async def commit_and_sync(
     background_tasks: BackgroundTasks,
     commit_request: Optional[GitCommitRequest] = Body(None),
     manager: GitManager = Depends(get_git_manager),
@@ -315,7 +315,7 @@ async def sync_workspace(
         else:
             commit_message = commit_request.message
 
-        results = manager.sync_workspace(commit_message=commit_message)
+        results = manager.commit_and_sync(commit_message=commit_message)
         message = "Workspace synchronized successfully."
         add_git_log(LogLevel.SUCCESS, message, details=results)
         background_tasks.add_task(connection_manager.broadcast_status_update)
@@ -332,7 +332,7 @@ def get_git_log(
     manager: GitManager = Depends(get_git_manager),
 ):
     try:
-        log_entries = manager.get_commit_log(limit=limit, page=page)
+        log_entries = manager.get_commit_history(limit=limit, page=page)
         remote_url = manager.get_remote_url()
         web_url = manager._format_remote_url_for_web(remote_url)
 
@@ -360,7 +360,7 @@ def get_commit_files(commit_hash: str, manager: GitManager = Depends(get_git_man
 @router.get("/branches", response_model=BranchListResponse)
 def get_branches(manager: GitManager = Depends(get_git_manager)):
     try:
-        return manager.fetch_and_list_branches()
+        return manager.list_branches()
     except Exception as e:
         handle_git_exception(e, "List Branches", manager)
 

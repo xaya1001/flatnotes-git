@@ -127,7 +127,7 @@
                 <button
                   @click.stop="handleRestoreFile(commit.hash, file.path)"
                   class="p-1 text-theme-text-muted hover:text-theme-text disabled:cursor-not-allowed disabled:opacity-50"
-                  :disabled="conflictStore.isInConflict"
+                  :disabled="isConflictRelated"
                   title="Restore this file to the version in this commit"
                 >
                   <SvgIcon type="mdi" :path="mdiRestore" :size="14" />
@@ -187,7 +187,7 @@
 </template>
 
 <script setup>
-import { ref } from "vue";
+import { ref, computed } from "vue";
 import { useHistoryStore } from "../../stores/historyStore";
 import { useActionsStore } from "../../stores/actionsStore";
 import { useStatusStore } from "../../stores/statusStore";
@@ -212,6 +212,16 @@ const toggleSettingsPanel = (event) => {
   statusStore.fetchStatus();
   settingsPanel.value.toggle(event);
 };
+
+const isConflictRelated = computed(() => {
+  const state = statusStore.repositoryState;
+  if (!state) return false;
+  return (
+    state.includes("CONFLICT") ||
+    state.includes("REBASING") ||
+    state.includes("MERGING")
+  );
+});
 
 async function handleRestoreFile(commitHash, filepath) {
   const confirmed = await panelUiStore.showConfirmation({

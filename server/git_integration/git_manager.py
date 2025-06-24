@@ -347,6 +347,25 @@ class GitManager:
             index_char = "?"
         return {"index_status": index_char, "work_tree_status": work_tree_char}
 
+    def get_remote_url(self, remote_name: Optional[str] = None) -> Optional[str]:
+        """Gets the URL of the specified remote."""
+        try:
+            return self.repo.remotes[remote_name or self.default_remote].url
+        except (KeyError, GitError):
+            return None
+
+    def _format_remote_url_for_web(self, url: str) -> Optional[str]:
+        if not url:
+            return None
+        if url.startswith("git@"):
+            path = url.split("@", 1)[1].replace(":", "/", 1)
+            base_url = f"https://{path}"
+            return base_url.removesuffix(".git").removesuffix("/")
+        if url.startswith(("http://", "https://")):
+            return url.removesuffix(".git").removesuffix("/")
+        logger.warning(f"Could not parse remote URL format: {url}")
+        return None
+
     # endregion
 
     # region: FILE OPERATIONS (PYGIT2)
@@ -524,7 +543,23 @@ class GitManager:
             }
 
         try:
-            results["pull"] = self.pull_remote_changes(remote_name=remote_name)
+            logger.info("Fetching remote updates before sync...")
+            self._execute_git_command(["fetch", self.default_remote])
+            self._reopen_repository()
+
+            _, behind = self.get_ahead_behind()
+
+            if behind > 0:
+                logger.info(
+                    f"Local branch is {behind} commit(s) behind remote. Pulling changes."
+                )
+                results["pull"] = self.pull_remote_changes(remote_name=remote_name)
+            else:
+                logger.info(
+                    "Local branch is up-to-date or ahead of remote. Skipping pull."
+                )
+                results["pull"] = {"message": "Already up-to-date. Pull skipped."}
+
             results["push"] = self.push_local_changes(remote_name=remote_name)
 
             self._cleanup_temp_notes()
@@ -541,36 +576,91 @@ class GitManager:
     def pull_remote_changes(
         self, remote_name: Optional[str] = None, branch: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Pulls changes from a remote repository."""
-        remote = remote_name or self.default_remote
-        branch_to_pull = branch or self.get_current_branch()
-        if self.repo.head_is_detached or branch_to_pull.startswith("DETACHED"):
+        """
+        Pulls changes from a remote repository by explicitly running fetch and then rebase/merge.
+        This provides more control and avoids ambiguity that can cause 'pull' to fail after an abort.
+        """
+        remote_to_use = remote_name or self.default_remote
+
+        # We need the HEAD before any operation to calculate the diff later.
+        try:
+            old_head_oid_str = str(self.repo.head.target)
+        except GitError:
+            old_head_oid_str = None
+
+        # Step 1: Always fetch first. This is a safe, non-destructive operation.
+        logger.info(f"Step 1/2: Fetching from remote '{remote_to_use}'...")
+        fetch_output = self._execute_git_command(["fetch", remote_to_use, "--prune"])
+        self._reopen_repository()  # Fetch updates remote refs, we must reopen.
+
+        # Step 2: Determine the correct upstream branch for the rebase/merge.
+        current_branch_name = branch or self.get_current_branch()
+        if not current_branch_name or current_branch_name.startswith("DETACHED"):
             raise GitManagerError("Cannot pull in a detached HEAD state.")
 
-        old_head_oid = self.repo.head.target
-        command = ["pull", remote, branch_to_pull]
-        if self.pull_strategy == PullStrategy.REBASE:
-            command.append("--rebase")
+        try:
+            local_branch = self.repo.branches.local[current_branch_name]
+            if not local_branch.upstream:
+                raise GitManagerError(
+                    f"Branch '{current_branch_name}' has no configured upstream to pull from."
+                )
+            upstream_ref_name = local_branch.upstream.name
+        except (KeyError, GitError) as e:
+            raise GitManagerError(
+                f"Could not determine upstream for branch '{current_branch_name}': {e}"
+            )
 
-        output = self._execute_git_command(command)
+        # Check if we are already up to date before attempting rebase/merge
+        _, behind = self.get_ahead_behind()
+        if behind == 0:
+            logger.info(
+                "Local branch is already up-to-date with its remote counterpart. Nothing to pull."
+            )
+            return {
+                "message": "Pull successful. Already up-to-date.",
+                "stdout": fetch_output,
+                "commits_received": 0,
+                "files_updated": [],
+            }
+
+        logger.info(
+            f"Step 2/2: Found {behind} new commit(s). Applying changes with strategy: {self.pull_strategy.value}"
+        )
+
+        # Step 3: Explicitly execute rebase or merge against the determined upstream.
+        if self.pull_strategy == PullStrategy.REBASE:
+            operation_command = ["rebase", upstream_ref_name]
+        else:  # MERGE strategy
+            operation_command = ["merge", upstream_ref_name]
+
+        operation_output = self._execute_git_command(operation_command)
+
+        # After a successful rebase/merge, reopen again to ensure all state is fresh.
         self._reopen_repository()
+
+        # Step 4: Analyze the result for a rich response.
         new_head_oid = self.repo.head.target
 
-        commits_received, files_updated = 0, []
-        if old_head_oid != new_head_oid:
-            try:
-                ahead, _ = self.repo.ahead_behind(new_head_oid, old_head_oid)
-                commits_received = ahead
-                diff = self.repo.diff(
-                    self.repo.get(old_head_oid), self.repo.get(new_head_oid)
-                )
-                files_updated = self._get_diff_metadata(diff)
-            except (GitError, ValueError):
-                pass
+        commits_received = 0
+        files_updated = []
+        if old_head_oid_str:
+            old_head_oid = pygit2.Oid(hex=old_head_oid_str)
+            if old_head_oid != new_head_oid:
+                try:
+                    # Use pygit2 to calculate the diff and commit count
+                    ahead, _ = self.repo.ahead_behind(new_head_oid, old_head_oid)
+                    commits_received = ahead
+                    diff = self.repo.diff(self.repo.get(old_head_oid), new_head_oid)
+                    files_updated = self._get_diff_metadata(diff)
+                except (GitError, ValueError):
+                    logger.warning(
+                        "Could not calculate diff after pull, history may have been rewritten extensively."
+                    )
+                    pass
 
         return {
             "message": "Pull successful.",
-            "stdout": output,
+            "stdout": f"Fetch output:\n{fetch_output}\n\nOperation output:\n{operation_output}",
             "commits_received": commits_received,
             "files_updated": files_updated,
         }

@@ -1,4 +1,4 @@
-<!-- client/git-integration/components/GitSidebar.vue -->
+<!-- client/git-integration/components/GitSidebar.vue (FINAL REFACTORED VERSION) -->
 <template>
   <div class="fixed right-0 top-0 z-40 h-full">
     <!-- Sidebar Component -->
@@ -153,9 +153,7 @@
             <TabPanel
               :pt="{
                 header: {
-                  class: conflictStore.isInConflict
-                    ? 'conflict-tab-header'
-                    : '',
+                  class: isConflictRelated ? 'conflict-tab-header' : '',
                 },
                 content: { class: 'p-0 flex flex-col h-full' },
               }"
@@ -164,12 +162,14 @@
                 <div class="flex items-center space-x-1">
                   <span>Workspace</span>
                   <span
-                    v-if="conflictStore.isInConflict"
+                    v-if="isConflictRelated"
                     class="h-2 w-2 rounded-full bg-red-500"
                   ></span>
                 </div>
               </template>
-              <ConflictView v-if="conflictStore.isInConflict" />
+
+              <!-- AUTHORITATIVE RENDERING DECISION -->
+              <ConflictView v-if="isConflictRelated" />
               <WorkspaceTab v-else />
             </TabPanel>
 
@@ -212,7 +212,6 @@ import { usePanelUiStore } from "../stores/panelUiStore";
 import { useStatusStore } from "../stores/statusStore";
 import { useHistoryStore } from "../stores/historyStore";
 import { useLogStore } from "../stores/logStore";
-import { useConflictStore } from "../stores/conflictStore";
 import eventBus from "../eventBus";
 import { GIT_OPERATION } from "../events";
 
@@ -228,15 +227,24 @@ const panelUiStore = usePanelUiStore();
 const statusStore = useStatusStore();
 const historyStore = useHistoryStore();
 const logStore = useLogStore();
-const conflictStore = useConflictStore();
 
 const isRefreshing = ref(false);
 const globalConfig = computed(() => globalStore.config.value);
 
-// This function will now be the single point of entry for fetching all sidebar data.
+// THE NEW SINGLE SOURCE OF TRUTH FOR UI DECISION MAKING
+const isConflictRelated = computed(() => {
+  const state = statusStore.repositoryState;
+  if (!state) return false;
+
+  // All states that belong to the conflict resolution flow are defined here.
+  return (
+    state.includes("CONFLICT") ||
+    state.includes("REBASING") ||
+    state.includes("MERGING")
+  );
+});
+
 function fetchAllSidebarData() {
-  // We fetch status, history, and log all at once when the sidebar becomes visible.
-  // This ensures all tabs have data ready.
   return Promise.all([
     statusStore.fetchStatus(),
     historyStore.fetchGitLog(),
@@ -245,7 +253,6 @@ function fetchAllSidebarData() {
 }
 
 function handleSidebarShow() {
-  // When the sidebar is shown, fetch all necessary data.
   fetchAllSidebarData();
 }
 
@@ -260,8 +267,7 @@ async function refreshAll() {
   });
 
   try {
-    await fetchAllSidebarData(); // Reuse the same data fetching logic
-
+    await fetchAllSidebarData();
     const response = {
       details: { message: "All data refreshed successfully." },
     };
@@ -282,7 +288,6 @@ async function refreshAll() {
 }
 
 onMounted(() => {
-  // Initialize the log store once when the component is mounted.
   if (globalStore.config.value?.flatnotesGitEnabled) {
     logStore.initialize();
   }
@@ -294,6 +299,7 @@ onUnmounted(() => {
   }
 });
 </script>
+
 <style scoped>
 /* PrimeVue sidebar custom styling */
 .p-sidebar {
@@ -330,5 +336,10 @@ onUnmounted(() => {
 }
 :deep(.p-tabview-panel) {
   @apply flex flex-grow flex-col;
+}
+
+/* Style for the conflicted tab header */
+.conflict-tab-header > div > a {
+  @apply border-red-500/50 text-red-500;
 }
 </style>

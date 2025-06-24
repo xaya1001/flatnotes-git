@@ -367,7 +367,7 @@ class TestRemoteOperations:
 
         if strategy == PullStrategy.MERGE:
             local_log = run_git(local_path, ["log", "-1", "--pretty=%s"])
-            assert "Merge branch" in local_log
+            assert "Merge remote-tracking branch" in local_log
         else:  # REBASE
             local_log = run_git(local_path, ["log", "--oneline", "-n", "2"])
             assert "Local divergent change" in local_log

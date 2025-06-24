@@ -157,3 +157,47 @@ def test_conflict_and_continue_workflow(tmp_path, manager_with_remote):
     log = list(repo.walk(repo.head.target, pygit2.GIT_SORT_TOPOLOGICAL))
     assert log[0].message.strip() == "feat: Sync with conflict"
     assert log[1].message.strip() == "Remote divergence"
+
+
+def test_sync_when_only_ahead_succeeds_without_error(manager_with_remote, run_git):
+    """
+    Tests the specific bug fix: when local is ahead of remote but not behind,
+    commit_and_sync should succeed without trying an unnecessary and failing pull.
+    """
+    manager, repo, local_path, remote_path = manager_with_remote
+
+    # 1. Capture the remote state before we make local changes.
+    remote_head_before = run_git(remote_path, ["rev-parse", "HEAD"])
+
+    # 2. Create a new local commit, making the local repo 1 commit ahead.
+    with open(os.path.join(local_path, "new_file_for_test.md"), "w") as f:
+        f.write("This is a new local-only file.")
+
+    # 3. Execute commit_and_sync. THIS IS THE ACTION WE ARE TESTING.
+    # We expect this to run without raising any exceptions.
+    try:
+        sync_result = manager.commit_and_sync("feat: Add a new file locally")
+    except Exception as e:
+        pytest.fail(f"commit_and_sync raised an unexpected exception: {e}")
+
+    # 4. Assertions
+    # The pull step should have been skipped.
+    assert "Pull skipped" in sync_result["pull"]["message"]
+
+    # The push step should have been successful.
+    assert "Push successful" in sync_result["push"]["message"]
+    assert sync_result["push"]["commits_pushed"] == 1
+
+    # The remote repository should now have our new commit.
+    remote_head_after = run_git(remote_path, ["rev-parse", "HEAD"])
+    assert remote_head_after != remote_head_before
+
+    remote_log = run_git(remote_path, ["log", "-1", "--pretty=%s"])
+    assert remote_log == "feat: Add a new file locally"
+
+    # The temporary note ref MUST be gone.
+    with pytest.raises(KeyError):
+        repo.lookup_reference(TEMP_NOTE_REF)
+
+    # The local repository should be clean.
+    assert not repo.status()
