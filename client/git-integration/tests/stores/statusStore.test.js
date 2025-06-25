@@ -5,9 +5,6 @@ import { setActivePinia, createPinia } from "pinia";
 import { useStatusStore } from "../../stores/statusStore";
 import * as gitApi from "../../gitApi";
 
-import eventBus from "../../eventBus";
-import { GIT_CONFLICT } from "../../events";
-
 // --- Mocking Setup ---
 
 vi.mock("../../gitApi", () => ({

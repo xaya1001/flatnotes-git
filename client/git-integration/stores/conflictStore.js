@@ -1,6 +1,5 @@
 // client/git-integration/stores/conflictStore.js (FIXED)
 import { defineStore } from "pinia";
-import { useToast } from "primevue/usetoast";
 import { v4 as uuidv4 } from "uuid";
 import * as gitApi from "../gitApi";
 import eventBus from "../eventBus";
@@ -8,8 +7,6 @@ import { GIT_OPERATION, GIT_CONFLICT } from "../events";
 import { useActionsStore } from "./actionsStore";
 
 export const useConflictStore = defineStore("git-conflict", () => {
-  const toast = useToast();
-
   async function handleContinue() {
     const actionsStore = useActionsStore();
     actionsStore.isActionLoading = true;

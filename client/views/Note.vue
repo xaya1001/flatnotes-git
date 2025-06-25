@@ -144,7 +144,7 @@ import ToastViewer from "../components/toastui/ToastViewer.vue";
 import { authTypes } from "../constants.js";
 import { useGlobalStore } from "../globalStore.js";
 import { getToastOptions } from "../helpers.js";
-import eventBus from "../git-integration/eventBus.js";
+import eventBus from "../git-integration/eventBus";
 import Compressor from "compressorjs";
 
 const props = defineProps({

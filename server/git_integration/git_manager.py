@@ -501,6 +501,17 @@ class GitManager:
     # endregion
 
     # region: REMOTE SYNC WORKFLOWS
+    def fetch_only(self) -> str:
+        """
+        Executes a 'git fetch' to update remote-tracking branches without
+        merging or rebasing. This is a safe, read-only style operation
+        used for background updates.
+        """
+        logger.info(f"Executing fetch for remote '{self.default_remote}'...")
+        output = self._execute_git_command(["fetch", self.default_remote, "--prune"])
+        self._reopen_repository()  # It's crucial to reload state after fetch
+        return output
+
     def commit_and_sync(
         self, commit_message: str, remote_name: Optional[str] = None
     ) -> Dict[str, Any]:

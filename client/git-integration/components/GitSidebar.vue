@@ -228,10 +228,11 @@ const statusStore = useStatusStore();
 const historyStore = useHistoryStore();
 const logStore = useLogStore();
 
+const isInitialLoad = ref(true);
 const isRefreshing = ref(false);
 const globalConfig = computed(() => globalStore.config.value);
 
-// THE NEW SINGLE SOURCE OF TRUTH FOR UI DECISION MAKING
+// THE SINGLE SOURCE OF TRUTH FOR UI DECISION MAKING
 const isConflictRelated = computed(() => {
   const state = statusStore.repositoryState;
   if (!state) return false;
@@ -253,6 +254,9 @@ function fetchAllSidebarData() {
 }
 
 function handleSidebarShow() {
+  if (isInitialLoad.value) {
+    return;
+  }
   fetchAllSidebarData();
 }
 
@@ -289,7 +293,10 @@ async function refreshAll() {
 
 onMounted(() => {
   if (globalStore.config.value?.flatnotesGitEnabled) {
+    statusStore.fetchStatus();
+    historyStore.fetchGitLog();
     logStore.initialize();
+    isInitialLoad.value = false;
   }
 });
 
