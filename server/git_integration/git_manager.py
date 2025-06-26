@@ -461,6 +461,12 @@ class GitManager:
 
         if os.path.exists(merge_head_path):
             os.remove(merge_head_path)
+            merge_msg_path = os.path.join(self.repo.path, "MERGE_MSG")
+            if os.path.exists(merge_msg_path):
+                os.remove(merge_msg_path)
+            merge_mode_path = os.path.join(self.repo.path, "MERGE_MODE")
+            if os.path.exists(merge_mode_path):
+                os.remove(merge_mode_path)
 
         new_commit = self.repo.get(commit_oid)
         files_changed = self._get_diff_metadata(self._get_commit_diff(new_commit))
@@ -475,8 +481,15 @@ class GitManager:
 
     def _get_commit_diff(self, commit: pygit2.Commit) -> pygit2.Diff:
         """Helper to get the diff of a commit against its parent."""
-        parent = commit.parents[0] if commit.parents else None
-        return self.repo.diff(parent, commit) if parent else commit.tree.diff_to_tree()
+        if not commit.parents:
+            # This is the initial commit. Diff its tree against an empty tree.
+            empty_tree_oid = self.repo.TreeBuilder().write()
+            empty_tree = self.repo.get(empty_tree_oid)
+            return empty_tree.diff_to_tree(commit.tree)
+        else:
+            # This is a regular commit. Diff against its first parent.
+            parent = commit.parents[0]
+            return self.repo.diff(parent, commit)
 
     def _get_diff_metadata(self, diff: pygit2.Diff) -> List[Dict[str, Any]]:
         """Helper to extract structured file metadata from a diff object."""
@@ -877,11 +890,15 @@ class GitManager:
         for name in self.repo.branches.remote:
             if not name.endswith("/HEAD"):
                 branch_part = name.split("/", 1)[1]
-                if branch_part not in self.repo.branches.local:
-                    branches.append(
-                        {"name": branch_part, "is_active": False, "is_remote": True}
-                    )
-        branches.sort(key=lambda x: (x["is_remote"], x["name"]))
+                branches.append(
+                    {"name": branch_part, "is_active": False, "is_remote": True}
+                )
+
+        # Deduplicate and sort
+        unique_branches = {(b["name"], b["is_remote"]): b for b in branches}.values()
+        branches = sorted(
+            list(unique_branches), key=lambda x: (x["is_remote"], x["name"])
+        )
         return {"branches": branches, "current_branch": active_branch_name}
 
     def switch_branch(self, branch_name: str):
