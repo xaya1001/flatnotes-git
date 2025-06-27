@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 from typing import List, Literal
 
@@ -33,24 +34,31 @@ auth_deps = [Depends(auth.authenticate)] if auth else []
 router = APIRouter()
 
 # --- Scoped Git Imports and Setup ---
+# This block is wrapped in a try/except to ensure the app can start
+# even if git-related dependencies are missing.
 git_integration_router = None
 if global_config.flatnotes_git_enabled:
     try:
         from git_integration import git_config
         from git_integration.git_config import initialize_git_config
 
+        # Initialize git config from the global config object
         initialize_git_config(global_config)
+
         from git_integration.git_logger import (
             AUTO_FETCH_LOG_ID,
             LogLevel,
             add_git_log,
         )
-        from git_integration.git_router import get_git_manager
+        from git_integration.git_router import get_git_service
         from git_integration.git_router import router as git_integration_router
         from git_integration.webhook_handler import verify_github_signature
         from git_integration.websockets import connection_manager
     except ImportError as e:
-        logger.error(f"FLATNOTES_GIT_ENABLED is true, but a module failed to load: {e}")
+        logger.error(
+            f"FLATNOTES_GIT_ENABLED is true, but a module failed to load: {e}. Git integration will be disabled."
+        )
+        git_integration_router = None  # Ensure it's disabled on error
 
 
 @asynccontextmanager
@@ -58,10 +66,10 @@ async def lifespan(app: FastAPI):
     """Handles application startup and shutdown events."""
     logger.info("Application startup...")
 
-    if git_config.GIT_ENABLED:
+    # Only configure scheduler and webhooks if git integration was successfully loaded
+    if git_integration_router and git_config.GIT_ENABLED:
         logger.info("Git integration is enabled.")
 
-        # --- Sync Logic ---
         # Determine the active automatic sync method. Webhook takes precedence.
         if git_config.GIT_WEBHOOK_ACTIVE:
             logger.info("Sync Mode: Real-time fetch via Webhook is active.")
@@ -74,13 +82,17 @@ async def lifespan(app: FastAPI):
 
             scheduler = BackgroundScheduler(daemon=True)
 
-            async def scheduled_fetch_job():
+            # This must be a standard 'def' function, not 'async def',
+            # because APScheduler runs it in a separate thread.
+            def scheduled_fetch_job():
                 """A lightweight job that only performs a git fetch."""
                 logger.debug("Executing scheduled git fetch...")
                 try:
-                    manager = get_git_manager()
-                    manager.fetch_only()
-                    await connection_manager.broadcast_status_update()
+                    # Instantiate the service to perform the action
+                    service = get_git_service()
+                    service.executor.fetch()
+                    # Run the async broadcast function from this sync thread
+                    asyncio.run(connection_manager.broadcast_status_update())
                     add_git_log(
                         LogLevel.SUCCESS,
                         "Scheduled fetch successful",
@@ -102,7 +114,6 @@ async def lifespan(app: FastAPI):
             scheduler.start()
             app.state.scheduler = scheduler
             logger.info("Scheduler for auto-fetch started.")
-
         else:
             logger.info("Sync Mode: Manual sync only. No automatic fetch configured.")
 
@@ -127,7 +138,7 @@ if git_integration_router:
 
     @app.post(
         f"{global_config.path_prefix}/api/git/webhook/github",
-        # The endpoint itself has no dependencies, we check inside.
+        status_code=202,
         include_in_schema=False,
     )
     async def github_webhook_receiver(
@@ -139,22 +150,19 @@ if git_integration_router:
         If a secret is configured, it verifies the signature.
         On a valid 'push' event, it triggers a 'git fetch'.
         """
-        # 1. Check if the feature is configured to be active.
-        if not git_config.GIT_WEBHOOK_SECRET:
-            logger.info(
-                "Webhook received but ignored: FLATNOTES_GIT_WEBHOOK_SECRET is not set."
+        if not git_config.GIT_WEBHOOK_ACTIVE:
+            logger.warning(
+                "Webhook received but ignored: Webhook feature is not active on the server."
             )
             raise HTTPException(
                 status_code=412,
-                detail="Webhook feature is disabled: secret is not configured on the server.",
+                detail="Webhook feature is not active on the server.",
             )
 
-        # 2. Verify the signature (now that we know a secret exists).
         await verify_github_signature(
             request, request.headers.get("x-hub-signature-256")
         )
 
-        # 3. Process the event.
         event_type = request.headers.get("X-GitHub-Event")
         if event_type != "push":
             return {
@@ -187,8 +195,8 @@ if git_integration_router:
         async def fetch_and_broadcast_task():
             """The actual git fetch operation, run in the background."""
             try:
-                manager = get_git_manager()
-                result = manager.fetch_only()  # <--- CALLING FETCH_ONLY
+                service = get_git_service()
+                result = service.executor.fetch()
                 add_git_log(
                     LogLevel.SUCCESS, "Webhook: Fetch successful", details=result
                 )
@@ -196,7 +204,6 @@ if git_integration_router:
                 logger.error(f"Webhook fetch task failed: {e}")
                 add_git_log(LogLevel.ERROR, "Webhook: Fetch failed", details=str(e))
             finally:
-                # Always broadcast, so the UI can update its ahead/behind status.
                 await connection_manager.broadcast_status_update()
 
         background_tasks.add_task(fetch_and_broadcast_task)

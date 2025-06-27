@@ -27,12 +27,11 @@
 import Mousetrap from "mousetrap";
 import "mousetrap/plugins/global-bind/mousetrap-global-bind";
 import { useToast } from "primevue/usetoast";
-import { computed, ref, onMounted, onUnmounted } from "vue";
+import { computed, ref, onMounted } from "vue";
 import { RouterView, useRoute } from "vue-router";
 
 import { apiErrorHandler, getConfig } from "./api.js";
 import PrimeToast from "./components/PrimeToast.vue";
-import ConfirmDialog from "primevue/confirmdialog";
 import { useGlobalStore } from "./globalStore.js";
 import { loadTheme } from "./helpers.js";
 import NavBar from "./partials/NavBar.vue";
@@ -40,23 +39,22 @@ import SearchModal from "./partials/SearchModal.vue";
 import { loadStoredToken } from "./tokenStorage.js";
 import LoadingIndicator from "./components/LoadingIndicator.vue";
 import router from "./router.js";
-
+import ConfirmDialog from "primevue/confirmdialog";
 import GitSidebar from "./git-integration/components/GitSidebar.vue";
-import { useStatusStore } from "./git-integration/stores/statusStore.js";
-import { gitWebSocketService } from "./git-integration/gitWebSocketService.js";
+import { useGitIntegration } from "./git-integration/composables/useGitIntegration.js";
 
 const globalStore = useGlobalStore();
-const statusStore = useStatusStore();
 const isSearchModalVisible = ref(false);
 const loadingIndicator = ref();
 const navBar = ref();
 const route = useRoute();
 const toast = useToast();
-const isConfigLoaded = ref(false);
 
+const isConfigLoaded = ref(false);
 const gitIntegrationEnabled = computed(
   () => globalStore.config.value?.flatnotesGitEnabled,
 );
+useGitIntegration();
 
 // '/' to search
 Mousetrap.bind("/", () => {
@@ -83,17 +81,11 @@ Mousetrap.bindGlobal("ctrl+alt+h", () => {
 });
 
 onMounted(() => {
-  document.addEventListener("visibilitychange", handleVisibilityChange);
-
   getConfig()
     .then((data) => {
       globalStore.config.value = data;
       isConfigLoaded.value = true;
       loadingIndicator.value.setLoaded();
-      if (data.flatnotesGitEnabled) {
-        statusStore.fetchStatus();
-        gitWebSocketService.connect();
-      }
     })
     .catch((error) => {
       apiErrorHandler(error, toast);
@@ -103,19 +95,6 @@ onMounted(() => {
   loadStoredToken();
   loadTheme();
 });
-
-onUnmounted(() => {
-  document.removeEventListener("visibilitychange", handleVisibilityChange);
-  if (gitIntegrationEnabled.value) {
-    gitWebSocketService.disconnect();
-  }
-});
-
-function handleVisibilityChange() {
-  if (!document.hidden && gitIntegrationEnabled.value) {
-    statusStore.fetchStatus();
-  }
-}
 
 const showNavBar = computed(() => {
   return route.name !== "login";

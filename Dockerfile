@@ -36,7 +36,6 @@ ENV APP_PATH=/app
 ENV FLATNOTES_PATH=/data
 
 RUN mkdir -p ${APP_PATH}
-RUN mkdir -p ${FLATNOTES_PATH}
 
 RUN apt update && apt install -y \
     curl \
