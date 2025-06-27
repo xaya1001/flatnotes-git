@@ -15,14 +15,21 @@
         <div class="mt-2 grid grid-cols-2 gap-2">
           <!-- Row 1: Network Actions -->
           <button
-            @click="actionsStore.handlePull"
+            @click="executePull().catch(() => {})"
             :disabled="isPullDisabled"
             :title="pullButtonTitle"
             class="flex items-center justify-center rounded p-2 text-sm font-semibold transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-50"
             :class="pullButtonStyle"
           >
             <SvgIcon
-              v-if="statusStore.commitsBehind > 0"
+              v-if="isPulling"
+              type="mdi"
+              :path="mdilRefresh"
+              :size="16"
+              class="animate-spin"
+            />
+            <SvgIcon
+              v-else-if="statusStore.commitsBehind > 0"
               type="mdi"
               :path="mdilArrowDown"
               :size="16"
@@ -31,14 +38,21 @@
             <span>{{ pullButtonText }}</span>
           </button>
           <button
-            @click="actionsStore.handlePush"
+            @click="executePush().catch(() => {})"
             :disabled="isPushDisabled"
             :title="pushButtonTitle"
             class="flex items-center justify-center rounded p-2 text-sm font-semibold transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-50"
             :class="pushButtonStyle"
           >
             <SvgIcon
-              v-if="statusStore.commitsAhead > 0"
+              v-if="isPushing"
+              type="mdi"
+              :path="mdilRefresh"
+              :size="16"
+              class="animate-spin"
+            />
+            <SvgIcon
+              v-else-if="statusStore.commitsAhead > 0"
               type="mdi"
               :path="mdilArrowUp"
               :size="16"
@@ -49,21 +63,35 @@
 
           <!-- Row 2: Commit Actions -->
           <button
-            @click="actionsStore.handleCommit(statusStore.commitMessage)"
+            @click="executeCommit(statusStore.commitMessage).catch(() => {})"
             :disabled="isCommitStagedDisabled"
             :title="commitStagedButtonTitle"
-            class="rounded bg-theme-background p-2 text-sm font-semibold hover:bg-theme-border disabled:cursor-not-allowed disabled:opacity-50"
+            class="flex items-center justify-center rounded bg-theme-background p-2 text-sm font-semibold hover:bg-theme-border disabled:cursor-not-allowed disabled:opacity-50"
           >
-            Commit Staged
+            <SvgIcon
+              v-if="isCommitting"
+              type="mdi"
+              :path="mdilRefresh"
+              :size="16"
+              class="animate-spin"
+            />
+            <span>Commit Staged</span>
           </button>
           <button
-            @click="actionsStore.handleSync(statusStore.commitMessage)"
+            @click="handleSync"
             :disabled="isSyncDisabled"
             :title="syncButtonTitle"
-            class="rounded p-2 text-sm font-semibold text-white transition-colors duration-200 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            class="flex items-center justify-center rounded p-2 text-sm font-semibold text-white transition-colors duration-200 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
             :class="syncButtonStyle"
           >
-            Commit & Sync
+            <SvgIcon
+              v-if="isSyncing"
+              type="mdi"
+              :path="mdilRefresh"
+              :size="16"
+              class="animate-spin"
+            />
+            <span>Commit & Sync</span>
           </button>
         </div>
       </div>
@@ -111,7 +139,7 @@
               Staged Changes ({{ statusStore.stagedFiles.length }})
             </h3>
             <button
-              @click="actionsStore.handleUnstageAll"
+              @click="executeUnstageAll().catch(() => {})"
               :disabled="isUnstageAllDisabled"
               title="Unstage All"
               class="text-xs font-semibold text-theme-text-muted hover:text-theme-text disabled:cursor-not-allowed disabled:opacity-50"
@@ -121,9 +149,9 @@
           </div>
           <FileTable
             :files="statusStore.stagedFiles"
-            :is-loading="statusStore.isLoading"
-            @open="statusStore.openNoteInEditor($event)"
-            @action:primary="actionsStore.handleUnstageFile($event)"
+            :is-loading="isTableLoading"
+            @open="handleOpenFile($event)"
+            @action:primary="executeUnstageFile($event).catch(() => {})"
             action-primary-icon="unstage"
           />
         </div>
@@ -135,7 +163,7 @@
               Changes ({{ statusStore.unstagedFiles.length }})
             </h3>
             <button
-              @click="actionsStore.handleStageAll"
+              @click="executeStageAll().catch(() => {})"
               :disabled="isStageAllDisabled"
               title="Stage All"
               class="text-xs font-semibold text-theme-text-muted hover:text-theme-text disabled:cursor-not-allowed disabled:opacity-50"
@@ -145,9 +173,9 @@
           </div>
           <FileTable
             :files="statusStore.unstagedFiles"
-            :is-loading="statusStore.isLoading"
-            @open="statusStore.openNoteInEditor($event)"
-            @action:primary="actionsStore.handleStageFile($event)"
+            :is-loading="isTableLoading"
+            @open="handleOpenFile($event)"
+            @action:primary="executeStageFile($event).catch(() => {})"
             @action:secondary="handleDiscardFile($event)"
             action-primary-icon="stage"
             action-secondary-icon="discard"
@@ -158,7 +186,7 @@
           >
             <button
               @click="handleDiscardAll"
-              :disabled="actionsStore.isActionLoading"
+              :disabled="isActionInProgress"
               class="w-full rounded border border-theme-danger p-2 text-sm font-semibold text-theme-danger hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Discard All Unstaged Changes...
@@ -299,8 +327,10 @@
 import { ref, onMounted, onUnmounted, computed } from "vue";
 import OverlayPanel from "primevue/overlaypanel";
 import { useStatusStore } from "../../stores/statusStore";
-import { useActionsStore } from "../../stores/actionsStore";
 import { usePanelUiStore } from "../../stores/panelUiStore";
+import { useGitOperation } from "../../composables/useGitOperation";
+import { useRouter } from "vue-router";
+import * as gitApi from "../../gitApi";
 import FileTable from "../shared/FileTable.vue";
 import SvgIcon from "@jamescoyle/vue-icon";
 import {
@@ -308,6 +338,7 @@ import {
   mdilChevronUp,
   mdilArrowUp,
   mdilArrowDown,
+  mdilRefresh,
 } from "@mdi/light-js";
 import {
   mdiCheck,
@@ -316,14 +347,92 @@ import {
 } from "@mdi/js";
 
 const statusStore = useStatusStore();
-const actionsStore = useActionsStore();
 const panelUiStore = usePanelUiStore();
+const router = useRouter();
 
 const isBranchMenuVisible = ref(false);
 const branchData = ref({ branches: [], current_branch: "" });
 const upstreamWarningPanel = ref();
 
-// --- Action Wrappers ---
+// --- Git Operation Composables ---
+const { isLoading: isSyncing, execute: executeSync } = useGitOperation(
+  "Commit & Sync",
+  gitApi.gitSyncWorkspace,
+);
+const { isLoading: isPulling, execute: executePull } = useGitOperation(
+  "Pull",
+  gitApi.gitPull,
+);
+const { isLoading: isPushing, execute: executePush } = useGitOperation(
+  "Push",
+  gitApi.gitPush,
+);
+const { isLoading: isCommitting, execute: executeCommit } = useGitOperation(
+  "Commit",
+  gitApi.gitCommit,
+);
+const { isLoading: isStagingFile, execute: executeStageFile } = useGitOperation(
+  "Stage File",
+  gitApi.gitStageFile,
+);
+const { isLoading: isStagingAll, execute: executeStageAll } = useGitOperation(
+  "Stage All",
+  gitApi.gitAddAll,
+);
+const { isLoading: isUnstagingFile, execute: executeUnstageFile } =
+  useGitOperation("Unstage File", gitApi.gitUnstageFile);
+const { isLoading: isUnstagingAll, execute: executeUnstageAll } =
+  useGitOperation("Unstage All", gitApi.gitUnstageAll);
+const { isLoading: isDiscardingFile, execute: executeDiscardFile } =
+  useGitOperation("Discard File", gitApi.gitDiscardFile);
+const { isLoading: isDiscardingAll, execute: executeDiscardAll } =
+  useGitOperation("Discard All", gitApi.gitDiscardAll);
+const { isLoading: isSwitchingBranch, execute: executeSwitchBranch } =
+  useGitOperation("Switch Branch", gitApi.switchBranch);
+
+// Aggregate loading states for disabling UI elements
+const isActionInProgress = computed(
+  () =>
+    isSyncing.value ||
+    isPulling.value ||
+    isPushing.value ||
+    isCommitting.value ||
+    isStagingFile.value ||
+    isStagingAll.value ||
+    isUnstagingFile.value ||
+    isUnstagingAll.value ||
+    isDiscardingFile.value ||
+    isDiscardingAll.value ||
+    isSwitchingBranch.value,
+);
+
+const isTableLoading = computed(
+  () =>
+    statusStore.isLoading ||
+    isStagingFile.value ||
+    isUnstagingFile.value ||
+    isDiscardingFile.value,
+);
+
+// --- Action Handlers ---
+function handleOpenFile(path) {
+  const title = path.replace(/\.md$/, "");
+  router.push({
+    name: "note",
+    params: { title },
+    query: { t: Date.now() },
+  });
+}
+
+async function handleSync() {
+  try {
+    await executeSync(statusStore.commitMessage);
+    statusStore.commitMessage = ""; // Clear on success
+  } catch (e) {
+    // Error is handled globally by the composable
+  }
+}
+
 async function handleDiscardFile(filepath) {
   const confirmed = await panelUiStore.showConfirmation({
     title: "Confirm Discard",
@@ -331,7 +440,7 @@ async function handleDiscardFile(filepath) {
     confirmButtonText: "Discard",
   });
   if (confirmed) {
-    await actionsStore.handleDiscardFile(filepath);
+    executeDiscardFile(filepath).catch(() => {});
   }
 }
 
@@ -342,7 +451,7 @@ async function handleDiscardAll() {
     confirmButtonText: "Discard All",
   });
   if (confirmed) {
-    await actionsStore.handleDiscardAll();
+    executeDiscardAll().catch(() => {});
   }
 }
 
@@ -356,15 +465,13 @@ const showGitignoreHelper = computed(() => {
 });
 
 async function stageAndPrefillCommit() {
-  await actionsStore.handleStageFile(".gitignore");
+  await executeStageFile(".gitignore").catch(() => {});
   if (!statusStore.commitMessage) {
     statusStore.commitMessage = "chore: Initialize .gitignore";
   }
 }
 
 // --- Computed Properties for Button States & Titles ---
-
-const isActionInProgress = computed(() => actionsStore.isActionLoading);
 const noStagedFiles = computed(() => statusStore.stagedFiles.length === 0);
 const noUnstagedFiles = computed(() => statusStore.unstagedFiles.length === 0);
 const noLocalChanges = computed(
@@ -378,12 +485,14 @@ const hasUncommittedChanges = computed(
 
 // --- Dynamic Button Text ---
 const pullButtonText = computed(() => {
+  if (isPulling.value) return "Pulling...";
   return statusStore.commitsBehind > 0
     ? `Pull ${statusStore.commitsBehind}`
     : "Pull";
 });
 
 const pushButtonText = computed(() => {
+  if (isPushing.value) return "Pushing...";
   return statusStore.commitsAhead > 0
     ? `Push ${statusStore.commitsAhead}`
     : "Push";
@@ -416,7 +525,6 @@ const isPullDisabled = computed(
   () =>
     isActionInProgress.value ||
     isNotTracking.value ||
-    statusStore.commitsBehind === 0 ||
     hasUncommittedChanges.value,
 );
 const pullButtonTitle = computed(() => {
@@ -478,11 +586,11 @@ const isStageAllDisabled = computed(
 );
 
 const isBranchSwitchingDisabled = computed(() => {
-  return actionsStore.isActionLoading || hasUncommittedChanges.value;
+  return isActionInProgress.value || hasUncommittedChanges.value;
 });
 
 const branchSwitchingTitle = computed(() => {
-  if (actionsStore.isActionLoading) return "Action in progress...";
+  if (isActionInProgress.value) return "Action in progress...";
   if (hasUncommittedChanges.value)
     return "Commit or discard your changes before switching branches.";
   return "Switch branch";
@@ -494,7 +602,7 @@ const toggleUpstreamWarning = (event) => {
 
 const handleBranchSelect = async (branch) => {
   if (!branch.is_active) {
-    await actionsStore.switchBranch(branch.name);
+    executeSwitchBranch(branch.name).catch(() => {});
   }
   isBranchMenuVisible.value = false;
 };
@@ -505,23 +613,30 @@ const toggleBranchMenu = async () => {
     isBranchMenuVisible.value = false;
     return;
   }
-  branchData.value = await actionsStore.getBranches();
-  isBranchMenuVisible.value = true;
+  // No need for a separate loading state, just fetch on open.
+  try {
+    branchData.value = await gitApi.getBranches();
+    isBranchMenuVisible.value = true;
+  } catch (e) {
+    // Error is handled by the global toast handler.
+    console.error("Failed to fetch branches:", e);
+  }
 };
 
 const handleClickOutside = (event) => {
   if (isBranchMenuVisible.value) {
-    if (!event.target.closest(".relative")) {
+    const trigger = event.target.closest(".relative");
+    if (!trigger) {
       isBranchMenuVisible.value = false;
     }
   }
 };
 
 onMounted(() => {
-  window.addEventListener("click", handleClickOutside, true);
+  document.addEventListener("click", handleClickOutside, true);
 });
 
 onUnmounted(() => {
-  window.removeEventListener("click", handleClickOutside, true);
+  document.removeEventListener("click", handleClickOutside, true);
 });
 </script>

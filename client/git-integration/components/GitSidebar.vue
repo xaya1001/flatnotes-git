@@ -1,4 +1,4 @@
-<!-- client/git-integration/components/GitSidebar.vue (FINAL REFACTORED VERSION) -->
+<!-- client/git-integration/components/GitSidebar.vue -->
 <template>
   <div class="fixed right-0 top-0 z-40 h-full">
     <!-- Sidebar Component -->
@@ -212,7 +212,7 @@ import { usePanelUiStore } from "../stores/panelUiStore";
 import { useStatusStore } from "../stores/statusStore";
 import { useHistoryStore } from "../stores/historyStore";
 import { useLogStore } from "../stores/logStore";
-import eventBus from "../eventBus";
+import eventBus from "../services/eventBus";
 import { GIT_OPERATION } from "../events";
 
 import GitStatusIndicator from "./GitStatusIndicator.vue";
@@ -220,7 +220,7 @@ import ConfirmModal from "../../components/ConfirmModal.vue";
 import WorkspaceTab from "./tabs/WorkspaceTab.vue";
 import GitLogTab from "./tabs/GitLogTab.vue";
 import GitHistoryTab from "./tabs/GitHistoryTab.vue";
-import ConflictView from "./tabs/ConflictView.vue";
+import ConflictView from "./ConflictView.vue";
 
 const globalStore = useGlobalStore();
 const panelUiStore = usePanelUiStore();

@@ -1,14 +1,11 @@
 // client/git-integration/stores/statusStore.js
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
-import { useRouter } from "vue-router";
 import * as gitApi from "../gitApi";
-import eventBus from "../eventBus";
+import eventBus from "../services/eventBus";
 import { GIT_OPERATION, GIT_CONFLICT } from "../events";
 
 export const useStatusStore = defineStore("git-status", () => {
-  const router = useRouter();
-
   // --- STATE ---
   const gitStatus = ref({ files: [] });
   const commitMessage = ref("");
@@ -84,29 +81,18 @@ export const useStatusStore = defineStore("git-status", () => {
     }
   }
 
-  function openNoteInEditor(path) {
-    const title = path.replace(/\.md$/, "");
-    router.push({
-      name: "note",
-      params: { title },
-      query: { t: Date.now() },
-    });
-  }
-
   function clearCommitMessage() {
     commitMessage.value = "";
   }
 
   // --- Event Listeners ---
-  const refreshEvents = [GIT_OPERATION.DID_SUCCEED, GIT_CONFLICT.RESOLVED];
-  refreshEvents.forEach((eventName) => {
-    eventBus.on(eventName, () => {
-      fetchStatus();
-    });
+  // Any successful operation should trigger a status refresh.
+  eventBus.on(GIT_OPERATION.DID_SUCCEED, () => {
+    fetchStatus();
   });
 
+  // When a conflict is first detected, refresh status to update the UI immediately.
   eventBus.on(GIT_CONFLICT.DETECTED, () => {
-    console.log("Conflict detected.");
     fetchStatus();
   });
 
@@ -126,7 +112,6 @@ export const useStatusStore = defineStore("git-status", () => {
     repositoryState,
     isInitialLoadComplete,
     fetchStatus,
-    openNoteInEditor,
     clearCommitMessage,
   };
 });

@@ -1,3 +1,4 @@
+# server/main.py
 import asyncio
 from contextlib import asynccontextmanager
 from typing import List, Literal
@@ -40,6 +41,9 @@ git_integration_router = None
 if global_config.flatnotes_git_enabled:
     try:
         from git_integration import git_config
+        from git_integration.core.git_executor import Executor
+        from git_integration.core.git_repository import Repository
+        from git_integration.core.git_service import GitService
         from git_integration.git_config import initialize_git_config
 
         # Initialize git config from the global config object
@@ -50,7 +54,6 @@ if global_config.flatnotes_git_enabled:
             LogLevel,
             add_git_log,
         )
-        from git_integration.git_router import get_git_service
         from git_integration.git_router import router as git_integration_router
         from git_integration.webhook_handler import verify_github_signature
         from git_integration.websockets import connection_manager
@@ -70,6 +73,26 @@ async def lifespan(app: FastAPI):
     if git_integration_router and git_config.GIT_ENABLED:
         logger.info("Git integration is enabled.")
 
+        # --- Create and store the singleton GitService instance ---
+        try:
+            repository = Repository(
+                repo_path=git_config.GIT_REPO_PATH,
+                default_branch=git_config.GIT_DEFAULT_BRANCH,
+                default_remote=git_config.GIT_REMOTE_NAME,
+            )
+            executor = Executor(
+                repo_path=git_config.GIT_REPO_PATH,
+                default_branch=git_config.GIT_DEFAULT_BRANCH,
+                default_remote=git_config.GIT_REMOTE_NAME,
+                user_name=git_config.GIT_COMMIT_USER_NAME,
+                user_email=git_config.GIT_COMMIT_USER_EMAIL,
+            )
+            app.state.git_service = GitService(repository=repository, executor=executor)
+            logger.info("Singleton GitService instance created and stored.")
+        except Exception as e:
+            logger.error(f"FATAL: Failed to initialize GitService on startup: {e}")
+            app.state.git_service = None
+
         # Determine the active automatic sync method. Webhook takes precedence.
         if git_config.GIT_WEBHOOK_ACTIVE:
             logger.info("Sync Mode: Real-time fetch via Webhook is active.")
@@ -86,10 +109,16 @@ async def lifespan(app: FastAPI):
             # because APScheduler runs it in a separate thread.
             def scheduled_fetch_job():
                 """A lightweight job that only performs a git fetch."""
+                if not app.state.git_service:
+                    logger.warning(
+                        "Scheduled fetch skipped: Git service not available."
+                    )
+                    return
+
                 logger.debug("Executing scheduled git fetch...")
                 try:
-                    # Instantiate the service to perform the action
-                    service = get_git_service()
+                    # Use the singleton instance
+                    service: GitService = app.state.git_service
                     service.executor.fetch()
                     # Run the async broadcast function from this sync thread
                     asyncio.run(connection_manager.broadcast_status_update())
@@ -194,8 +223,12 @@ if git_integration_router:
 
         async def fetch_and_broadcast_task():
             """The actual git fetch operation, run in the background."""
+            if not app.state.git_service:
+                logger.error("Webhook task failed: Git service not available.")
+                return
             try:
-                service = get_git_service()
+                # Use the singleton instance
+                service: GitService = app.state.git_service
                 result = service.executor.fetch()
                 add_git_log(
                     LogLevel.SUCCESS, "Webhook: Fetch successful", details=result

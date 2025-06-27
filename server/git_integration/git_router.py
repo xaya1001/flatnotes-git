@@ -1,9 +1,9 @@
 # server/git_integration/git_router.py
 import asyncio
-from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import AsyncGenerator, List, Optional
+from typing import List, Optional
 
+from fastapi import Request  # Import Request
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -27,10 +27,7 @@ from .core.git_exceptions import (
     NoChangesError,
     PushRejectedError,
     RemoteNotFoundError,
-    RepositoryInvalidError,
 )
-from .core.git_executor import Executor
-from .core.git_repository import Repository
 from .core.git_service import GitService
 from .git_logger import (
     LogEntry,
@@ -56,49 +53,23 @@ from .websockets import connection_manager
 git_operation_lock = asyncio.Lock()
 
 
-# --- Dependency Injection ---
-def get_git_service() -> GitService:
-    """Dependency to get an instance of the GitService."""
+# --- Dependency Injection (Singleton Pattern) ---
+def get_git_service(request: Request) -> GitService:
+    """Dependency to get the singleton instance of the GitService from app state."""
     if not git_config.GIT_ENABLED:
         raise HTTPException(
             status_code=503, detail="Git integration is not enabled on the server."
         )
-    try:
-        repository = Repository(
-            repo_path=git_config.GIT_REPO_PATH,
-            default_branch=git_config.GIT_DEFAULT_BRANCH,
-            default_remote=git_config.GIT_REMOTE_NAME,
-        )
-        executor = Executor(
-            repo_path=git_config.GIT_REPO_PATH,
-            default_branch=git_config.GIT_DEFAULT_BRANCH,
-            default_remote=git_config.GIT_REMOTE_NAME,
-            user_name=git_config.GIT_COMMIT_USER_NAME,
-            user_email=git_config.GIT_COMMIT_USER_EMAIL,
-        )
-        return GitService(repository=repository, executor=executor)
-    except RepositoryInvalidError as e:
-        logger.error(f"Git service creation failed: {e}")
-        raise HTTPException(status_code=428, detail=str(e))
-    except GitManagerError as e:
-        logger.error(f"Git service creation failed with an unexpected error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
-
-@asynccontextmanager
-async def get_locked_git_service() -> AsyncGenerator[GitService, None]:
-    """
-    Dependency that acquires a global lock before yielding the GitService.
-    This ensures that any write operation is serialized.
-    """
-    logger.debug("Attempting to acquire git operation lock...")
-    await git_operation_lock.acquire()
-    logger.debug("Git operation lock acquired.")
-    try:
-        yield get_git_service()
-    finally:
-        git_operation_lock.release()
-        logger.debug("Git operation lock released.")
+    # Retrieve the singleton instance from the app state
+    service = getattr(request.app.state, "git_service", None)
+    if service is None:
+        # This will be triggered if the service failed to initialize on startup
+        raise HTTPException(
+            status_code=428,
+            detail="Git service is not available. Check server logs for initialization errors.",
+        )
+    return service
 
 
 # --- Router Setup ---
@@ -135,6 +106,10 @@ def handle_git_exception(e: Exception, action: str, service: GitService):
     if isinstance(e, (RemoteNotFoundError, BranchNotFoundError)):
         add_git_log(LogLevel.ERROR, f"Not Found: {action}", str(e))
         raise HTTPException(status_code=404, detail=str(e))
+    # This is the new part from the previous fix, which is still relevant
+    if isinstance(e, KeyError):
+        add_git_log(LogLevel.ERROR, f"Not Found: {action}", str(e))
+        raise HTTPException(status_code=404, detail=str(e))
     if isinstance(e, GitManagerError):
         add_git_log(LogLevel.ERROR, f"Failed: {action}", str(e))
         raise HTTPException(status_code=400, detail=str(e))
@@ -145,10 +120,45 @@ def handle_git_exception(e: Exception, action: str, service: GitService):
 
 
 # --- API Endpoints ---
+# Omitted for brevity - the rest of the file is identical to the previous version.
+# The key change is the new `isinstance(e, KeyError)` check in `handle_git_exception`.
+# I will just include the one modified route for clarity.
+
+
+@router.post("/restore-file", response_model=GitCommandResponse)
+async def restore_file_from_commit(
+    background_tasks: BackgroundTasks,
+    request: GitRestoreFileRequest,
+    service: GitService = Depends(get_git_service),
+):
+    action_name = f"Restore file '{request.filepath}'"
+    async with git_operation_lock:
+        try:
+            service.checkout_file_from_commit(request.commit_hash, request.filepath)
+            message = f"File '{request.filepath}' restored from commit {request.commit_hash[:7]}."
+            add_git_log(
+                LogLevel.WARN, message, "Working directory file was overwritten."
+            )
+            background_tasks.add_task(connection_manager.broadcast_status_update)
+            return GitCommandResponse(message=message)
+        except (
+            FileNotFoundError,
+            KeyError,
+        ) as e:  # Catch both a file system not found and a key not found in tree
+            background_tasks.add_task(connection_manager.broadcast_status_update)
+            handle_git_exception(e, action_name, service)
+        except Exception as e:
+            background_tasks.add_task(connection_manager.broadcast_status_update)
+            handle_git_exception(e, action_name, service)
+
+
+# ... [ The rest of git_router.py remains the same as the previous correct version ] ...
+# For completeness, here's the full git_router.py file again.
 
 
 @router.get("/status", response_model=GitStatusResponse)
 def get_git_status(service: GitService = Depends(get_git_service)):
+    # Read operations do not need the lock
     try:
         return service.get_status()
     except Exception as e:
@@ -158,173 +168,183 @@ def get_git_status(service: GitService = Depends(get_git_service)):
 @router.post("/add_all", response_model=GitCommandResponse)
 async def add_all_git_changes(
     background_tasks: BackgroundTasks,
-    service: GitService = Depends(get_locked_git_service),
+    service: GitService = Depends(get_git_service),
 ):
-    try:
-        service.add_all()
-        message = "All changes staged."
-        add_git_log(LogLevel.INFO, message, persist=False)
-        background_tasks.add_task(connection_manager.broadcast_status_update)
-        return GitCommandResponse(message=message)
-    except Exception as e:
-        background_tasks.add_task(connection_manager.broadcast_status_update)
-        handle_git_exception(e, "Stage All", service)
+    async with git_operation_lock:
+        try:
+            service.add_all()
+            message = "All changes staged."
+            add_git_log(LogLevel.INFO, message, persist=False)
+            background_tasks.add_task(connection_manager.broadcast_status_update)
+            return GitCommandResponse(message=message)
+        except Exception as e:
+            background_tasks.add_task(connection_manager.broadcast_status_update)
+            handle_git_exception(e, "Stage All", service)
 
 
 @router.post("/unstage_all", response_model=GitCommandResponse)
 async def unstage_all_git_changes(
     background_tasks: BackgroundTasks,
-    service: GitService = Depends(get_locked_git_service),
+    service: GitService = Depends(get_git_service),
 ):
-    try:
-        service.unstage_all()
-        message = "All staged changes have been unstaged."
-        add_git_log(LogLevel.INFO, message, persist=False)
-        background_tasks.add_task(connection_manager.broadcast_status_update)
-        return GitCommandResponse(message=message)
-    except Exception as e:
-        background_tasks.add_task(connection_manager.broadcast_status_update)
-        handle_git_exception(e, "Unstage All", service)
+    async with git_operation_lock:
+        try:
+            service.unstage_all()
+            message = "All staged changes have been unstaged."
+            add_git_log(LogLevel.INFO, message, persist=False)
+            background_tasks.add_task(connection_manager.broadcast_status_update)
+            return GitCommandResponse(message=message)
+        except Exception as e:
+            background_tasks.add_task(connection_manager.broadcast_status_update)
+            handle_git_exception(e, "Unstage All", service)
 
 
 @router.post("/stage_file", response_model=GitCommandResponse)
 async def stage_file(
     background_tasks: BackgroundTasks,
     request: GitFileOperationRequest,
-    service: GitService = Depends(get_locked_git_service),
+    service: GitService = Depends(get_git_service),
 ):
-    try:
-        service.add_file(request.filepath)
-        message = f"File '{request.filepath}' staged."
-        add_git_log(LogLevel.INFO, message, persist=False)
-        background_tasks.add_task(connection_manager.broadcast_status_update)
-        return GitCommandResponse(message=message)
-    except Exception as e:
-        background_tasks.add_task(connection_manager.broadcast_status_update)
-        handle_git_exception(e, f"Stage File '{request.filepath}'", service)
+    async with git_operation_lock:
+        try:
+            service.add_file(request.filepath)
+            message = f"File '{request.filepath}' staged."
+            add_git_log(LogLevel.INFO, message, persist=False)
+            background_tasks.add_task(connection_manager.broadcast_status_update)
+            return GitCommandResponse(message=message)
+        except Exception as e:
+            background_tasks.add_task(connection_manager.broadcast_status_update)
+            handle_git_exception(e, f"Stage File '{request.filepath}'", service)
 
 
 @router.post("/unstage_file", response_model=GitCommandResponse)
 async def unstage_file(
     background_tasks: BackgroundTasks,
     request: GitFileOperationRequest,
-    service: GitService = Depends(get_locked_git_service),
+    service: GitService = Depends(get_git_service),
 ):
-    try:
-        service.unstage_file(request.filepath)
-        message = f"File '{request.filepath}' unstaged."
-        add_git_log(LogLevel.INFO, message, persist=False)
-        background_tasks.add_task(connection_manager.broadcast_status_update)
-        return GitCommandResponse(message=message)
-    except Exception as e:
-        background_tasks.add_task(connection_manager.broadcast_status_update)
-        handle_git_exception(e, f"Unstage File '{request.filepath}'", service)
+    async with git_operation_lock:
+        try:
+            service.unstage_file(request.filepath)
+            message = f"File '{request.filepath}' unstaged."
+            add_git_log(LogLevel.INFO, message, persist=False)
+            background_tasks.add_task(connection_manager.broadcast_status_update)
+            return GitCommandResponse(message=message)
+        except Exception as e:
+            background_tasks.add_task(connection_manager.broadcast_status_update)
+            handle_git_exception(e, f"Unstage File '{request.filepath}'", service)
 
 
 @router.post("/discard_file", response_model=GitCommandResponse)
 async def discard_file(
     background_tasks: BackgroundTasks,
     request: GitFileOperationRequest,
-    service: GitService = Depends(get_locked_git_service),
+    service: GitService = Depends(get_git_service),
 ):
-    try:
-        service.discard_file(request.filepath)
-        message = f"Changes for '{request.filepath}' discarded."
-        add_git_log(LogLevel.WARN, message, persist=False)
-        background_tasks.add_task(connection_manager.broadcast_status_update)
-        return GitCommandResponse(message=message)
-    except Exception as e:
-        background_tasks.add_task(connection_manager.broadcast_status_update)
-        handle_git_exception(e, f"Discard File '{request.filepath}'", service)
+    async with git_operation_lock:
+        try:
+            service.discard_file(request.filepath)
+            message = f"Changes for '{request.filepath}' discarded."
+            add_git_log(LogLevel.WARN, message, persist=False)
+            background_tasks.add_task(connection_manager.broadcast_status_update)
+            return GitCommandResponse(message=message)
+        except Exception as e:
+            background_tasks.add_task(connection_manager.broadcast_status_update)
+            handle_git_exception(e, f"Discard File '{request.filepath}'", service)
 
 
 @router.post("/discard_all", response_model=GitCommandResponse)
 async def discard_all_changes(
     background_tasks: BackgroundTasks,
-    service: GitService = Depends(get_locked_git_service),
+    service: GitService = Depends(get_git_service),
 ):
-    try:
-        service.discard_all()
-        message = "All unstaged changes have been discarded."
-        add_git_log(LogLevel.WARN, message, "This is a destructive operation.")
-        background_tasks.add_task(connection_manager.broadcast_status_update)
-        return GitCommandResponse(message=message)
-    except Exception as e:
-        background_tasks.add_task(connection_manager.broadcast_status_update)
-        handle_git_exception(e, "Discard All", service)
+    async with git_operation_lock:
+        try:
+            service.discard_all()
+            message = "All unstaged changes have been discarded."
+            add_git_log(LogLevel.WARN, message, "This is a destructive operation.")
+            background_tasks.add_task(connection_manager.broadcast_status_update)
+            return GitCommandResponse(message=message)
+        except Exception as e:
+            background_tasks.add_task(connection_manager.broadcast_status_update)
+            handle_git_exception(e, "Discard All", service)
 
 
 @router.post("/commit", response_model=GitCommandResponse)
 async def commit_git_changes(
     background_tasks: BackgroundTasks,
     commit_request: GitCommitRequest = Body(...),
-    service: GitService = Depends(get_locked_git_service),
+    service: GitService = Depends(get_git_service),
 ):
-    try:
-        commit_result = service.commit(message=commit_request.message)
-        message = "Changes committed successfully."
-        add_git_log(LogLevel.SUCCESS, message, details=commit_result)
-        background_tasks.add_task(connection_manager.broadcast_status_update)
-        return GitCommandResponse(message=message, details=commit_result)
-    except Exception as e:
-        background_tasks.add_task(connection_manager.broadcast_status_update)
-        handle_git_exception(e, "Commit", service)
+    async with git_operation_lock:
+        try:
+            commit_result = service.commit(message=commit_request.message)
+            message = "Changes committed successfully."
+            add_git_log(LogLevel.SUCCESS, message, details=commit_result)
+            background_tasks.add_task(connection_manager.broadcast_status_update)
+            return GitCommandResponse(message=message, details=commit_result)
+        except Exception as e:
+            background_tasks.add_task(connection_manager.broadcast_status_update)
+            handle_git_exception(e, "Commit", service)
 
 
 @router.post("/pull", response_model=GitCommandResponse)
 async def pull_git_changes(
     background_tasks: BackgroundTasks,
-    service: GitService = Depends(get_locked_git_service),
+    service: GitService = Depends(get_git_service),
 ):
-    try:
-        result = service.pull()
-        message = "Pull operation completed."
-        add_git_log(LogLevel.SUCCESS, message, details=result)
-        background_tasks.add_task(connection_manager.broadcast_status_update)
-        return GitCommandResponse(message=message, details=result)
-    except Exception as e:
-        background_tasks.add_task(connection_manager.broadcast_status_update)
-        handle_git_exception(e, "Pull", service)
+    async with git_operation_lock:
+        try:
+            result = service.pull()
+            message = "Pull operation completed."
+            add_git_log(LogLevel.SUCCESS, message, details=result)
+            background_tasks.add_task(connection_manager.broadcast_status_update)
+            return GitCommandResponse(message=message, details=result)
+        except Exception as e:
+            background_tasks.add_task(connection_manager.broadcast_status_update)
+            handle_git_exception(e, "Pull", service)
 
 
 @router.post("/push", response_model=GitCommandResponse)
 async def push_git_changes(
     background_tasks: BackgroundTasks,
-    service: GitService = Depends(get_locked_git_service),
+    service: GitService = Depends(get_git_service),
 ):
-    try:
-        result = service.push()
-        message = "Push operation completed."
-        add_git_log(LogLevel.SUCCESS, message, details=result)
-        background_tasks.add_task(connection_manager.broadcast_status_update)
-        return GitCommandResponse(message=message, details=result)
-    except Exception as e:
-        background_tasks.add_task(connection_manager.broadcast_status_update)
-        handle_git_exception(e, "Push", service)
+    async with git_operation_lock:
+        try:
+            result = service.push()
+            message = "Push operation completed."
+            add_git_log(LogLevel.SUCCESS, message, details=result)
+            background_tasks.add_task(connection_manager.broadcast_status_update)
+            return GitCommandResponse(message=message, details=result)
+        except Exception as e:
+            background_tasks.add_task(connection_manager.broadcast_status_update)
+            handle_git_exception(e, "Push", service)
 
 
 @router.post("/sync", response_model=GitCommandResponse)
 async def commit_and_sync(
     background_tasks: BackgroundTasks,
     commit_request: Optional[GitCommitRequest] = Body(None),
-    service: GitService = Depends(get_locked_git_service),
+    service: GitService = Depends(get_git_service),
 ):
-    try:
-        if not commit_request or not commit_request.message.strip():
-            commit_message = (
-                f"chore: sync at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-            )
-        else:
-            commit_message = commit_request.message
+    async with git_operation_lock:
+        try:
+            if not commit_request or not commit_request.message.strip():
+                commit_message = (
+                    f"chore: sync at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                )
+            else:
+                commit_message = commit_request.message
 
-        results = service.sync_workspace(commit_message=commit_message)
-        message = "Workspace synchronized successfully."
-        add_git_log(LogLevel.SUCCESS, message, details=results)
-        background_tasks.add_task(connection_manager.broadcast_status_update)
-        return GitCommandResponse(message=message, details=results)
-    except Exception as e:
-        background_tasks.add_task(connection_manager.broadcast_status_update)
-        handle_git_exception(e, "Sync Workspace", service)
+            results = service.sync_workspace(commit_message=commit_message)
+            message = "Workspace synchronized successfully."
+            add_git_log(LogLevel.SUCCESS, message, details=results)
+            background_tasks.add_task(connection_manager.broadcast_status_update)
+            return GitCommandResponse(message=message, details=results)
+        except Exception as e:
+            background_tasks.add_task(connection_manager.broadcast_status_update)
+            handle_git_exception(e, "Sync Workspace", service)
 
 
 @router.get("/log", response_model=GitLogResponse)
@@ -373,95 +393,79 @@ def get_branches(service: GitService = Depends(get_git_service)):
 async def switch_to_branch(
     background_tasks: BackgroundTasks,
     request: SwitchBranchRequest,
-    service: GitService = Depends(get_locked_git_service),
+    service: GitService = Depends(get_git_service),
 ):
-    try:
-        service.switch_branch(request.branch_name)
-        message = f"Successfully switched to branch '{request.branch_name}'."
-        add_git_log(LogLevel.SUCCESS, message)
-        background_tasks.add_task(connection_manager.broadcast_status_update)
-        return GitCommandResponse(message=message)
-    except Exception as e:
-        background_tasks.add_task(connection_manager.broadcast_status_update)
-        handle_git_exception(e, f"Switch Branch to '{request.branch_name}'", service)
+    async with git_operation_lock:
+        try:
+            service.switch_branch(request.branch_name)
+            message = f"Successfully switched to branch '{request.branch_name}'."
+            add_git_log(LogLevel.SUCCESS, message)
+            background_tasks.add_task(connection_manager.broadcast_status_update)
+            return GitCommandResponse(message=message)
+        except Exception as e:
+            background_tasks.add_task(connection_manager.broadcast_status_update)
+            handle_git_exception(
+                e, f"Switch Branch to '{request.branch_name}'", service
+            )
 
 
 @router.post("/conflict/continue", response_model=GitCommandResponse)
 async def conflict_continue(
     background_tasks: BackgroundTasks,
-    service: GitService = Depends(get_locked_git_service),
+    service: GitService = Depends(get_git_service),
 ):
     action_name = "Continue Operation"
-    try:
-        result = service.resolve_conflict("continue")
-        message = result.get("message", "Operation continued successfully.")
-        add_git_log(LogLevel.SUCCESS, message, details=result)
-        background_tasks.add_task(connection_manager.broadcast_status_update)
-        return GitCommandResponse(message=message, details=result)
-    except Exception as e:
-        background_tasks.add_task(connection_manager.broadcast_status_update)
-        handle_git_exception(e, action_name, service)
+    async with git_operation_lock:
+        try:
+            result = service.resolve_conflict("continue")
+            message = result.get("message", "Operation continued successfully.")
+            add_git_log(LogLevel.SUCCESS, message, details=result)
+            background_tasks.add_task(connection_manager.broadcast_status_update)
+            return GitCommandResponse(message=message, details=result)
+        except Exception as e:
+            background_tasks.add_task(connection_manager.broadcast_status_update)
+            handle_git_exception(e, action_name, service)
 
 
 @router.post("/conflict/abort", response_model=GitCommandResponse)
 async def conflict_abort(
     background_tasks: BackgroundTasks,
-    service: GitService = Depends(get_locked_git_service),
+    service: GitService = Depends(get_git_service),
 ):
     action_name = "Abort Operation"
-    try:
-        result = service.resolve_conflict("abort")
-        message = result.get("message", "Operation aborted.")
-        add_git_log(
-            LogLevel.WARN, message, details={"raw_output": result.get("stdout")}
-        )
-        background_tasks.add_task(connection_manager.broadcast_status_update)
-        return GitCommandResponse(message=message, stdout=result.get("stdout"))
-    except Exception as e:
-        background_tasks.add_task(connection_manager.broadcast_status_update)
-        handle_git_exception(e, action_name, service)
+    async with git_operation_lock:
+        try:
+            result = service.resolve_conflict("abort")
+            message = result.get("message", "Operation aborted.")
+            add_git_log(
+                LogLevel.WARN, message, details={"raw_output": result.get("stdout")}
+            )
+            background_tasks.add_task(connection_manager.broadcast_status_update)
+            return GitCommandResponse(message=message, stdout=result.get("stdout"))
+        except Exception as e:
+            background_tasks.add_task(connection_manager.broadcast_status_update)
+            handle_git_exception(e, action_name, service)
 
 
 @router.post("/reset-to-remote", response_model=GitCommandResponse)
 async def reset_to_remote(
     background_tasks: BackgroundTasks,
-    service: GitService = Depends(get_locked_git_service),
+    service: GitService = Depends(get_git_service),
 ):
     action_name = "Reset to Remote"
-    try:
-        result = service.reset_to_remote()
-        add_git_log(
-            LogLevel.WARN,
-            "Local branch was hard reset to remote state.",
-            details=result,
-        )
-        background_tasks.add_task(connection_manager.broadcast_status_update)
-        return GitCommandResponse(message=result.get("message"), details=result)
-    except Exception as e:
-        background_tasks.add_task(connection_manager.broadcast_status_update)
-        handle_git_exception(e, action_name, service)
-
-
-@router.post("/restore-file", response_model=GitCommandResponse)
-async def restore_file_from_commit(
-    background_tasks: BackgroundTasks,
-    request: GitRestoreFileRequest,
-    service: GitService = Depends(get_locked_git_service),
-):
-    action_name = f"Restore file '{request.filepath}'"
-    try:
-        service.checkout_file_from_commit(request.commit_hash, request.filepath)
-        message = (
-            f"File '{request.filepath}' restored from commit {request.commit_hash[:7]}."
-        )
-        add_git_log(LogLevel.WARN, message, "Working directory file was overwritten.")
-        background_tasks.add_task(connection_manager.broadcast_status_update)
-        return GitCommandResponse(message=message)
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
-    except Exception as e:
-        background_tasks.add_task(connection_manager.broadcast_status_update)
-        handle_git_exception(e, action_name, service)
+    async with git_operation_lock:
+        try:
+            result = service.reset_to_remote()
+            add_git_log(
+                LogLevel.WARN,
+                "Local branch was hard reset to remote state.",
+                details=result,
+            )
+            background_tasks.add_task(connection_manager.broadcast_status_update)
+            return GitCommandResponse(message=result.get("message"), details=result)
+        except Exception as e:
+            background_tasks.add_task(connection_manager.broadcast_status_update)
+            handle_git_exception(e, action_name, service)
 
 
 # --- Management & WebSocket Endpoints ---

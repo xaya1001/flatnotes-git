@@ -4,7 +4,7 @@ import { ref } from "vue";
 import { v4 as uuidv4 } from "uuid";
 import { useToast } from "primevue/usetoast";
 import * as gitApi from "../gitApi";
-import eventBus from "../eventBus";
+import eventBus from "../services/eventBus";
 import { GIT_OPERATION, GIT_CONFLICT } from "../events";
 
 export const useLogStore = defineStore("git-log", () => {
@@ -142,26 +142,6 @@ export const useLogStore = defineStore("git-log", () => {
         details: `Files with conflicts: ${conflicted_files.join(", ")}`,
       });
       delete operationIdToLogIdMap.value[payload.operationId];
-    }
-  });
-
-  eventBus.on(GIT_CONFLICT.RESOLVED, (payload) => {
-    const logId = operationIdToLogIdMap.value[payload.operationId];
-    if (logId) {
-      const message = `${payload.actionName} successful.`;
-      updateLog(logId, {
-        level: "success",
-        message: message,
-        details: payload.response.details || payload.response.stdout,
-      });
-      delete operationIdToLogIdMap.value[payload.operationId];
-
-      toast.add({
-        severity: "success",
-        summary: "Operation Complete",
-        detail: payload.response.message || message,
-        life: 4000,
-      });
     }
   });
 
