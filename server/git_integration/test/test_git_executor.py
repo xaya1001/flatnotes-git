@@ -6,7 +6,7 @@ import pytest
 from pygit2.enums import FileStatus
 
 from .. import git_config
-from ..core.exceptions import NoChangesError, PushRejectedError
+from ..core.git_exceptions import NoChangesError, PushRejectedError
 from ..core.git_executor import Executor
 from .conftest import make_commit
 

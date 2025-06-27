@@ -13,7 +13,7 @@ from pygit2.enums import FileStatus, RepositoryState, SortMode
 
 from logger import logger
 
-from .exceptions import RepositoryInvalidError
+from .git_exceptions import RepositoryInvalidError
 
 
 class Repository:

@@ -13,7 +13,7 @@ from pygit2 import GitError
 from logger import logger
 
 from .. import git_config
-from .exceptions import GitManagerError, MergeConflictError, NoChangesError
+from .git_exceptions import GitManagerError, MergeConflictError, NoChangesError
 from .git_executor import TEMP_NOTE_REF, Executor
 from .git_repository import Repository
 

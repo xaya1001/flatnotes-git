@@ -5,7 +5,7 @@ import pygit2
 import pytest
 from pygit2.enums import SortMode
 
-from ..core.exceptions import RepositoryInvalidError
+from ..core.git_exceptions import RepositoryInvalidError
 from ..core.git_repository import Repository
 from .conftest import make_commit
 

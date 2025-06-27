@@ -20,7 +20,7 @@ from logger import logger
 from main import auth  # Import auth setup from main
 
 from . import git_config
-from .core.exceptions import (
+from .core.git_exceptions import (
     BranchNotFoundError,
     GitManagerError,
     MergeConflictError,

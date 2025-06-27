@@ -10,7 +10,7 @@ from pygit2.enums import SortMode
 from logger import logger
 
 from .. import git_config
-from .exceptions import (
+from .git_exceptions import (
     BranchNotFoundError,
     GitManagerError,
     MergeConflictError,

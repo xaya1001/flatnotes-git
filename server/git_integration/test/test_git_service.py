@@ -6,7 +6,7 @@ import pygit2
 import pytest
 
 from .. import git_config
-from ..core.exceptions import GitManagerError, MergeConflictError
+from ..core.git_exceptions import GitManagerError, MergeConflictError
 from ..core.git_service import GitService
 from .conftest import make_commit
 
