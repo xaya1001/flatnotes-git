@@ -40,14 +40,12 @@ class GitService:
     def get_commit_history(
         self, limit: int = 20, page: int = 1
     ) -> List[Dict[str, Any]]:
-        self.executor.fetch()  # Ensure remote state is fresh before showing log
         return self.repository.get_commit_history(limit=limit, page=page)
 
     def get_files_in_commit(self, commit_hash: str) -> List[Dict[str, str]]:
         return self.repository.get_files_in_commit(commit_hash)
 
     def list_branches(self) -> Dict[str, Any]:
-        self.executor.fetch()  # Ensure remote branches are up-to-date
         return self.repository.list_branches()
 
     # --- Proxied Write Operations ---
@@ -157,7 +155,11 @@ class GitService:
 
         return {
             "message": "Pull successful.",
-            "stdout": f"Fetch output:\n{fetch_output}\n\nOperation output:\n{operation_output}",
+            "stdout": f"""Fetch output:
+{fetch_output}
+
+Operation output:
+{operation_output}""",
             "commits_received": commits_received,
             "files_updated": files_updated,
         }
@@ -229,7 +231,8 @@ class GitService:
                     push_output = self.executor.push()
                     return {
                         "message": "Rebase finished and pushed.",
-                        "details": f"Rebase: {continue_output}\nPush: {push_output}",
+                        "details": f"""Rebase: {continue_output}
+Push: {push_output}""",
                     }
                 elif state == "MERGING":
                     commit_result = self.executor.commit(message=None)

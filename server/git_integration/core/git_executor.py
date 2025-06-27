@@ -50,10 +50,6 @@ class Executor:
                     self.repo = pygit2.init_repository(
                         repo_path, initial_head=self.default_branch
                     )
-                    if self.author:
-                        config = self.repo.config
-                        config.set_multivar("user.name", ".*", self.author.name)
-                        config.set_multivar("user.email", ".*", self.author.email)
                 else:
                     raise RepositoryInvalidError(
                         f"No Git repository found at or above '{repo_path}'. "
@@ -61,6 +57,12 @@ class Executor:
                     )
             else:
                 self.repo = pygit2.Repository(git_repo_path)
+
+            # Set user info at repo level if provided, for subprocess commands
+            if self.author:
+                config = self.repo.config
+                config.set_multivar("user.name", ".*", self.author.name)
+                config.set_multivar("user.email", ".*", self.author.email)
 
             self._enforce_gitignore_rule()
 
@@ -82,7 +84,11 @@ class Executor:
                 f"No .gitignore found. Creating one to ignore '{preferred_rule}'."
             )
             with open(gitignore_path, "w") as f:
-                f.write(f"# Flatnotes specific ignores\n{preferred_rule}\n")
+                f.write(
+                    f"""# Flatnotes specific ignores
+{preferred_rule}
+"""
+                )
         else:
             rule_exists = False
             full_content = ""
@@ -104,7 +110,9 @@ class Executor:
                     if not full_content.endswith("\n"):
                         f.write("\n")
                     f.write(
-                        f"\n# Added by Flatnotes to ignore its cache\n{preferred_rule}\n"
+                        f"""\n# Added by Flatnotes to ignore its cache
+{preferred_rule}
+"""
                     )
 
     def _refresh_repository_state(self):
@@ -142,15 +150,14 @@ class Executor:
             )
 
     def _execute_git_command(self, command: List[str]) -> str:
-        """Runs a git command using subprocess, with centralized error handling."""
+        """
+        Runs a git command using subprocess, with centralized error handling.
+        Security Note: All elements in the 'command' list are constructed
+        internally by the server and are not sourced from direct user input,
+        mitigating command injection risks.
+        """
         env = os.environ.copy()
         env["GIT_EDITOR"] = "true"
-        if self.author:
-            env["GIT_AUTHOR_NAME"] = self.author.name
-            env["GIT_AUTHOR_EMAIL"] = self.author.email
-        if self.committer:
-            env["GIT_COMMITTER_NAME"] = self.committer.name
-            env["GIT_COMMITTER_EMAIL"] = self.committer.email
 
         try:
             process = subprocess.run(
@@ -167,9 +174,9 @@ class Executor:
         except subprocess.CalledProcessError as e:
             output_lower = (e.stdout + e.stderr).lower()
             logger.error(
-                f"Git command `{' '.join(command)}` failed.\n"
-                f"STDOUT: {e.stdout}\n"
-                f"STDERR: {e.stderr}"
+                f"""Git command `{' '.join(command)}` failed.
+STDOUT: {e.stdout}
+STDERR: {e.stderr}"""
             )
 
             if command[0] == "push" and (

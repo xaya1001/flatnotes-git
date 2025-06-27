@@ -1,5 +1,6 @@
 # server/git_integration/git_router.py
 import asyncio
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import AsyncGenerator, List, Optional
 
@@ -84,6 +85,7 @@ def get_git_service() -> GitService:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@asynccontextmanager
 async def get_locked_git_service() -> AsyncGenerator[GitService, None]:
     """
     Dependency that acquires a global lock before yielding the GitService.
@@ -329,7 +331,7 @@ async def commit_and_sync(
 def get_git_log(
     limit: int = Query(20, ge=1, le=100),
     page: int = Query(1, ge=1),
-    service: GitService = Depends(get_locked_git_service),
+    service: GitService = Depends(get_git_service),
 ):
     try:
         log_entries = service.get_commit_history(limit=limit, page=page)
@@ -360,7 +362,7 @@ def get_commit_files(commit_hash: str, service: GitService = Depends(get_git_ser
 
 
 @router.get("/branches", response_model=BranchListResponse)
-def get_branches(service: GitService = Depends(get_locked_git_service)):
+def get_branches(service: GitService = Depends(get_git_service)):
     try:
         return service.list_branches()
     except Exception as e:
@@ -465,12 +467,12 @@ async def restore_file_from_commit(
 # --- Management & WebSocket Endpoints ---
 
 
-@router.get("/activity-log", response_model=List[LogEntry])
+@router.get("/activity-log", response_model=List[LogEntry], dependencies=auth_deps)
 def get_git_activity_log():
     return get_all_logs()
 
 
-@router.delete("/activity-log", status_code=204)
+@router.delete("/activity-log", status_code=204, dependencies=auth_deps)
 def delete_git_activity_log():
     try:
         clear_all_logs()
