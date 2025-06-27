@@ -80,7 +80,28 @@ flatnotes_command="python -m \
 
 if [ `id -u` -eq 0 ] && [ `id -g` -eq 0 ]; then
     echo Setting file permissions...
-    chown -R ${PUID}:${PGID} ${APP_PATH} ${FLATNOTES_PATH}
+
+    APP_OWNER=$(stat -c "%u:%g" "${APP_PATH}" 2>/dev/null || echo "0:0")
+    if [ "$APP_OWNER" != "${PUID}:${PGID}" ]; then
+        echo "Setting APP_PATH permissions..."
+        chown -R ${PUID}:${PGID} ${APP_PATH}
+    else
+        echo "APP_PATH permissions already correct"
+    fi
+
+    if [ ! -d "${FLATNOTES_PATH}" ]; then
+        echo "Creating FLATNOTES_PATH directory..."
+        mkdir -p ${FLATNOTES_PATH}
+        chown ${PUID}:${PGID} ${FLATNOTES_PATH}
+    else
+        DATA_OWNER=$(stat -c "%u:%g" "${FLATNOTES_PATH}" 2>/dev/null || echo "0:0")
+        if [ "$DATA_OWNER" != "${PUID}:${PGID}" ]; then
+            echo "Setting FLATNOTES_PATH directory permissions..."
+            chown -R ${PUID}:${PGID} ${FLATNOTES_PATH}
+        else
+            echo "FLATNOTES_PATH permissions already correct"
+        fi
+    fi
 
     echo Starting flatnotes as user ${PUID}...
     exec ${EXEC_TOOL} ${PUID}:${PGID} ${flatnotes_command}

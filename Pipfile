@@ -9,6 +9,8 @@ flake8 = "*"
 rope = "*"
 isort = "*"
 pytest = "*"
+httpx = "*"
+pytest-asyncio = "*"
 
 [packages]
 whoosh = "==2.7.4"
