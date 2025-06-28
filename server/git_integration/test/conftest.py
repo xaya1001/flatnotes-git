@@ -13,7 +13,6 @@ from main import app
 from ..core.git_executor import Executor
 from ..core.git_repository import Repository
 from ..core.git_service import GitService
-from ..git_router import git_operation_lock
 
 
 # Helper function
@@ -124,18 +123,16 @@ async def async_client(
     """
     Provides an async client for API testing, injecting the real GitService.
     """
-    from ..git_router import get_git_service, get_locked_git_service
+    from ..git_router import get_git_service
 
+    # The function to override the dependency.
     def override_get_service():
         return git_service
 
-    async def override_get_locked_service():
-        async with git_operation_lock:
-            yield git_service
-
+    # Apply the override to the FastAPI app instance.
     app.dependency_overrides[get_git_service] = override_get_service
-    app.dependency_overrides[get_locked_git_service] = override_get_locked_service
 
+    # Create the test client.
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield client

@@ -1,9 +1,7 @@
 # server/git_integration/git_router.py
 import asyncio
-from datetime import datetime
 from typing import List, Optional
 
-from fastapi import Request  # Import Request
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -11,13 +9,14 @@ from fastapi import (
     Depends,
     HTTPException,
     Query,
+    Request,
     Response,
     WebSocket,
     WebSocketDisconnect,
 )
 
 from logger import logger
-from main import auth  # Import auth setup from main
+from main import auth
 
 from . import git_config
 from .core.git_exceptions import (
@@ -120,9 +119,6 @@ def handle_git_exception(e: Exception, action: str, service: GitService):
 
 
 # --- API Endpoints ---
-# Omitted for brevity - the rest of the file is identical to the previous version.
-# The key change is the new `isinstance(e, KeyError)` check in `handle_git_exception`.
-# I will just include the one modified route for clarity.
 
 
 @router.post("/restore-file", response_model=GitCommandResponse)
@@ -330,12 +326,12 @@ async def commit_and_sync(
 ):
     async with git_operation_lock:
         try:
-            if not commit_request or not commit_request.message.strip():
-                commit_message = (
-                    f"chore: sync at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            # The frontend now guarantees a non-empty message.
+            commit_message = commit_request.message if commit_request else ""
+            if not commit_message.strip():
+                raise HTTPException(
+                    status_code=400, detail="Commit message cannot be empty."
                 )
-            else:
-                commit_message = commit_request.message
 
             results = service.sync_workspace(commit_message=commit_message)
             message = "Workspace synchronized successfully."

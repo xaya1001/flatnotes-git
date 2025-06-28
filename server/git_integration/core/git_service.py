@@ -95,6 +95,12 @@ class GitService:
         """
         Pulls changes from a remote repository by explicitly running fetch and then rebase/merge.
         """
+        # Enforce clean workspace principle for standalone pulls
+        if self.repository.repo.status():
+            raise GitManagerError(
+                "Cannot pull with uncommitted changes. Please commit, stash, or discard them first."
+            )
+
         remote_to_use = remote_name or self.executor.default_remote
 
         try:
@@ -173,7 +179,11 @@ Operation output:
         results = {}
         self.executor._cleanup_temp_notes()
 
-        if self.repository.repo.status():
+        # The `sync` command can operate on a dirty workspace.
+        # It will create a temporary commit. The standalone `pull` command cannot.
+        is_dirty = bool(self.repository.repo.status())
+
+        if is_dirty:
             logger.info(
                 "Sync started with a dirty workspace. A temporary commit will be created."
             )
@@ -207,6 +217,7 @@ Operation output:
             _, behind = self.repository.get_ahead_behind()
             if behind > 0:
                 logger.info(f"Local branch is {behind} commit(s) behind. Pulling.")
+                # We can call pull directly here because we know the state is clean or committed.
                 results["pull"] = self.pull(remote_name=remote_name)
             else:
                 logger.info("Local branch is up-to-date. Skipping pull.")

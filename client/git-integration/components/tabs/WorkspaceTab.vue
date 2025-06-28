@@ -5,12 +5,21 @@
     <div class="min-h-0 flex-grow overflow-y-auto p-2">
       <!-- Commit & Sync Area -->
       <div class="mb-4 flex-shrink-0 px-2">
-        <textarea
-          v-model="statusStore.commitMessage"
-          placeholder="Commit Message (use {{date}} and {{numFiles}})"
-          rows="3"
-          class="w-full rounded border bg-theme-background p-2 text-sm focus:border-theme-brand focus:ring-theme-brand"
-        ></textarea>
+        <div class="relative">
+          <textarea
+            v-model="statusStore.commitMessage"
+            :placeholder="defaultMessageTemplate"
+            rows="3"
+            class="w-full rounded border bg-theme-background p-2 pr-8 text-sm focus:border-theme-brand focus:ring-theme-brand"
+          ></textarea>
+          <button
+            class="tooltip-trigger absolute right-2 top-2 p-1 text-theme-text-muted hover:text-theme-text"
+            :data-tooltip="tooltipText"
+            aria-label="Show commit message placeholders"
+          >
+            <SvgIcon type="mdi" :path="mdiInformationOutline" :size="16" />
+          </button>
+        </div>
         <!-- Action Buttons Grid -->
         <div class="mt-2 grid grid-cols-2 gap-2">
           <!-- Row 1: Network Actions -->
@@ -63,7 +72,7 @@
 
           <!-- Row 2: Commit Actions -->
           <button
-            @click="executeCommit(statusStore.commitMessage).catch(() => {})"
+            @click="handleCommitStaged"
             :disabled="isCommitStagedDisabled"
             :title="commitStagedButtonTitle"
             class="flex items-center justify-center rounded bg-theme-background p-2 text-sm font-semibold hover:bg-theme-border disabled:cursor-not-allowed disabled:opacity-50"
@@ -414,6 +423,26 @@ const isTableLoading = computed(
     isDiscardingFile.value,
 );
 
+// --- Commit Message Templating & Default ---
+const defaultMessageTemplate = "chore: sync {{numFiles}} notes at {{datetime}}";
+const tooltipText =
+  "Available placeholders:\n{{numFiles}}: Number of files changed\n{{date}}: YYYY-MM-DD\n{{datetime}}: YYYY-MM-DD HH:MM:SS";
+
+function processCommitMessage(rawMessage, numFiles) {
+  const message =
+    rawMessage.trim() === "" ? defaultMessageTemplate : rawMessage;
+
+  const now = new Date();
+  const date = now.toISOString().split("T")[0];
+  const time = now.toTimeString().split(" ")[0]; // HH:MM:SS
+  const datetime = `${date} ${time}`;
+
+  return message
+    .replace(/{{datetime}}/g, datetime)
+    .replace(/{{date}}/g, date)
+    .replace(/{{numFiles}}/g, numFiles);
+}
+
 // --- Action Handlers ---
 function handleOpenFile(path) {
   const title = path.replace(/\.md$/, "");
@@ -425,9 +454,29 @@ function handleOpenFile(path) {
 }
 
 async function handleSync() {
+  const numFiles =
+    statusStore.stagedFiles.length + statusStore.unstagedFiles.length;
+  const processedMessage = processCommitMessage(
+    statusStore.commitMessage,
+    numFiles,
+  );
   try {
-    await executeSync(statusStore.commitMessage);
+    await executeSync(processedMessage);
     statusStore.commitMessage = ""; // Clear on success
+  } catch (e) {
+    // Error is handled globally by the composable
+  }
+}
+
+async function handleCommitStaged() {
+  const numFiles = statusStore.stagedFiles.length;
+  const processedMessage = processCommitMessage(
+    statusStore.commitMessage,
+    numFiles,
+  );
+  try {
+    await executeCommit(processedMessage);
+    statusStore.commitMessage = "";
   } catch (e) {
     // Error is handled globally by the composable
   }
@@ -466,9 +515,7 @@ const showGitignoreHelper = computed(() => {
 
 async function stageAndPrefillCommit() {
   await executeStageFile(".gitignore").catch(() => {});
-  if (!statusStore.commitMessage) {
-    statusStore.commitMessage = "chore: Initialize .gitignore";
-  }
+  statusStore.commitMessage = "chore: Initialize .gitignore";
 }
 
 // --- Computed Properties for Button States & Titles ---
@@ -478,7 +525,6 @@ const noLocalChanges = computed(
   () => noStagedFiles.value && noUnstagedFiles.value,
 );
 const isNotTracking = computed(() => !statusStore.isTrackingUpstream);
-const noCommitMessage = computed(() => !statusStore.commitMessage.trim());
 const hasUncommittedChanges = computed(
   () => !noStagedFiles.value || !noUnstagedFiles.value,
 );
@@ -552,13 +598,11 @@ const pushButtonTitle = computed(() => {
 });
 
 const isCommitStagedDisabled = computed(
-  () =>
-    isActionInProgress.value || noStagedFiles.value || noCommitMessage.value,
+  () => isActionInProgress.value || noStagedFiles.value,
 );
 const commitStagedButtonTitle = computed(() => {
   if (isActionInProgress.value) return "Action in progress...";
   if (noStagedFiles.value) return "No changes staged to commit.";
-  if (noCommitMessage.value) return "Commit message cannot be empty.";
   return "Commit staged changes";
 });
 
@@ -640,3 +684,36 @@ onUnmounted(() => {
   document.removeEventListener("click", handleClickOutside, true);
 });
 </script>
+
+<style scoped>
+.tooltip-trigger:hover::after {
+  content: attr(data-tooltip);
+  position: absolute;
+
+  /* Positioning Logic */
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+
+  /* Styling */
+  background-color: rgb(var(--theme-background-elevated));
+  color: rgb(var(--theme-text));
+  border: 1px solid rgb(var(--theme-border));
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-line;
+  text-align: left;
+  z-index: 10;
+  width: max-content;
+  max-width: 270px;
+  box-shadow:
+    0 4px 6px -1px rgb(0 0 0 / 0.1),
+    0 2px 4px -2px rgb(0 0 0 / 0.1);
+
+  /* Animation */
+  opacity: 1;
+  pointer-events: none; /* Prevent the tooltip from interfering with mouse events */
+}
+</style>
