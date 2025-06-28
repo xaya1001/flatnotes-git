@@ -64,4 +64,6 @@ jobs:
             FLATNOTES_PASSWORD: testpassword
             FLATNOTES_SECRET_KEY: a-long-and-very-random-secret-key-for-ci
             FLATNOTES_GIT_ENABLED: true
-        run: npm run git-test
+        run: |
+            mkdir -p $FLATNOTES_PATH
+            npm run git-test
