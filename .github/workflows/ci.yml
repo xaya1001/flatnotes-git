@@ -3,7 +3,7 @@
 name: Continuous Integration
 
 # --- Triggers ---
-# This workflow runs on pull requests that target the 'main' branch.
+# This workflow runs on pull requests that target the 'git-Integration' branch.
 on:
   pull_request:
     branches:
@@ -24,19 +24,18 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Cache Pipenv dependencies
-        id: cache-pipenv
+      - name: Cache pip cache
         uses: actions/cache@v4
         with:
-          path: ~/.local/share/virtualenvs
-          key: ${{ runner.os }}-pipenv-${{ hashFiles('**/Pipfile.lock') }}
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/Pipfile.lock') }}
           restore-keys: |
-            ${{ runner.os }}-pipenv-
+            ${{ runner.os }}-pip-
 
       - name: Install Pipenv and Python dependencies
         run: |
           pip install pipenv
-          pipenv install --dev --system
+          pipenv install --dev
 
       # --- 3. Set up Node.js and Cache npm Dependencies ---
       - name: Set up Node.js
