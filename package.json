@@ -6,6 +6,8 @@
   "main": "client/index.html",
   "scripts": {
     "git-test": "pipenv run pytest && vitest --coverage --root .",
+    "test:py": "pipenv run pytest",
+    "test:js": "vitest --coverage --root .",
     "prepare": "husky",
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "vite build",

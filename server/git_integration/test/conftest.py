@@ -7,7 +7,7 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
-from main import app
+from main import app, auth
 
 # import paths
 from ..core.git_executor import Executor
@@ -47,13 +47,18 @@ def bare_repo_path(tmp_path: Path) -> Iterator[Path]:
 @pytest.fixture(scope="function")
 def repo_with_initial_commit(temp_repo_path: Path) -> pygit2.Repository:
     repo = pygit2.init_repository(str(temp_repo_path), initial_head="main")
+
+    config = repo.config
+    config.set_multivar("user.name", ".*", "Test Author")
+    config.set_multivar("user.email", ".*", "test@example.com")
+
     (temp_repo_path / "README.md").write_text("Initial commit.")
     (temp_repo_path / ".gitignore").write_text(".flatnotes/\n")
     index = repo.index
     index.add("README.md")
     index.add(".gitignore")
     index.write()
-    author = pygit2.Signature("Test Author", "test@example.com")
+    author = repo.default_signature
     tree = index.write_tree()
     repo.create_commit("HEAD", author, author, "Initial commit", tree, [])
     return repo
@@ -121,20 +126,29 @@ async def async_client(
     git_service: GitService,
 ) -> AsyncGenerator[AsyncClient, None]:
     """
-    Provides an async client for API testing, injecting the real GitService.
+    Provides an async client for API testing, injecting the real GitService
+    and overriding the authentication dependency to simulate an always-logged-in user.
     """
     from ..git_router import get_git_service
 
-    # The function to override the dependency.
+    # The function to override the service dependency.
     def override_get_service():
         return git_service
 
-    # Apply the override to the FastAPI app instance.
+    # A fake authentication function that does nothing, simulating a successful login.
+    def override_authenticate():
+        pass
+
+    # Apply the overrides to the main FastAPI app instance for the duration of the test.
     app.dependency_overrides[get_git_service] = override_get_service
 
-    # Create the test client.
+    if auth:
+        app.dependency_overrides[auth.authenticate] = override_authenticate
+
+    # Create the test client against the real app with our overrides.
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
 
+    # Clean up the overrides after the test is done to avoid side-effects.
     app.dependency_overrides.clear()

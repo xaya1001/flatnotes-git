@@ -3,7 +3,9 @@ from pathlib import Path
 
 import pygit2
 import pytest
-from httpx import AsyncClient
+from httpx import ASGITransport, AsyncClient
+
+from main import app, auth
 
 from .. import git_config
 from .conftest import make_commit
@@ -100,3 +102,33 @@ async def test_conflict_resolution_workflow(
     final_status = await async_client.get("/api/git/status")
     assert final_status.json()["repository_state"] == "CLEAN"
     assert final_status.json()["files_changed_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_unauthenticated_access_is_rejected(
+    git_service,
+):
+    """
+    Verifies that accessing a protected Git endpoint without authentication
+    results in a 401 Unauthorized error.
+    This test explicitly does NOT use the dependency_overrides.
+    """
+    from ..git_router import get_git_service
+
+    # 1. ARRANGE
+    app.dependency_overrides[get_git_service] = lambda: git_service
+
+    if not auth:
+        pytest.skip("Skipping auth test because authentication is disabled.")
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        # 2. ACTION
+        response = await client.get("/api/git/status")
+
+        # 3. ASSERT
+        assert response.status_code == 401
+
+    # 4. CLEANUP
+    app.dependency_overrides.clear()
