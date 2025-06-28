@@ -5,7 +5,7 @@
   "description": "A database-less note taking web app that utilises a flat folder of markdown files for storage.",
   "main": "client/index.html",
   "scripts": {
-    "git-test": "pipenv run pytest && vitest --root .",
+    "git-test": "pipenv run pytest && vitest --coverage --root .",
     "prepare": "husky",
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "vite build",
@@ -32,6 +32,7 @@
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "5.2.3",
+    "@vitest/coverage-v8": "^3.2.4",
     "@vue/test-utils": "^2.4.6",
     "autoprefixer": "10.4.21",
     "husky": "^9.1.7",

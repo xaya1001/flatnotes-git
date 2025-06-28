@@ -2,7 +2,7 @@
 import { computed, watchEffect } from "vue";
 import { useGlobalStore } from "../../globalStore";
 import { useStatusStore } from "../stores/statusStore";
-import { gitWebSocketService } from "../gitWebSocketService.js";
+import { webSocket } from "../services/webSocket.js";
 import { initializeGitEventHandlers } from "./eventHandler";
 
 export function useGitIntegration() {
@@ -21,12 +21,12 @@ export function useGitIntegration() {
 
   watchEffect((onCleanup) => {
     if (gitEnabled.value) {
-      gitWebSocketService.connect();
+      webSocket.connect();
       initializeGitEventHandlers();
       document.addEventListener("visibilitychange", onVisibilityChange);
 
       onCleanup(() => {
-        gitWebSocketService.disconnect();
+        webSocket.disconnect();
         document.removeEventListener("visibilitychange", onVisibilityChange);
       });
     }

@@ -403,15 +403,35 @@ STDERR: {e.stderr}"""
             )
 
     def checkout_file_from_commit(self, commit_hash: str, filepath: str):
-        """Restores a single file to its state from a specific commit."""
+        """
+        Restores a single file to its state from a specific commit.
+        This is now smarter to handle restores of deleted files.
+        """
         commit = self.repo.get(commit_hash)
         if not isinstance(commit, pygit2.Commit):
-            raise GitError(f"Hash '{commit_hash}' is not a commit.")
-        if filepath not in commit.tree:
-            raise KeyError(f"File '{filepath}' not found in commit '{commit_hash}'")
-        self.repo.checkout_tree(
-            treeish=commit.tree, paths=[filepath], strategy=pygit2.GIT_CHECKOUT_FORCE
-        )
+            raise GitError(f"Hash '{commit_hash}' is not a valid commit.")
+
+        tree_to_checkout_from = None
+        # Case 1: File exists in the target commit (add, modify)
+        if filepath in commit.tree:
+            tree_to_checkout_from = commit.tree
+        # Case 2: File does NOT exist, check parent (likely a deletion)
+        elif commit.parents:
+            parent_commit = commit.parents[0]
+            if filepath in parent_commit.tree:
+                tree_to_checkout_from = parent_commit.tree
+
+        if tree_to_checkout_from:
+            self.repo.checkout_tree(
+                treeish=tree_to_checkout_from,
+                paths=[filepath],
+                strategy=pygit2.GIT_CHECKOUT_FORCE,
+            )
+        else:
+            # If not found in current or parent, then it's a true error
+            raise KeyError(
+                f"File '{filepath}' not found in commit '{commit_hash}' or its direct parent."
+            )
 
     # Helper methods used by commit, copied from Repository for simplicity, could be refactored
     def _get_commit_diff(self, commit: pygit2.Commit) -> pygit2.Diff:

@@ -95,7 +95,7 @@
                 <!-- Open in editor button -->
                 <button
                   v-if="file.path.endsWith('.md')"
-                  @click="historyStore.openNoteInEditor(file.path)"
+                  @click="openNoteInEditor(file.path)"
                   class="p-1 text-theme-text-muted hover:text-theme-text"
                   title="Open File in Editor"
                 >
@@ -127,7 +127,7 @@
                 <button
                   @click.stop="handleRestoreFile(commit.hash, file.path)"
                   class="p-1 text-theme-text-muted hover:text-theme-text disabled:cursor-not-allowed disabled:opacity-50"
-                  :disabled="isConflictRelated"
+                  :disabled="isActionInProgress || isConflictRelated"
                   title="Restore this file to the version in this commit"
                 >
                   <SvgIcon type="mdi" :path="mdiRestore" :size="14" />
@@ -170,9 +170,7 @@
           <button
             v-if="statusStore.commitsAhead > 0 || statusStore.commitsBehind > 0"
             @click="handleReset"
-            :disabled="
-              actionsStore.isActionLoading || conflictStore.isInConflict
-            "
+            :disabled="isActionInProgress || isConflictRelated"
             class="w-full rounded border border-theme-danger p-2 text-sm font-semibold text-theme-danger hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Reset to Remote...
@@ -188,24 +186,34 @@
 
 <script setup>
 import { ref, computed } from "vue";
+import { useRouter } from "vue-router";
 import { useHistoryStore } from "../../stores/historyStore";
-import { useActionsStore } from "../../stores/actionsStore";
 import { useStatusStore } from "../../stores/statusStore";
-import { useConflictStore } from "../../stores/conflictStore";
 import { usePanelUiStore } from "../../stores/panelUiStore";
+import { useGitOperation } from "../../composables/useGitOperation";
+import * as gitApi from "../../gitApi";
 import { getCommitFileStatusClass, getStatusLabel } from "../../gitUtils";
 import SvgIcon from "@jamescoyle/vue-icon";
 import OverlayPanel from "primevue/overlaypanel";
 
 import { mdilFile, mdilChevronDown, mdilChevronUp } from "@mdi/light-js";
-
 import { mdiOpenInNew, mdiCog, mdiRestore } from "@mdi/js";
 
 const historyStore = useHistoryStore();
-const actionsStore = useActionsStore();
 const statusStore = useStatusStore();
-const conflictStore = useConflictStore();
 const panelUiStore = usePanelUiStore();
+const router = useRouter();
+
+const { isLoading: isRestoring, execute: executeRestoreFile } = useGitOperation(
+  "Restore File",
+  gitApi.gitRestoreFile,
+);
+const { isLoading: isResetting, execute: executeResetToRemote } =
+  useGitOperation("Reset to Remote", gitApi.gitResetToRemote);
+
+const isActionInProgress = computed(
+  () => isRestoring.value || isResetting.value,
+);
 
 const settingsPanel = ref();
 const toggleSettingsPanel = (event) => {
@@ -223,6 +231,15 @@ const isConflictRelated = computed(() => {
   );
 });
 
+function openNoteInEditor(path) {
+  const title = path.replace(/\.md$/, "");
+  router.push({
+    name: "note",
+    params: { title },
+    query: { t: Date.now() },
+  });
+}
+
 async function handleRestoreFile(commitHash, filepath) {
   const confirmed = await panelUiStore.showConfirmation({
     title: "Confirm File Restore",
@@ -231,7 +248,7 @@ async function handleRestoreFile(commitHash, filepath) {
     confirmButtonStyle: "danger",
   });
   if (confirmed) {
-    await actionsStore.handleRestoreFile(commitHash, filepath);
+    executeRestoreFile(commitHash, filepath).catch(() => {});
   }
 }
 
@@ -245,7 +262,7 @@ async function handleReset() {
   });
 
   if (confirmed) {
-    await actionsStore.handleResetToRemote();
+    executeResetToRemote().catch(() => {});
   }
 }
 </script>

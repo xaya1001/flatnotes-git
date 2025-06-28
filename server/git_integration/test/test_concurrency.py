@@ -10,11 +10,7 @@ from httpx import ASGITransport, AsyncClient
 
 # Import the router directly, not the app
 from ..core.git_service import GitService
-from ..git_router import (
-    get_git_service,
-    get_locked_git_service,
-    git_operation_lock,
-)
+from ..git_router import get_git_service, git_operation_lock
 from ..git_router import router as git_router
 
 
@@ -24,14 +20,8 @@ def create_test_app(git_service: GitService) -> FastAPI:
     test_app.include_router(git_router, prefix="/api/git")
 
     # Apply the overrides to this specific app instance
+    # We ONLY need to override the base service dependency now.
     test_app.dependency_overrides[get_git_service] = lambda: git_service
-
-    # The locked override MUST also yield the same service instance
-    async def override_get_locked_service():
-        async with git_operation_lock:
-            yield git_service
-
-    test_app.dependency_overrides[get_locked_git_service] = override_get_locked_service
 
     return test_app
 
@@ -40,6 +30,7 @@ def create_test_app(git_service: GitService) -> FastAPI:
 async def test_concurrent_sync_requests_are_serialized(git_service: GitService):
     """
     Verifies that the git_operation_lock serializes concurrent write operations.
+    This test logic remains valid as the lock is still used inside the route.
     """
     app = create_test_app(git_service)
     async with AsyncClient(
@@ -51,7 +42,7 @@ async def test_concurrent_sync_requests_are_serialized(git_service: GitService):
         def tracking_sync(*args, **kwargs):
             start_time = time.monotonic()
             call_times.append({"start": start_time, "end": 0})
-            time.sleep(0.1)
+            time.sleep(0.1)  # Simulate work
             result = original_sync_method(*args, **kwargs)
             end_time = time.monotonic()
             call_times[-1]["end"] = end_time
@@ -61,6 +52,9 @@ async def test_concurrent_sync_requests_are_serialized(git_service: GitService):
             (Path(git_service.executor.repo.workdir) / "concurrent_test.md").write_text(
                 "data"
             )
+            git_service.executor.repo.index.add("concurrent_test.md")
+            git_service.executor.repo.index.write()
+
             task1 = async_client.post("/api/git/sync", json={"message": "feat: Sync 1"})
             task2 = async_client.post("/api/git/sync", json={"message": "Sync 2"})
             responses = await asyncio.gather(task1, task2)
@@ -70,6 +64,7 @@ async def test_concurrent_sync_requests_are_serialized(git_service: GitService):
             assert len(call_times) == 2
             call_times.sort(key=lambda x: x["start"])
             first_call, second_call = call_times
+            # The key assertion: the second call must start after the first one ends.
             assert second_call["start"] >= first_call["end"]
 
 
@@ -79,7 +74,8 @@ async def test_read_operation_is_not_blocked_by_write_operation(
 ):
     """
     Verifies that a read operation (/status) can proceed even if a write
-    operation (/sync) is holding the lock.
+    operation (/sync) is holding the lock. This remains valid because
+    the /status route does not use the lock.
     """
     app = create_test_app(git_service)
     async with AsyncClient(
@@ -94,7 +90,7 @@ async def test_read_operation_is_not_blocked_by_write_operation(
             nonlocal lock_acquired_time
             await real_acquire(*args, **kwargs)
             lock_acquired_time = time.monotonic()
-            await asyncio.sleep(0.2)
+            await asyncio.sleep(0.2)  # Hold the lock for a while
 
         def fast_release(*args, **kwargs):
             nonlocal lock_released_time
@@ -108,16 +104,29 @@ async def test_read_operation_is_not_blocked_by_write_operation(
             "git_integration.git_router.git_operation_lock.release",
             side_effect=fast_release,
         ):
+            # Create a change so sync has something to do
+            (Path(git_service.executor.repo.workdir) / "write_op.md").write_text("data")
+
+            # Start the slow write operation in the background
             write_task = asyncio.create_task(
                 async_client.post("/api/git/sync", json={"message": "Slow write op"})
             )
+
+            # Give the write task a moment to acquire the lock
             await asyncio.sleep(0.05)
+
+            # While the lock is held, perform a read operation
             read_response = await async_client.get("/api/git/status")
             read_complete_time = time.monotonic()
+
+            # Wait for the write operation to finish
             write_response = await write_task
 
         assert read_response.status_code == 200
         assert write_response.status_code == 200
-        lock_held_duration = lock_released_time - lock_acquired_time
+
+        # The key assertion: the read operation must complete before the lock is released.
         assert read_complete_time < lock_released_time
+
+        lock_held_duration = lock_released_time - lock_acquired_time
         assert lock_held_duration >= 0.2

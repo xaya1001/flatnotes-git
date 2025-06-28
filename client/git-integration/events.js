@@ -7,5 +7,4 @@ export const GIT_OPERATION = {
 
 export const GIT_CONFLICT = {
   DETECTED: "git:conflict:detected",
-  RESOLVED: "git:conflict:resolved", // Fired when a conflict is successfully continued or aborted
 };

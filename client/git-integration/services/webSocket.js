@@ -1,5 +1,5 @@
 // client/git-integration/gitWebSocketService.js
-import { useStatusStore } from "./stores/statusStore";
+import { useStatusStore } from "../stores/statusStore";
 
 let socket = null;
 let reconnectInterval = 5000; // 5-second reconnect interval
@@ -131,7 +131,7 @@ function disconnect() {
   }
 }
 
-export const gitWebSocketService = {
+export const webSocket = {
   connect,
   disconnect,
 };

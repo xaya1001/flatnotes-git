@@ -4,8 +4,8 @@ import { ref } from "vue";
 import { useToast } from "primevue/usetoast";
 import { useRouter } from "vue-router";
 import * as gitApi from "../gitApi";
-import eventBus from "../eventBus";
-import { GIT_OPERATION, GIT_CONFLICT } from "../events";
+import eventBus from "../services/eventBus";
+import { GIT_OPERATION } from "../events";
 
 export const useHistoryStore = defineStore("git-history", () => {
   const toast = useToast();
@@ -68,25 +68,22 @@ export const useHistoryStore = defineStore("git-history", () => {
     router.push({ name: "note", params: { title } });
   }
 
-  // --- Event Listeners ---
-  const refreshEvents = [GIT_OPERATION.DID_SUCCEED, GIT_CONFLICT.RESOLVED];
-  refreshEvents.forEach((eventName) => {
-    eventBus.on(eventName, (payload) => {
-      // Only refresh on actions that change history
-      const relevantActions = [
-        "Commit & Sync",
-        "Pull",
-        "Push",
-        "Commit",
-        "Continue Operation",
-        "Abort Operation",
-        "Switch Branch",
-        "Reset to Remote",
-      ];
-      if (relevantActions.includes(payload.actionName)) {
-        fetchGitLog();
-      }
-    });
+  // --- Event Listener ---
+  eventBus.on(GIT_OPERATION.DID_SUCCEED, (payload) => {
+    // Only refresh on actions that change history
+    const relevantActions = [
+      "Commit & Sync",
+      "Pull",
+      "Push",
+      "Commit",
+      "Continue Operation",
+      "Abort Operation",
+      "Switch Branch",
+      "Reset to Remote",
+    ];
+    if (relevantActions.includes(payload.actionName)) {
+      fetchGitLog();
+    }
   });
 
   return {

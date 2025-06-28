@@ -1,4 +1,4 @@
-<!-- client/git-integration/components/tabs/ConflictView.vue -->
+<!-- client/git-integration/components/ConflictView.vue -->
 <template>
   <div class="flex h-full flex-col">
     <!-- Header -->
@@ -39,9 +39,9 @@
         </h3>
         <FileTable
           :files="stagedResolutions"
-          :is-loading="statusStore.isLoading"
-          @open="statusStore.openNoteInEditor($event)"
-          @action:primary="actionsStore.handleUnstageFile($event)"
+          :is-loading="statusStore.isLoading || isActionInProgress"
+          @open="handleOpenFile($event)"
+          @action:primary="executeUnstage($event)"
           action-primary-icon="unstage"
         />
       </div>
@@ -53,9 +53,9 @@
         </h3>
         <FileTable
           :files="unresolvedFiles"
-          :is-loading="statusStore.isLoading"
-          @open="statusStore.openNoteInEditor($event)"
-          @action:primary="actionsStore.handleStageFile($event)"
+          :is-loading="statusStore.isLoading || isActionInProgress"
+          @open="handleOpenFile($event)"
+          @action:primary="executeStage($event)"
           action-primary-icon="stage"
         />
       </div>
@@ -67,18 +67,32 @@
         <button
           @click="handleContinue"
           :disabled="isContinueDisabled"
-          class="rounded bg-theme-success p-2 font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+          class="flex items-center justify-center rounded bg-theme-success p-2 font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
           :title="continueButtonTitle"
         >
-          {{ continueButtonText }}
+          <SvgIcon
+            v-if="isContinuing"
+            type="mdi"
+            :path="mdilRefresh"
+            :size="20"
+            class="mr-2 animate-spin"
+          />
+          <span>{{ continueButtonText }}</span>
         </button>
         <button
           @click="handleAbort"
-          :disabled="actionsStore.isActionLoading"
+          :disabled="isActionInProgress"
           :title="abortButtonTitle"
-          class="rounded bg-theme-danger p-2 font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+          class="flex items-center justify-center rounded bg-theme-danger p-2 font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {{ abortButtonText }}
+          <SvgIcon
+            v-if="isAborting"
+            type="mdi"
+            :path="mdilRefresh"
+            :size="20"
+            class="mr-2 animate-spin"
+          />
+          <span>{{ abortButtonText }}</span>
         </button>
       </div>
     </div>
@@ -87,18 +101,46 @@
 
 <script setup>
 import { computed } from "vue";
+import { useRouter } from "vue-router";
 import { mdiAlertOctagon } from "@mdi/js";
+import { mdilRefresh } from "@mdi/light-js";
 import SvgIcon from "@jamescoyle/vue-icon";
-import { useConflictStore } from "../../stores/conflictStore";
-import { useActionsStore } from "../../stores/actionsStore";
-import { useStatusStore } from "../../stores/statusStore";
-import { usePanelUiStore } from "../../stores/panelUiStore";
-import FileTable from "../shared/FileTable.vue";
 
-const conflictStore = useConflictStore();
-const actionsStore = useActionsStore();
+import { useStatusStore } from "../stores/statusStore";
+import { usePanelUiStore } from "../stores/panelUiStore";
+import { useGitOperation } from "../composables/useGitOperation";
+import * as gitApi from "../gitApi";
+import FileTable from "./shared/FileTable.vue";
+
 const statusStore = useStatusStore();
 const panelUiStore = usePanelUiStore();
+const router = useRouter();
+
+// --- API Operation Composables ---
+const { isLoading: isContinuing, execute: executeContinue } = useGitOperation(
+  "Continue Operation",
+  gitApi.gitConflictContinue,
+);
+const { isLoading: isAborting, execute: executeAbort } = useGitOperation(
+  "Abort Operation",
+  gitApi.gitConflictAbort,
+);
+const { isLoading: isStaging, execute: executeStage } = useGitOperation(
+  "Stage File",
+  gitApi.gitStageFile,
+);
+const { isLoading: isUnstaging, execute: executeUnstage } = useGitOperation(
+  "Unstage File",
+  gitApi.gitUnstageFile,
+);
+
+const isActionInProgress = computed(
+  () =>
+    isContinuing.value ||
+    isAborting.value ||
+    isStaging.value ||
+    isUnstaging.value,
+);
 
 // --- Computed Properties for File Partitioning ---
 const unresolvedFiles = computed(() =>
@@ -148,7 +190,7 @@ const showUnstagedChangesWarning = computed(() => {
 });
 
 const isContinueDisabled = computed(() => {
-  if (actionsStore.isActionLoading) return true;
+  if (isActionInProgress.value) return true;
   const state = statusStore.repositoryState;
   if (state !== "REBASING_CONTINUE" && state !== "MERGING") return true;
   if (unresolvedFiles.value.length > 0) return true;
@@ -156,7 +198,7 @@ const isContinueDisabled = computed(() => {
 });
 
 const continueButtonTitle = computed(() => {
-  if (actionsStore.isActionLoading) return "Action in progress...";
+  if (isActionInProgress.value) return "Action in progress...";
   const state = statusStore.repositoryState;
   if (state !== "REBASING_CONTINUE" && state !== "MERGING") {
     return "You must resolve all conflicts and stage the files before continuing.";
@@ -168,11 +210,20 @@ const continueButtonTitle = computed(() => {
 });
 
 const abortButtonTitle = computed(() => {
-  if (actionsStore.isActionLoading) return "Action in progress...";
+  if (isActionInProgress.value) return "Action in progress...";
   return `Abort the ${conflictType.value.toLowerCase()} and restore previous state`;
 });
 
 // --- Action Handlers ---
+function handleOpenFile(path) {
+  const title = path.replace(/\.md$/, "");
+  router.push({
+    name: "note",
+    params: { title },
+    query: { t: Date.now() },
+  });
+}
+
 async function handleContinue() {
   const confirmed = await panelUiStore.showConfirmation({
     title: `Confirm Continue ${conflictType.value}`,
@@ -181,7 +232,7 @@ async function handleContinue() {
     confirmButtonStyle: "success",
   });
   if (confirmed) {
-    conflictStore.handleContinue();
+    executeContinue().catch(() => {});
   }
 }
 
@@ -193,7 +244,7 @@ async function handleAbort() {
     confirmButtonStyle: "danger",
   });
   if (confirmed) {
-    conflictStore.handleAbort();
+    executeAbort().catch(() => {});
   }
 }
 </script>
