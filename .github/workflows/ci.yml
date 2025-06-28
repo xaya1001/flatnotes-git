@@ -2,8 +2,6 @@
 
 name: Continuous Integration
 
-# --- Triggers ---
-# This workflow runs on pull requests that target the 'git-Integration' branch.
 on:
   pull_request:
     branches:
@@ -14,11 +12,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # --- 1. Checkout Code ---
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # --- 2. Set up Python and Cache Pipenv Dependencies ---
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
@@ -37,11 +33,10 @@ jobs:
           pip install pipenv
           pipenv install --dev
 
-      # --- 3. Set up Node.js and Cache npm Dependencies ---
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20' # A recent LTS version
+          node-version: '20'
 
       - name: Cache npm dependencies
         id: cache-npm
@@ -53,17 +48,22 @@ jobs:
             ${{ runner.os }}-node-
 
       - name: Install npm dependencies
-        run: npm ci # 'ci' is faster and more reliable for CI environments
+        run: npm ci
 
-      # --- 4. Run Tests ---
+      # --- Build Step (Fix) ---
+      # This step creates the client/dist directory required by the backend.
+      - name: Build frontend assets
+        run: npm run build
+
+      # --- Test Step ---
       - name: Run Python and JS tests
         env:
-            FLATNOTES_PATH: /tmp/flatnotes-test-data
-            FLATNOTES_AUTH_TYPE: password
-            FLATNOTES_USERNAME: testuser
-            FLATNOTES_PASSWORD: testpassword
-            FLATNOTES_SECRET_KEY: a-long-and-very-random-secret-key-for-ci
-            FLATNOTES_GIT_ENABLED: true
+          FLATNOTES_PATH: /tmp/flatnotes-test-data
+          FLATNOTES_AUTH_TYPE: password
+          FLATNOTES_USERNAME: testuser
+          FLATNOTES_PASSWORD: testpassword
+          FLATNOTES_SECRET_KEY: a-long-and-very-random-secret-key-for-ci
+          FLATNOTES_GIT_ENABLED: true
         run: |
-            mkdir -p $FLATNOTES_PATH
-            npm run git-test
+          mkdir -p $FLATNOTES_PATH
+          npm run git-test
