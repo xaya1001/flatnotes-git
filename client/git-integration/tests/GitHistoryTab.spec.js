@@ -198,4 +198,50 @@ describe("GitHistoryTab.vue", () => {
       expect(restoreButton.attributes("disabled")).toBeDefined();
     });
   });
+
+  describe("Pagination", () => {
+    // This setup is crucial. The component needs at least one commit
+    // to render the list view where the "Load More" button lives.
+    beforeEach(() => {
+      mountComponent();
+      historyStore.gitLog = mockCommits; // Ensure the commit list is not empty
+      historyStore.isLoading = false;
+    });
+
+    it('renders "Load More" button when hasMoreCommits is true', async () => {
+      historyStore.hasMoreCommits = true;
+      await wrapper.vm.$nextTick();
+
+      const button = wrapper.find("button.w-full");
+      expect(button.exists()).toBe(true);
+      expect(button.text()).toContain("Load More");
+    });
+
+    it('does not render "Load More" button when hasMoreCommits is false', async () => {
+      historyStore.hasMoreCommits = false;
+      await wrapper.vm.$nextTick();
+
+      const button = wrapper.find("button.w-full");
+      expect(button.exists()).toBe(false);
+    });
+
+    it('calls fetchMoreCommits action when "Load More" is clicked', async () => {
+      const fetchMoreSpy = vi.spyOn(historyStore, "fetchMoreCommits");
+      historyStore.hasMoreCommits = true;
+      await wrapper.vm.$nextTick();
+
+      await wrapper.find("button.w-full").trigger("click");
+      expect(fetchMoreSpy).toHaveBeenCalledOnce();
+    });
+
+    it('disables "Load More" button when isLoadingMore is true', async () => {
+      historyStore.hasMoreCommits = true;
+      historyStore.isLoadingMore = true;
+      await wrapper.vm.$nextTick();
+
+      const button = wrapper.find("button.w-full");
+      expect(button.attributes("disabled")).toBeDefined();
+      expect(button.text()).toContain("Loading...");
+    });
+  });
 });
