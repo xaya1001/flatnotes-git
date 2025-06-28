@@ -50,8 +50,6 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
-      # --- Build Step (Fix) ---
-      # This step creates the client/dist directory required by the backend.
       - name: Build frontend assets
         run: npm run build
 
