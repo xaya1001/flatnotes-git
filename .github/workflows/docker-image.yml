@@ -1,68 +1,57 @@
-# .github/workflows/docker-publish.yml
+# .github/workflows/docker-image.yml
 
 name: Docker Publish on Tag
 
-# --- Trigger: This workflow runs only when a new tag is pushed ---
-# We use tags like v1.0.0, v1.1.0, etc., to trigger releases.
+# This workflow runs on:
+# 1. A new tag push (e.g., v1.0.0)
+# 2. A manual trigger from the GitHub Actions UI
 on:
   push:
     tags:
-      - 'v*.*.*' # Matches tags like v1.0.0, v1.2.3
+      - 'v*.*.*'
+  workflow_dispatch:
 
 jobs:
   build-and-push:
-    runs-on: ubuntu-latest # Use the latest Ubuntu runner environment
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
 
+    env:
+      # Centralize the image name for easy updates.
+      IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/flatnotes-git
+
     steps:
-      # --- Step 1: Check out your repository code ---
-      # This downloads your source code into the runner so it can be built.
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # --- Step 2: Set up QEMU for multi-platform builds ---
-      # (Optional but recommended) This allows you to build images for different
-      # architectures, like arm64 for Raspberry Pi users.
-      - name: Set up QEMU
+      - name: Set up QEMU for multi-platform builds
         uses: docker/setup-qemu-action@v3
 
-      # --- Step 3: Set up Docker Buildx ---
-      # Buildx is a Docker CLI plugin that extends 'docker build' with more
-      # features, including multi-platform builds.
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # --- Step 4: Log in to Docker Hub ---
-      # This step uses the secrets you created earlier to authenticate.
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # --- Step 5: Extract metadata (tags and labels) from the Git tag ---
-      # This clever action automatically figures out the Docker image tags.
-      # For a Git tag like 'v1.2.3', it will generate Docker tags:
-      # - yourusername/flatnotes-git:latest
-      # - yourusername/flatnotes-git:1.2.3
-      # - yourusername/flatnotes-git:1.2
-      # - yourusername/flatnotes-git:1
+      # This action automatically creates tags like 'latest', '1.2.3', '1.2'
       - name: Extract metadata for Docker
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/flatnotes-git
+          images: ${{ env.IMAGE_NAME }}
 
-      # --- Step 6: Build and push the Docker image ---
-      # This is the main event. It builds your Dockerfile and pushes the
-      # resulting image to Docker Hub with all the tags generated above.
+      # This step builds the Dockerfile and pushes it to Docker Hub
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
-          context: . # Use the current directory as the build context
-          push: true # Actually push the image to the registry
-          tags: ${{ steps.meta.outputs.tags }} # Use the tags from the 'meta' step
-          labels: ${{ steps.meta.outputs.labels }} # Add standard labels
-          platforms: linux/amd64,linux/arm64 # Build for both common architectures
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Build for both common CPU architectures
+          platforms: linux/amd64,linux/arm64
