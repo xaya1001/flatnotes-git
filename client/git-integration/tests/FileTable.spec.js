@@ -1,3 +1,5 @@
+// client/git-integration/tests/FileTable.spec.js
+
 import { describe, it, expect } from "vitest";
 import { mount } from "@vue/test-utils";
 import { h } from "vue";
@@ -48,7 +50,6 @@ describe("FileTable.vue", () => {
     expect(wrapper.text()).toContain("No changes.");
   });
 
-  // CORRECTED AND MORE SPECIFIC TEST
   it("renders unstaged files with correct work_tree_status", () => {
     const mockUnstagedFiles = [
       { path: "new-file.md", index_status: " ", work_tree_status: "A" },
@@ -59,7 +60,7 @@ describe("FileTable.vue", () => {
       props: {
         files: mockUnstagedFiles,
         isLoading: false,
-        actionPrimaryIcon: "stage", // This table is for unstaged changes
+        actionPrimaryIcon: "stage",
       },
       global: {
         stubs: {
@@ -73,12 +74,10 @@ describe("FileTable.vue", () => {
     expect(wrapper.text()).toContain("modified-file.md");
 
     const statuses = wrapper.findAll(".font-mono");
-    // statusToShow should return work_tree_status because action is 'stage'
     expect(statuses[0].text()).toBe("A");
     expect(statuses[1].text()).toBe("M");
   });
 
-  // ADDED A NEW TEST FOR THE OTHER CASE
   it("renders staged files with correct index_status", () => {
     const mockStagedFiles = [
       { path: "staged-delete.md", index_status: "D", work_tree_status: " " },
@@ -89,7 +88,7 @@ describe("FileTable.vue", () => {
       props: {
         files: mockStagedFiles,
         isLoading: false,
-        actionPrimaryIcon: "unstage", // This table is for staged changes
+        actionPrimaryIcon: "unstage",
       },
       global: {
         stubs: {
@@ -100,7 +99,6 @@ describe("FileTable.vue", () => {
     });
 
     const statuses = wrapper.findAll(".font-mono");
-    // statusToShow should return index_status because action is 'unstage'
     expect(statuses[0].text()).toBe("D");
     expect(statuses[1].text()).toBe("R");
   });
@@ -164,7 +162,6 @@ describe("FileTable.vue", () => {
     const wrapper = mount(FileTable, {
       props: {
         files: mockFiles,
-        // No action icon needed for this test
       },
       global: {
         stubs: {

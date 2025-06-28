@@ -1,3 +1,5 @@
+// client/git-integration/tests/ConflictView.spec.js
+
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
@@ -65,7 +67,6 @@ describe("ConflictView.vue", () => {
     return mount(ConflictView, {
       global: {
         stubs,
-        // No plugins or mocks needed here anymore because of vi.mock
       },
     });
   };

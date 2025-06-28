@@ -1,11 +1,10 @@
+// client/git-integration/tests/useGitOperation.spec.js
+
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { ref } from "vue";
 import { useGitOperation } from "../composables/useGitOperation.js";
 import eventBus from "../services/eventBus.js";
 import { GIT_OPERATION, GIT_CONFLICT } from "../events.js";
 
-// Mock the entire eventBus module.
-// This allows us to control and inspect its `emit` method.
 vi.mock("../services/eventBus.js", () => ({
   default: {
     emit: vi.fn(),

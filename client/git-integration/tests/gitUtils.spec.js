@@ -1,3 +1,5 @@
+// client/git-integration/tests/gitUtils.spec.js
+
 import { describe, it, expect } from "vitest";
 import {
   getStatusLabel,
@@ -7,11 +9,8 @@ import {
   getLogLevelTextColorClass,
 } from "../gitUtils.js";
 
-// 'describe' creates a test suite, a logical grouping for related tests.
 describe("gitUtils.js", () => {
-  // Test suite for the getStatusLabel function
   describe("getStatusLabel", () => {
-    // 'it' defines an individual test case.
     it("should return correct labels for known status characters", () => {
       expect(getStatusLabel("A")).toBe("Added");
       expect(getStatusLabel("M")).toBe("Modified");

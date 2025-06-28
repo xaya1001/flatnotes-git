@@ -1,3 +1,5 @@
+// client/git-integration/tests/GitStatusIndicator.spec.js
+
 import { describe, it, expect, beforeEach } from "vitest";
 import { mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";

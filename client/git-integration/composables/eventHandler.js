@@ -3,13 +3,13 @@ import eventBus from "../services/eventBus";
 import { useStatusStore } from "../stores/statusStore";
 
 export function initializeGitEventHandlers() {
-  const statusStore = useStatusStore();
-
   eventBus.on("note:saved", () => {
+    const statusStore = useStatusStore();
     statusStore.fetchStatus();
   });
 
   eventBus.on("note:deleted", () => {
+    const statusStore = useStatusStore();
     statusStore.fetchStatus();
   });
 }
