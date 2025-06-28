@@ -57,4 +57,6 @@ jobs:
 
       # --- 4. Run Tests ---
       - name: Run Python and JS tests
+        env:
+            FLATNOTES_PATH: /tmp/flatnotes-test-data
         run: npm run git-test
