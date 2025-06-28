@@ -137,6 +137,20 @@
           </div>
         </div>
       </div>
+      <!-- Load More Button -->
+      <div
+        v-if="historyStore.hasMoreCommits && !historyStore.isLoading"
+        class="mt-4 p-2"
+      >
+        <button
+          @click="historyStore.fetchMoreCommits"
+          :disabled="historyStore.isLoadingMore"
+          class="w-full rounded-md bg-theme-background p-2 text-sm font-semibold text-theme-text hover:bg-theme-border disabled:cursor-wait disabled:opacity-75"
+        >
+          <span v-if="historyStore.isLoadingMore">Loading...</span>
+          <span v-else>Load More</span>
+        </button>
+      </div>
     </div>
 
     <!-- Floating Settings Button and Panel -->

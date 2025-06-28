@@ -18,12 +18,24 @@ export const useHistoryStore = defineStore("git-history", () => {
   const expandedCommit = ref(null);
   const isFilesLoading = ref(false);
 
+  // --- state for pagination ---
+  const isLoadingMore = ref(false);
+  const currentPage = ref(1);
+  const hasMoreCommits = ref(true);
+  const PAGE_SIZE = 20;
+
   async function fetchGitLog() {
     isLoading.value = true;
+    currentPage.value = 1;
+    hasMoreCommits.value = true; // Reset on refresh
     try {
-      const response = await gitApi.getGitLog(20, 1);
+      const response = await gitApi.getGitLog(PAGE_SIZE, currentPage.value);
       gitLog.value = response.log;
       remoteBaseUrl.value = response.remote_base_url;
+      // If fewer than PAGE_SIZE logs are returned, we've reached the end.
+      if (response.log.length < PAGE_SIZE) {
+        hasMoreCommits.value = false;
+      }
     } catch (err) {
       toast.add({
         severity: "error",
@@ -35,6 +47,31 @@ export const useHistoryStore = defineStore("git-history", () => {
       remoteBaseUrl.value = null;
     } finally {
       isLoading.value = false;
+    }
+  }
+
+  async function fetchMoreCommits() {
+    if (isLoadingMore.value || !hasMoreCommits.value) return;
+
+    isLoadingMore.value = true;
+    try {
+      const nextPage = currentPage.value + 1;
+      const response = await gitApi.getGitLog(PAGE_SIZE, nextPage);
+      gitLog.value.push(...response.log);
+      currentPage.value = nextPage;
+      if (response.log.length < PAGE_SIZE) {
+        hasMoreCommits.value = false;
+      }
+    } catch (err) {
+      toast.add({
+        severity: "error",
+        summary: "Error Fetching More Commits",
+        detail: err.message,
+        life: 3000,
+      });
+      // Do not increment page on failure to allow retry
+    } finally {
+      isLoadingMore.value = false;
     }
   }
 
@@ -93,7 +130,10 @@ export const useHistoryStore = defineStore("git-history", () => {
     commitFilesCache,
     expandedCommit,
     isFilesLoading,
+    isLoadingMore,
+    hasMoreCommits,
     fetchGitLog,
+    fetchMoreCommits,
     toggleCommitExpansion,
     openNoteInEditor,
   };
