@@ -47,13 +47,18 @@ def bare_repo_path(tmp_path: Path) -> Iterator[Path]:
 @pytest.fixture(scope="function")
 def repo_with_initial_commit(temp_repo_path: Path) -> pygit2.Repository:
     repo = pygit2.init_repository(str(temp_repo_path), initial_head="main")
+
+    config = repo.config
+    config.set_multivar("user.name", ".*", "Test Author")
+    config.set_multivar("user.email", ".*", "test@example.com")
+
     (temp_repo_path / "README.md").write_text("Initial commit.")
     (temp_repo_path / ".gitignore").write_text(".flatnotes/\n")
     index = repo.index
     index.add("README.md")
     index.add(".gitignore")
     index.write()
-    author = pygit2.Signature("Test Author", "test@example.com")
+    author = repo.default_signature
     tree = index.write_tree()
     repo.create_commit("HEAD", author, author, "Initial commit", tree, [])
     return repo
