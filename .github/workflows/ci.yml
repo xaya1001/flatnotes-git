@@ -3,12 +3,16 @@
 name: Continuous Integration
 
 on:
+  push:
+    branches:
+      - git-integration
   pull_request:
     branches:
       - git-integration
 
 jobs:
   test:
+    name: Build and Test
     runs-on: ubuntu-latest
 
     steps:
@@ -20,32 +24,24 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Cache pip cache
+      - name: Cache Pipenv virtualenv
         uses: actions/cache@v4
         with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/Pipfile.lock') }}
+          path: ~/.local/share/virtualenvs
+          key: ${{ runner.os }}-pipenv-${{ hashFiles('**/Pipfile.lock') }}
           restore-keys: |
-            ${{ runner.os }}-pip-
+            ${{ runner.os }}-pipenv-
 
       - name: Install Pipenv and Python dependencies
         run: |
           pip install pipenv
           pipenv install --dev
 
-      - name: Set up Node.js
+      - name: Set up Node.js with npm caching
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-
-      - name: Cache npm dependencies
-        id: cache-npm
-        uses: actions/cache@v4
-        with:
-          path: ~/.npm
-          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node-
+          cache: 'npm'
 
       - name: Install npm dependencies
         run: npm ci
@@ -53,9 +49,9 @@ jobs:
       - name: Build frontend assets
         run: npm run build
 
-      # --- Test Step ---
       - name: Run Python and JS tests
         env:
+          # Environment variables for the test run
           FLATNOTES_PATH: /tmp/flatnotes-test-data
           FLATNOTES_AUTH_TYPE: password
           FLATNOTES_USERNAME: testuser

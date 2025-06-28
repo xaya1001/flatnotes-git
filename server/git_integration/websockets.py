@@ -1,9 +1,54 @@
 # server/git_integration/websockets.py
 from typing import List
 
-from fastapi import WebSocket, WebSocketDisconnect
+from fastapi import (
+    APIRouter,
+    Depends,
+    WebSocket,
+    WebSocketDisconnect,
+    WebSocketException,
+    status,
+)
 
 from logger import logger
+from main import auth
+
+# Create a dedicated router for WebSocket endpoints
+ws_router = APIRouter()
+
+
+async def get_websocket_token(websocket: WebSocket):
+    """
+    A dependency function to authenticate WebSocket connections using a cookie.
+    If authentication fails, it raises a WebSocketException, which cleanly
+    terminates the connection and prevents the endpoint from running.
+    """
+    if not auth:
+        # If auth is disabled, allow the connection to proceed.
+        return
+
+    token = websocket.cookies.get("token")
+    if token is None:
+        logger.warning(
+            f"WebSocket connection rejected for {websocket.client.host}: Missing token cookie."
+        )
+        raise WebSocketException(
+            code=status.WS_1008_POLICY_VIOLATION, reason="Missing token"
+        )
+
+    try:
+        # Use the validation logic from the existing auth module
+        auth._validate_token(token)
+        logger.debug(
+            f"WebSocket client authenticated successfully: {websocket.client.host}"
+        )
+    except Exception:
+        logger.warning(
+            f"WebSocket authentication failed for client: {websocket.client.host}"
+        )
+        raise WebSocketException(
+            code=status.WS_1008_POLICY_VIOLATION, reason="Invalid token"
+        )
 
 
 class ConnectionManager:
@@ -26,9 +71,6 @@ class ConnectionManager:
 
     async def broadcast_status_update(self):
         """Broadcasts a status update trigger signal to all connected clients."""
-        # We only send a lightweight trigger signal, not the full state.
-        # The client, upon receiving this, will actively fetch the latest state,
-        # perfectly reusing the existing logic.
         message = {"type": "status_update"}
         logger.info(
             f"Broadcasting status update to {len(self.active_connections)} clients."
@@ -38,7 +80,6 @@ class ConnectionManager:
             try:
                 await connection.send_json(message)
             except WebSocketDisconnect:
-                # Handle cases where the client has disconnected without a clean close
                 self.disconnect(connection)
             except Exception as e:
                 logger.error(
@@ -49,3 +90,18 @@ class ConnectionManager:
 
 # Create a global singleton instance for application-wide use
 connection_manager = ConnectionManager()
+
+
+@ws_router.websocket("/api/git/ws/status", dependencies=[Depends(get_websocket_token)])
+async def websocket_endpoint(websocket: WebSocket):
+    """
+    The authenticated WebSocket endpoint. The dependency ensures that this
+    code is only run for valid, authenticated clients.
+    """
+    await connection_manager.connect(websocket)
+    try:
+        while True:
+            # Keep the connection alive by waiting for messages (or pings).
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        connection_manager.disconnect(websocket)

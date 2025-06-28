@@ -1,4 +1,4 @@
-# attachments/s3.py
+# server/attachments/s3.py
 
 import io
 from typing import TYPE_CHECKING
@@ -107,6 +107,20 @@ class S3Attachments(BaseAttachments):
 
         # Otherwise, generate a secure presigned URL for temporary access.
         try:
+            # First, check if the object exists. This is more reliable.
+            self.s3_client.head_object(Bucket=self.bucket_name, Key=object_key)
+        except ClientError as e:
+            # If head_object raises a 404, it means the file is not found.
+            if e.response.get("Error", {}).get("Code") == "404":
+                raise FileNotFoundError(
+                    f"Attachment '{filename}' not found in S3 bucket '{self.bucket_name}'."
+                )
+            # For any other error (e.g., permissions), raise a generic IOError.
+            logger.error(f"Error checking for S3 object '{object_key}': {e}")
+            raise IOError(f"Could not retrieve file from S3: {e}")
+
+        # If head_object succeeds, the file exists, so we can generate the URL.
+        try:
             url = self.s3_client.generate_presigned_url(
                 "get_object",
                 Params={"Bucket": self.bucket_name, "Key": object_key},
@@ -114,10 +128,5 @@ class S3Attachments(BaseAttachments):
             )
             return RedirectResponse(url=url)
         except ClientError as e:
-            if e.response["Error"]["Code"] == "NoSuchKey":
-                raise FileNotFoundError(
-                    "The specified attachment cannot be found in S3."
-                )
-            else:
-                logger.error(f"Error generating presigned URL from S3: {e}")
-                raise IOError(f"Could not retrieve file from S3: {e}")
+            logger.error(f"Error generating presigned URL from S3: {e}")
+            raise IOError(f"Could not retrieve file from S3: {e}")

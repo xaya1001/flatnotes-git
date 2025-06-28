@@ -56,7 +56,7 @@ if global_config.flatnotes_git_enabled:
         )
         from git_integration.git_router import router as git_integration_router
         from git_integration.webhook_handler import verify_github_signature
-        from git_integration.websockets import connection_manager
+        from git_integration.websockets import connection_manager, ws_router
     except ImportError as e:
         logger.error(
             f"FLATNOTES_GIT_ENABLED is true, but a module failed to load: {e}. Git integration will be disabled."
@@ -250,7 +250,9 @@ if git_integration_router:
         git_integration_router,
         prefix=f"{global_config.path_prefix}/api/git",
         tags=["git"],
+        dependencies=auth_deps,
     )
+    app.include_router(ws_router)
     logger.info("Git integration API routes included.")
 else:
     logger.info(

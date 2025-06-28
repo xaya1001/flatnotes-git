@@ -11,12 +11,9 @@ from fastapi import (
     Query,
     Request,
     Response,
-    WebSocket,
-    WebSocketDisconnect,
 )
 
 from logger import logger
-from main import auth
 
 from . import git_config
 from .core.git_exceptions import (
@@ -72,8 +69,7 @@ def get_git_service(request: Request) -> GitService:
 
 
 # --- Router Setup ---
-auth_deps = [Depends(auth.authenticate)] if auth else []
-router = APIRouter(dependencies=auth_deps)
+router = APIRouter()
 
 
 def handle_git_exception(e: Exception, action: str, service: GitService):
@@ -146,10 +142,6 @@ async def restore_file_from_commit(
         except Exception as e:
             background_tasks.add_task(connection_manager.broadcast_status_update)
             handle_git_exception(e, action_name, service)
-
-
-# ... [ The rest of git_router.py remains the same as the previous correct version ] ...
-# For completeness, here's the full git_router.py file again.
 
 
 @router.get("/status", response_model=GitStatusResponse)
@@ -464,15 +456,15 @@ async def reset_to_remote(
             handle_git_exception(e, action_name, service)
 
 
-# --- Management & WebSocket Endpoints ---
+# --- Management Endpoint ---
 
 
-@router.get("/activity-log", response_model=List[LogEntry], dependencies=auth_deps)
+@router.get("/activity-log", response_model=List[LogEntry])
 def get_git_activity_log():
     return get_all_logs()
 
 
-@router.delete("/activity-log", status_code=204, dependencies=auth_deps)
+@router.delete("/activity-log", status_code=204)
 def delete_git_activity_log():
     try:
         clear_all_logs()
@@ -480,14 +472,3 @@ def delete_git_activity_log():
     except Exception as e:
         logger.error(f"Failed to clear activity logs: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to clear logs.") from e
-
-
-@router.websocket("/ws/status")
-async def websocket_endpoint(websocket: WebSocket):
-    await connection_manager.connect(websocket)
-    try:
-        while True:
-            # Keep the connection alive
-            await websocket.receive_text()
-    except WebSocketDisconnect:
-        connection_manager.disconnect(websocket)

@@ -11,6 +11,8 @@ isort = "*"
 pytest = "*"
 httpx = "*"
 pytest-asyncio = "*"
+moto = {extras = ["s3"], version = "*"}
+boto3 = "*"
 
 [packages]
 whoosh = "==2.7.4"
