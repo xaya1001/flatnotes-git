@@ -27,6 +27,8 @@ from logger import logger
 from notes.base import BaseNotes
 from notes.models import Note, NoteCreate, NoteUpdate, SearchResult
 
+# region --- Global App Initialization ---
+
 global_config = GlobalConfig()
 auth: BaseAuth = global_config.load_auth()
 note_storage: BaseNotes = global_config.load_note_storage()
@@ -34,7 +36,10 @@ attachment_storage: BaseAttachments = global_config.load_attachment_storage()
 auth_deps = [Depends(auth.authenticate)] if auth else []
 router = APIRouter()
 
-# --- Scoped Git Imports and Setup ---
+# endregion
+
+# region --- Git Integration Setup ---
+
 # This block is wrapped in a try/except to ensure the app can start
 # even if git-related dependencies are missing.
 git_integration_router = None
@@ -62,6 +67,10 @@ if global_config.flatnotes_git_enabled:
             f"FLATNOTES_GIT_ENABLED is true, but a module failed to load: {e}. Git integration will be disabled."
         )
         git_integration_router = None  # Ensure it's disabled on error
+
+# endregion
+
+# region --- Application Lifespan (Startup/Shutdown) ---
 
 
 @asynccontextmanager
@@ -155,14 +164,17 @@ async def lifespan(app: FastAPI):
         app.state.scheduler.shutdown()
 
 
+# endregion
+
+# region --- FastAPI App and Webhook Setup ---
+
 app = FastAPI(
     docs_url=global_config.path_prefix + "/docs",
     openapi_url=global_config.path_prefix + "/openapi.json",
     lifespan=lifespan,
 )
 
-
-# --- Webhook Endpoint ---
+# Webhook Endpoint
 if git_integration_router:
 
     @app.post(
@@ -244,15 +256,26 @@ if git_integration_router:
         return {"status": "accepted", "detail": "Fetch operation scheduled."}
 
 
-# Conditionally include the Git integration router
+# endregion
+
+# region --- Router and Static Files Mounting ---
+
+# Conditionally include the Git integration routers
 if git_integration_router:
+    # Include the main HTTP router with its authentication dependencies
     app.include_router(
         git_integration_router,
         prefix=f"{global_config.path_prefix}/api/git",
         tags=["git"],
         dependencies=auth_deps,
     )
-    app.include_router(ws_router)
+    # Include the WebSocket router under the same prefix.
+    # It has its own, separate authentication dependency.
+    app.include_router(
+        ws_router,
+        prefix=f"{global_config.path_prefix}/api/git",
+        tags=["git"],
+    )
     logger.info("Git integration API routes included.")
 else:
     logger.info(
@@ -260,6 +283,8 @@ else:
     )
 
 replace_base_href("client/dist/index.html", global_config.path_prefix)
+
+# endregion
 
 
 # region UI

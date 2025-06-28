@@ -13,7 +13,7 @@ from fastapi import (
 from logger import logger
 from main import auth
 
-# Create a dedicated router for WebSocket endpoints
+# Create a new, dedicated router for WebSocket endpoints
 ws_router = APIRouter()
 
 
@@ -37,8 +37,8 @@ async def get_websocket_token(websocket: WebSocket):
         )
 
     try:
-        # Use the validation logic from the existing auth module
-        auth._validate_token(token)
+        # Use the now-public validation logic from the existing auth module
+        auth.validate_token(token)
         logger.debug(
             f"WebSocket client authenticated successfully: {websocket.client.host}"
         )
@@ -92,7 +92,7 @@ class ConnectionManager:
 connection_manager = ConnectionManager()
 
 
-@ws_router.websocket("/api/git/ws/status", dependencies=[Depends(get_websocket_token)])
+@ws_router.websocket("/ws/status", dependencies=[Depends(get_websocket_token)])
 async def websocket_endpoint(websocket: WebSocket):
     """
     The authenticated WebSocket endpoint. The dependency ensures that this

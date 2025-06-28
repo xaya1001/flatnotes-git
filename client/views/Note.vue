@@ -394,7 +394,7 @@ function postAttachment(fileToUpload) {
   toast.add(getToastOptions("Uploading attachment..."));
 
   // Upload the attachment
-  return createAttachment(file)
+  return createAttachment(fileToUpload)
     .then((data) => {
       // Success Toast
       toast.add(

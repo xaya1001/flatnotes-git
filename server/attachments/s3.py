@@ -110,8 +110,9 @@ class S3Attachments(BaseAttachments):
             # First, check if the object exists. This is more reliable.
             self.s3_client.head_object(Bucket=self.bucket_name, Key=object_key)
         except ClientError as e:
-            # If head_object raises a 404, it means the file is not found.
-            if e.response.get("Error", {}).get("Code") == "404":
+            # If head_object raises a 404 or NoSuchKey, it means the file is not found.
+            error_code = e.response.get("Error", {}).get("Code")
+            if error_code in ("404", "NoSuchKey"):
                 raise FileNotFoundError(
                     f"Attachment '{filename}' not found in S3 bucket '{self.bucket_name}'."
                 )
