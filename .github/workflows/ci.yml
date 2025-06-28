@@ -7,7 +7,7 @@ name: Continuous Integration
 on:
   pull_request:
     branches:
-      - git-Integration
+      - git-integration
 
 jobs:
   test:
