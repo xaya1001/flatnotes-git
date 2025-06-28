@@ -45,6 +45,7 @@ describe("WorkspaceTab.vue", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     statusStore = useStatusStore();
+    statusStore.commitMessage = "chore: sync {{num}} notes at {{datetime}}";
     vi.clearAllMocks();
   });
 
@@ -107,9 +108,9 @@ describe("WorkspaceTab.vue", () => {
     expect(mockSyncExecute).toHaveBeenCalledWith("Test commit");
   });
 
-  it("clears commit message on successful sync", async () => {
+  it("resets commit message to default on successful sync", async () => {
     statusStore.$patch({
-      commitMessage: "Initial Message",
+      commitMessage: "A custom user message",
       gitStatus: { files: [{ path: "note.md", work_tree_status: "M" }] },
     });
     const mockSyncExecute = vi.fn(() => Promise.resolve());
@@ -119,6 +120,9 @@ describe("WorkspaceTab.vue", () => {
     }));
     const wrapper = mountComponent();
     await wrapper.find("button.bg-theme-brand").trigger("click");
-    expect(statusStore.commitMessage).toBe("");
+
+    expect(statusStore.commitMessage).toBe(
+      "chore: sync {{num}} notes at {{datetime}}",
+    );
   });
 });

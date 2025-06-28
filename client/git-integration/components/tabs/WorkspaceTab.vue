@@ -8,7 +8,6 @@
         <div class="relative">
           <textarea
             v-model="statusStore.commitMessage"
-            :placeholder="defaultMessageTemplate"
             rows="3"
             class="w-full rounded border bg-theme-background p-2 pr-8 text-sm focus:border-theme-brand focus:ring-theme-brand"
           ></textarea>
@@ -16,6 +15,7 @@
             class="tooltip-trigger absolute right-2 top-2 p-1 text-theme-text-muted hover:text-theme-text"
             :data-tooltip="tooltipText"
             aria-label="Show commit message placeholders"
+            tabindex="0"
           >
             <SvgIcon type="mdi" :path="mdiInformationOutline" :size="16" />
           </button>
@@ -424,11 +424,16 @@ const isTableLoading = computed(
 );
 
 // --- Commit Message Templating & Default ---
-const defaultMessageTemplate = "chore: sync {{numFiles}} notes at {{datetime}}";
+const defaultMessageTemplate = "chore: sync {{num}} notes at {{datetime}}";
 const tooltipText =
-  "Available placeholders:\n{{numFiles}}: Number of files changed\n{{date}}: YYYY-MM-DD\n{{datetime}}: YYYY-MM-DD HH:MM:SS";
+  "Available placeholders:\n{{num}}: Number of files changed\n{{date}}: YYYY-MM-DD\n{{datetime}}: YYYY-MM-DD HH:MM:SS";
 
-function processCommitMessage(rawMessage, numFiles) {
+// Initialize commit message if it's empty
+if (!statusStore.commitMessage.trim()) {
+  statusStore.commitMessage = defaultMessageTemplate;
+}
+
+function processCommitMessage(rawMessage, num) {
   const message =
     rawMessage.trim() === "" ? defaultMessageTemplate : rawMessage;
 
@@ -440,7 +445,7 @@ function processCommitMessage(rawMessage, numFiles) {
   return message
     .replace(/{{datetime}}/g, datetime)
     .replace(/{{date}}/g, date)
-    .replace(/{{numFiles}}/g, numFiles);
+    .replace(/{{num}}/g, num);
 }
 
 // --- Action Handlers ---
@@ -454,29 +459,22 @@ function handleOpenFile(path) {
 }
 
 async function handleSync() {
-  const numFiles =
-    statusStore.stagedFiles.length + statusStore.unstagedFiles.length;
-  const processedMessage = processCommitMessage(
-    statusStore.commitMessage,
-    numFiles,
-  );
+  const num = statusStore.stagedFiles.length + statusStore.unstagedFiles.length;
+  const processedMessage = processCommitMessage(statusStore.commitMessage, num);
   try {
     await executeSync(processedMessage);
-    statusStore.commitMessage = ""; // Clear on success
+    statusStore.commitMessage = defaultMessageTemplate; // Clear on success
   } catch (e) {
     // Error is handled globally by the composable
   }
 }
 
 async function handleCommitStaged() {
-  const numFiles = statusStore.stagedFiles.length;
-  const processedMessage = processCommitMessage(
-    statusStore.commitMessage,
-    numFiles,
-  );
+  const num = statusStore.stagedFiles.length;
+  const processedMessage = processCommitMessage(statusStore.commitMessage, num);
   try {
     await executeCommit(processedMessage);
-    statusStore.commitMessage = "";
+    statusStore.commitMessage = defaultMessageTemplate;
   } catch (e) {
     // Error is handled globally by the composable
   }
@@ -524,6 +522,7 @@ const noUnstagedFiles = computed(() => statusStore.unstagedFiles.length === 0);
 const noLocalChanges = computed(
   () => noStagedFiles.value && noUnstagedFiles.value,
 );
+const noCommitMessage = computed(() => statusStore.commitMessage.trim() === "");
 const isNotTracking = computed(() => !statusStore.isTrackingUpstream);
 const hasUncommittedChanges = computed(
   () => !noStagedFiles.value || !noUnstagedFiles.value,
@@ -598,11 +597,13 @@ const pushButtonTitle = computed(() => {
 });
 
 const isCommitStagedDisabled = computed(
-  () => isActionInProgress.value || noStagedFiles.value,
+  () =>
+    isActionInProgress.value || noStagedFiles.value || noCommitMessage.value,
 );
 const commitStagedButtonTitle = computed(() => {
   if (isActionInProgress.value) return "Action in progress...";
   if (noStagedFiles.value) return "No changes staged to commit.";
+  if (noCommitMessage.value) return "Enter a commit message.";
   return "Commit staged changes";
 });
 
@@ -686,7 +687,8 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.tooltip-trigger:hover::after {
+.tooltip-trigger:hover::after,
+.tooltip-trigger:focus::after {
   content: attr(data-tooltip);
   position: absolute;
 
