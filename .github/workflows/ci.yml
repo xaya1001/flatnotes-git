@@ -1,0 +1,61 @@
+# .github/workflows/ci.yml
+
+name: Continuous Integration
+
+# --- Triggers ---
+# This workflow runs on pull requests that target the 'main' branch.
+on:
+  pull_request:
+    branches:
+      - git-Integration
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      # --- 1. Checkout Code ---
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # --- 2. Set up Python and Cache Pipenv Dependencies ---
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache Pipenv dependencies
+        id: cache-pipenv
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/virtualenvs
+          key: ${{ runner.os }}-pipenv-${{ hashFiles('**/Pipfile.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pipenv-
+
+      - name: Install Pipenv and Python dependencies
+        run: |
+          pip install pipenv
+          pipenv install --dev --system
+
+      # --- 3. Set up Node.js and Cache npm Dependencies ---
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20' # A recent LTS version
+
+      - name: Cache npm dependencies
+        id: cache-npm
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
+      - name: Install npm dependencies
+        run: npm ci # 'ci' is faster and more reliable for CI environments
+
+      # --- 4. Run Tests ---
+      - name: Run Python and JS tests
+        run: npm run git-test
