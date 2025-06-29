@@ -1,5 +1,6 @@
 <template>
   <div
+    ref="indicatorElement"
     class="fixed right-0 top-1/2 z-50 flex -translate-y-1/2 cursor-pointer items-center rounded-l-full bg-theme-background-elevated pr-3 shadow-lg transition-transform duration-300 hover:bg-theme-border"
     :class="{ 'translate-x-[-1px]': !panelUiStore.isSidebarVisible }"
     :style="{ transform: `translateX(-${sidebarVisibleWidth}px)` }"
@@ -81,7 +82,7 @@
 </template>
 
 <script setup>
-import { computed } from "vue";
+import { computed, ref, defineExpose } from "vue";
 import { useStatusStore } from "../stores/statusStore";
 import { usePanelUiStore } from "../stores/panelUiStore";
 import SvgIcon from "@jamescoyle/vue-icon";
@@ -99,8 +100,11 @@ defineEmits(["toggle-sidebar"]);
 
 const statusStore = useStatusStore();
 const panelUiStore = usePanelUiStore();
+const indicatorElement = ref(null);
 
 const sidebarVisibleWidth = computed(() => {
   return panelUiStore.isSidebarVisible ? panelUiStore.width : 0;
 });
+
+defineExpose({ element: indicatorElement });
 </script>
