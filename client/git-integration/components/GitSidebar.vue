@@ -5,11 +5,11 @@
     <Sidebar
       v-model:visible="panelUiStore.isSidebarVisible"
       @show="handleSidebarShow"
+      @hide="handleSidebarHide"
       position="right"
       :modal="!panelUiStore.isPinned"
       :dismissable="!panelUiStore.isPinned"
       :showCloseIcon="false"
-      @hide="panelUiStore.hideSidebar"
       :pt="{
         root: {
           class:
@@ -72,7 +72,7 @@
               />
             </button>
             <button
-              @click="panelUiStore.hideSidebar"
+              @click="handleClose"
               class="rounded-full p-1 hover:bg-theme-border"
               title="Close Panel"
             >
@@ -188,7 +188,10 @@
     </Sidebar>
 
     <!-- Toggle Indicator -->
-    <GitStatusIndicator @toggle-sidebar="panelUiStore.toggleSidebar" />
+    <GitStatusIndicator
+      ref="statusIndicator"
+      @toggle-sidebar="handleToggleSidebar"
+    />
   </div>
 </template>
 
@@ -230,14 +233,15 @@ const logStore = useLogStore();
 
 const isInitialLoad = ref(true);
 const isRefreshing = ref(false);
+const statusIndicator = ref(null);
 const globalConfig = computed(() => globalStore.config.value);
 
 // THE SINGLE SOURCE OF TRUTH FOR UI DECISION MAKING
+const focusReturnTarget = ref(null);
+
 const isConflictRelated = computed(() => {
   const state = statusStore.repositoryState;
   if (!state) return false;
-
-  // All states that belong to the conflict resolution flow are defined here.
   return (
     state.includes("CONFLICT") ||
     state.includes("REBASING") ||
@@ -258,6 +262,30 @@ function handleSidebarShow() {
     return;
   }
   fetchAllSidebarData();
+}
+
+function handleSidebarHide() {
+  if (
+    focusReturnTarget.value &&
+    typeof focusReturnTarget.value.focus === "function"
+  ) {
+    focusReturnTarget.value.focus();
+  }
+  focusReturnTarget.value = null;
+}
+
+function handleToggleSidebar() {
+  if (statusIndicator.value && statusIndicator.value.element) {
+    focusReturnTarget.value = statusIndicator.value.element;
+  }
+  panelUiStore.toggleSidebar();
+}
+
+function handleClose() {
+  if (statusIndicator.value && statusIndicator.value.element) {
+    focusReturnTarget.value = statusIndicator.value.element;
+  }
+  panelUiStore.hideSidebar();
 }
 
 async function refreshAll() {

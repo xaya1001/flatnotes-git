@@ -15,6 +15,7 @@ export const usePanelUiStore = defineStore("git-panel-ui", () => {
   let confirmModalResolve = null;
 
   // -- ACTIONS --
+
   function toggleSidebar() {
     isSidebarVisible.value = !isSidebarVisible.value;
   }

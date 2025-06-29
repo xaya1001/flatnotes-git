@@ -4,9 +4,14 @@
 
 <script setup>
 import Editor from "@toast-ui/editor";
-import { onMounted, ref } from "vue";
+import { onMounted, onUnmounted, ref, nextTick } from "vue";
 
+import eventBus from "../../git-integration/services/eventBus.js";
 import baseOptions from "./baseOptions.js";
+import {
+  renderMermaidBlocks,
+  reinitializeMermaidTheme,
+} from "./mermaidRenderer.js";
 
 const props = defineProps({
   initialValue: String,
@@ -22,7 +27,26 @@ const emit = defineEmits(["change", "keydown"]);
 const editorElement = ref();
 let toastEditor;
 
+const runMermaidRender = () => {
+  if (editorElement.value) {
+    renderMermaidBlocks(editorElement.value);
+  }
+};
+
+const handleThemeChange = () => {
+  const newTheme = document.body.classList.contains("dark")
+    ? "dark"
+    : "default";
+  reinitializeMermaidTheme(newTheme);
+  runMermaidRender();
+};
+
 onMounted(() => {
+  const initialTheme = document.body.classList.contains("dark")
+    ? "dark"
+    : "default";
+  reinitializeMermaidTheme(initialTheme);
+
   toastEditor = new Editor({
     ...baseOptions,
     el: editorElement.value,
@@ -35,11 +59,23 @@ onMounted(() => {
       keydown: (_, event) => {
         emit("keydown", event);
       },
+      afterPreviewRender: (html) => {
+        runMermaidRender();
+        return html;
+      },
     },
     hooks: props.addImageBlobHook
       ? { addImageBlobHook: props.addImageBlobHook }
       : {},
   });
+
+  nextTick(runMermaidRender);
+
+  eventBus.on("theme-changed", handleThemeChange);
+});
+
+onUnmounted(() => {
+  eventBus.off("theme-changed", handleThemeChange);
 });
 
 function getMarkdown() {

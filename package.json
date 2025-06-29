@@ -24,6 +24,7 @@
     "@toast-ui/editor-plugin-code-syntax-highlight": "3.1.0",
     "axios": "1.8.4",
     "compressorjs": "^1.2.1",
+    "mermaid": "^11.7.0",
     "mitt": "^3.0.1",
     "mousetrap": "1.6.5",
     "pinia": "2.3.1",
