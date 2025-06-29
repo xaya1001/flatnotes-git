@@ -23,17 +23,10 @@ const emit = defineEmits(["change", "keydown"]);
 const editorElement = ref();
 let toastEditor;
 
-let renderTimeout;
-const handleUpdate = () => {
-  // Debounce the rendering call to avoid excessive re-renders while typing.
-  clearTimeout(renderTimeout);
-  renderTimeout = setTimeout(() => {
-    // Re-render Mermaid blocks when the content changes.
-    // This is especially important for the 'Preview' tab.
-    if (editorElement.value) {
-      renderMermaidBlocks(editorElement.value);
-    }
-  }, 200);
+const runMermaidRender = () => {
+  if (editorElement.value) {
+    renderMermaidBlocks(editorElement.value);
+  }
 };
 
 onMounted(() => {
@@ -45,10 +38,13 @@ onMounted(() => {
     events: {
       change: () => {
         emit("change");
-        handleUpdate();
       },
       keydown: (_, event) => {
         emit("keydown", event);
+      },
+      afterPreviewRender: (html) => {
+        runMermaidRender();
+        return html;
       },
     },
     hooks: props.addImageBlobHook
@@ -56,7 +52,7 @@ onMounted(() => {
       : {},
   });
 
-  handleUpdate();
+  setTimeout(runMermaidRender, 100);
 });
 
 function getMarkdown() {

@@ -24,7 +24,6 @@ onMounted(() => {
     initialValue: props.initialValue,
   });
 
-  // A small delay ensures the DOM is fully updated by TUI before we scan it.
   setTimeout(() => {
     if (viewerElement.value) {
       renderMermaidBlocks(viewerElement.value);
