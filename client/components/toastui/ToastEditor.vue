@@ -25,8 +25,11 @@ let toastEditor;
 
 let renderTimeout;
 const handleUpdate = () => {
+  // Debounce the rendering call to avoid excessive re-renders while typing.
   clearTimeout(renderTimeout);
   renderTimeout = setTimeout(() => {
+    // Re-render Mermaid blocks when the content changes.
+    // This is especially important for the 'Preview' tab.
     if (editorElement.value) {
       renderMermaidBlocks(editorElement.value);
     }
@@ -68,7 +71,6 @@ defineExpose({ getMarkdown, isWysiwygMode });
 </script>
 
 <style>
-/* No changes needed here, just keeping the imports */
 @import "@toast-ui/editor/dist/toastui-editor.css";
 @import "prismjs/themes/prism.css";
 @import "@toast-ui/editor-plugin-code-syntax-highlight/dist/toastui-editor-plugin-code-syntax-highlight.css";

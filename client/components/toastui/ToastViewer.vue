@@ -24,17 +24,16 @@ onMounted(() => {
     initialValue: props.initialValue,
   });
 
+  // A small delay ensures the DOM is fully updated by TUI before we scan it.
   setTimeout(() => {
-    renderMermaidBlocks(viewerElement.value);
+    if (viewerElement.value) {
+      renderMermaidBlocks(viewerElement.value);
+    }
   }, 100);
 });
 </script>
 
 <style>
-.custom-mermaid-block[data-processed] {
-  display: none !important;
-}
-
 @import "@toast-ui/editor/dist/toastui-editor-viewer.css";
 @import "prismjs/themes/prism.css";
 @import "@toast-ui/editor-plugin-code-syntax-highlight/dist/toastui-editor-plugin-code-syntax-highlight.css";

@@ -31,47 +31,6 @@ const customHTMLRenderer = {
     }
     return original;
   },
-
-  // --- MERMAID ---
-  codeBlock(node) {
-    const language = node.lang || "txt";
-    const content = node.literal;
-
-    const trimmedContent = content.trim();
-    const isMermaid =
-      trimmedContent.startsWith("graph") ||
-      trimmedContent.startsWith("sequenceDiagram") ||
-      trimmedContent.startsWith("gantt") ||
-      trimmedContent.startsWith("classDiagram") ||
-      trimmedContent.startsWith("stateDiagram") ||
-      trimmedContent.startsWith("pie") ||
-      trimmedContent.startsWith("erDiagram") ||
-      trimmedContent.startsWith("journey");
-
-    if (isMermaid) {
-      return [
-        {
-          type: "openTag",
-          tagName: "pre",
-          attributes: { class: "custom-mermaid-block" },
-        },
-        { type: "text", content: content + "\n" },
-        { type: "closeTag", tagName: "pre" },
-      ];
-    }
-
-    return [
-      { type: "openTag", tagName: "pre" },
-      {
-        type: "openTag",
-        tagName: "code",
-        attributes: { "data-language": language },
-      },
-      { type: "text", content },
-      { type: "closeTag", tagName: "code" },
-      { type: "closeTag", tagName: "pre" },
-    ];
-  },
 };
 
 const baseOptions = {

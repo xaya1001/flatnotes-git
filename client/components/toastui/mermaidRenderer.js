@@ -1,5 +1,6 @@
-// /client/components/toastui/mermaidRenderer.js
+// client/components/toastui/mermaidRenderer.js
 import mermaid from "mermaid";
+import { v4 as uuidv4 } from "uuid"; // Import the uuid library
 
 // Initialize Mermaid only once with our desired settings.
 mermaid.initialize({
@@ -9,8 +10,8 @@ mermaid.initialize({
 });
 
 /**
- * Finds all 'custom-mermaid-block' elements within a given container
- * and renders them using a manual, non-destructive approach.
+ * Finds all explicitly marked Mermaid code blocks (` ```mermaid `) within a given
+ * container and renders them into SVG diagrams.
  * @param {HTMLElement} containerElement The parent element to search within.
  */
 export async function renderMermaidBlocks(containerElement) {
@@ -19,57 +20,59 @@ export async function renderMermaidBlocks(containerElement) {
   }
 
   // --- CLEANUP STEP ---
-  // Before rendering, remove all previously generated Mermaid SVGs within this container.
-  // We identify them by the 'id' we ask Mermaid to generate.
-  const oldSvgs = containerElement.querySelectorAll('div[id^="mermaid-svg-"]');
+  // Remove previously rendered SVGs and reset the state of processed <pre> blocks.
+  const oldSvgs = containerElement.querySelectorAll("div[data-mermaid-svg-id]");
   oldSvgs.forEach((svgNode) => svgNode.remove());
-  // And also remove the 'data-processed' attribute from all blocks to make them "renderable" again.
-  const processedBlocks = containerElement.querySelectorAll(
-    "pre.custom-mermaid-block[data-processed]",
-  );
-  processedBlocks.forEach((block) => block.removeAttribute("data-processed"));
 
-  // Find all elements that we "tagged" in baseOptions.js.
-  // Now we just look for the class, regardless of the data-processed attribute.
-  const mermaidNodes = containerElement.querySelectorAll(
-    "pre.custom-mermaid-block",
+  const processedBlocks = containerElement.querySelectorAll(
+    "pre[data-mermaid-processed]",
   );
+  processedBlocks.forEach((block) => {
+    block.removeAttribute("data-mermaid-processed");
+    block.style.display = ""; // Restore visibility before re-processing
+  });
+
+  // --- SELECTION STEP ---
+
+  const mermaidNodes = containerElement.querySelectorAll("pre.lang-mermaid");
 
   if (mermaidNodes.length === 0) {
     return;
   }
 
-  // Process each found node individually.
+  // --- RENDER STEP ---
   for (const node of mermaidNodes) {
-    // If it's already processed by this run, skip.
-    if (node.getAttribute("data-processed")) {
+    if (node.getAttribute("data-mermaid-processed")) {
       continue;
     }
 
     const diagramText = node.textContent;
-    // The ID now needs to be attached to the SVG container itself for cleanup.
-    const mermaidId = `mermaid-svg-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    if (!diagramText.trim()) {
+      continue;
+    }
+
+    // Use UUID for a more robust and unique ID.
+    const mermaidId = `mermaid-svg-${uuidv4()}`;
+    // Mermaid's internal render function requires the ID to start with a letter.
+    const mermaidInternalId = `d${mermaidId}`;
 
     try {
-      // 1. Ask Mermaid to render the diagram into an SVG string in memory.
-      const { svg } = await mermaid.render(`d${mermaidId}`, diagramText); // Mermaid requires ID to start with a letter
-
-      // 2. Create a new container element for our SVG.
+      const { svg } = await mermaid.render(mermaidInternalId, diagramText);
       const svgContainer = document.createElement("div");
-      // Set the ID on our container for future cleanup.
-      svgContainer.id = mermaidId;
+
+      // Use a data-attribute for the SVG container's ID for clarity and easier selection.
+      svgContainer.setAttribute("data-mermaid-svg-id", mermaidId);
       svgContainer.innerHTML = svg;
 
-      // 3. Insert the new container with the rendered SVG right before the original <pre> block.
       node.parentNode.insertBefore(svgContainer, node);
 
-      // 4. Mark the original <pre> block as "processed" to prevent re-rendering
-      //    and to allow our CSS to hide it.
-      node.setAttribute("data-processed", "true");
+      node.setAttribute("data-mermaid-processed", "true");
+      node.style.display = "none";
     } catch (error) {
       console.error("Failed to render Mermaid diagram:", error);
-      node.innerHTML = `Error rendering Mermaid diagram: ${error.message}`;
-      node.setAttribute("data-processed", "true");
+      // Display error inside the code block itself for user feedback.
+      node.innerHTML = `<code>Error rendering Mermaid diagram: ${error.message}</code>`;
+      node.setAttribute("data-mermaid-processed", "true");
     }
   }
 }
