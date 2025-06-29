@@ -69,7 +69,7 @@ describe("mermaidRenderer.js", () => {
     expect(svgContainers[1].textContent).toBe("sequenceDiagram; A->>B: Hello;");
   });
 
-  it("should clean up old SVGs before re-rendering", async () => {
+  it("should clean up old SVGs and errors before re-rendering", async () => {
     const { renderMermaidBlocks } = await import(
       "../../components/toastui/mermaidRenderer.js"
     );
@@ -89,9 +89,25 @@ describe("mermaidRenderer.js", () => {
     const errorMessage = "Mermaid syntax error!";
     mermaid.render.mockRejectedValue(new Error(errorMessage));
     container.innerHTML = `<pre class="lang-mermaid"><code>invalid diagram</code></pre>`;
+
     await renderMermaidBlocks(container);
+
+    // Assert that the original pre element is now hidden
     const preElement = container.querySelector("pre.lang-mermaid");
-    expect(preElement.innerHTML).toContain(errorMessage);
+    expect(preElement.style.display).toBe("none");
+
+    // Assert that a new error container was created and inserted
+    const errorContainer = container.querySelector("div[data-mermaid-error]");
+    expect(errorContainer).not.toBeNull();
+
+    // Assert that the error container has the correct message
+    expect(errorContainer.textContent).toContain(
+      "Error rendering Mermaid diagram",
+    );
+    expect(errorContainer.textContent).toContain(errorMessage);
+
+    // Assert the error was logged
+    expect(consoleErrorSpy).toHaveBeenCalled();
   });
 
   it("should ignore empty or whitespace-only mermaid blocks", async () => {
@@ -107,7 +123,6 @@ describe("mermaidRenderer.js", () => {
     it("should initialize with strict security level on first import", async () => {
       await import("../../components/toastui/mermaidRenderer.js");
       const mockedMermaid = (await import("mermaid")).default;
-
       expect(mockedMermaid.initialize).toHaveBeenCalledWith({
         startOnLoad: false,
         securityLevel: "strict",
@@ -119,7 +134,6 @@ describe("mermaidRenderer.js", () => {
         "../../components/toastui/mermaidRenderer.js"
       );
       const mockedMermaid = (await import("mermaid")).default;
-
       mockedMermaid.initialize.mockClear();
 
       reinitializeMermaidTheme("dark");

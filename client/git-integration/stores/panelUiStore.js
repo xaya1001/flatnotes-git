@@ -15,33 +15,14 @@ export const usePanelUiStore = defineStore("git-panel-ui", () => {
   let confirmModalResolve = null;
 
   // -- ACTIONS --
-  const sidebarTriggerElement = ref(null);
-
-  function setSidebarTrigger(el) {
-    if (el) {
-      sidebarTriggerElement.value = el;
-    }
-  }
-
-  function returnFocusToTrigger() {
-    const trigger = sidebarTriggerElement.value;
-    if (trigger && typeof trigger.focus === "function") {
-      trigger.focus();
-    }
-    sidebarTriggerElement.value = null;
-  }
 
   function toggleSidebar() {
     isSidebarVisible.value = !isSidebarVisible.value;
-    if (!isSidebarVisible.value) {
-      returnFocusToTrigger();
-    }
   }
 
   function hideSidebar() {
     if (!isPinned.value) {
       isSidebarVisible.value = false;
-      returnFocusToTrigger();
     }
   }
 
@@ -96,7 +77,5 @@ export const usePanelUiStore = defineStore("git-panel-ui", () => {
     setWidth,
     showConfirmation,
     resolveConfirmation,
-    setSidebarTrigger,
-    returnFocusToTrigger,
   };
 });

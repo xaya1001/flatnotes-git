@@ -4,7 +4,7 @@
 
 <script setup>
 import Editor from "@toast-ui/editor";
-import { onMounted, onUnmounted, ref } from "vue";
+import { onMounted, onUnmounted, ref, nextTick } from "vue";
 
 import eventBus from "../../git-integration/services/eventBus.js";
 import baseOptions from "./baseOptions.js";
@@ -33,7 +33,6 @@ const runMermaidRender = () => {
   }
 };
 
-// Overall Comment: Theme change handler is now more performant.
 const handleThemeChange = () => {
   const newTheme = document.body.classList.contains("dark")
     ? "dark"
@@ -43,7 +42,6 @@ const handleThemeChange = () => {
 };
 
 onMounted(() => {
-  // Set initial theme before creating the editor
   const initialTheme = document.body.classList.contains("dark")
     ? "dark"
     : "default";
@@ -62,7 +60,6 @@ onMounted(() => {
         emit("keydown", event);
       },
       afterPreviewRender: (html) => {
-        // Overall Comment: This hook is the correct way to render.
         runMermaidRender();
         return html;
       },
@@ -72,19 +69,11 @@ onMounted(() => {
       : {},
   });
 
-  // Overall Comment: Replaced setTimeout with a more reliable direct call.
-  // The 'afterPreviewRender' hook handles subsequent renders.
-  // This initial call might still be needed if a preview is shown by default.
-  // A slight delay might still be necessary to ensure the initial preview DOM is ready.
-  // Using nextTick is better than setTimeout.
-  import("vue").then(({ nextTick }) => {
-    nextTick(runMermaidRender);
-  });
+  nextTick(runMermaidRender);
 
   eventBus.on("theme-changed", handleThemeChange);
 });
 
-// Overall Comment: Unsubscribe from eventBus to prevent memory leaks.
 onUnmounted(() => {
   eventBus.off("theme-changed", handleThemeChange);
 });

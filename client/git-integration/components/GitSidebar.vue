@@ -237,11 +237,11 @@ const statusIndicator = ref(null);
 const globalConfig = computed(() => globalStore.config.value);
 
 // THE SINGLE SOURCE OF TRUTH FOR UI DECISION MAKING
+const focusReturnTarget = ref(null);
+
 const isConflictRelated = computed(() => {
   const state = statusStore.repositoryState;
   if (!state) return false;
-
-  // All states that belong to the conflict resolution flow are defined here.
   return (
     state.includes("CONFLICT") ||
     state.includes("REBASING") ||
@@ -265,19 +265,25 @@ function handleSidebarShow() {
 }
 
 function handleSidebarHide() {
-  panelUiStore.returnFocusToTrigger();
+  if (
+    focusReturnTarget.value &&
+    typeof focusReturnTarget.value.focus === "function"
+  ) {
+    focusReturnTarget.value.focus();
+  }
+  focusReturnTarget.value = null;
 }
 
 function handleToggleSidebar() {
   if (statusIndicator.value && statusIndicator.value.element) {
-    panelUiStore.setSidebarTrigger(statusIndicator.value.element);
+    focusReturnTarget.value = statusIndicator.value.element;
   }
   panelUiStore.toggleSidebar();
 }
 
 function handleClose() {
   if (statusIndicator.value && statusIndicator.value.element) {
-    panelUiStore.setSidebarTrigger(statusIndicator.value.element);
+    focusReturnTarget.value = statusIndicator.value.element;
   }
   panelUiStore.hideSidebar();
 }
