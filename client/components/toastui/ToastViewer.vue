@@ -6,6 +6,7 @@
 import Viewer from "@toast-ui/editor/dist/toastui-editor-viewer";
 import { onMounted, ref } from "vue";
 
+import eventBus from "../../git-integration/services/eventBus.js";
 import baseOptions from "./baseOptions.js";
 import extendedAutolinks from "./extendedAutolinks.js";
 import { renderMermaidBlocks } from "./mermaidRenderer.js";
@@ -29,6 +30,15 @@ onMounted(() => {
       renderMermaidBlocks(viewerElement.value);
     }
   }, 100);
+
+  eventBus.on("theme-changed", async () => {
+    if (viewerElement.value) {
+      const { renderMermaidBlocks } = await import(
+        "./mermaidRenderer.js?t=" + new Date().getTime()
+      );
+      renderMermaidBlocks(viewerElement.value);
+    }
+  });
 });
 </script>
 

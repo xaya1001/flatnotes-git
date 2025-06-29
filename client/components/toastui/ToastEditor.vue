@@ -6,6 +6,7 @@
 import Editor from "@toast-ui/editor";
 import { onMounted, ref } from "vue";
 
+import eventBus from "../../git-integration/services/eventBus.js";
 import baseOptions from "./baseOptions.js";
 import { renderMermaidBlocks } from "./mermaidRenderer.js";
 
@@ -23,9 +24,9 @@ const emit = defineEmits(["change", "keydown"]);
 const editorElement = ref();
 let toastEditor;
 
-const runMermaidRender = () => {
+const runMermaidRender = (renderer) => {
   if (editorElement.value) {
-    renderMermaidBlocks(editorElement.value);
+    (renderer || renderMermaidBlocks)(editorElement.value);
   }
 };
 
@@ -53,6 +54,13 @@ onMounted(() => {
   });
 
   setTimeout(runMermaidRender, 100);
+
+  eventBus.on("theme-changed", async () => {
+    const { renderMermaidBlocks } = await import(
+      "./mermaidRenderer.js?t=" + new Date().getTime()
+    );
+    runMermaidRender(renderMermaidBlocks);
+  });
 });
 
 function getMarkdown() {

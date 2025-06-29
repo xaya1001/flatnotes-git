@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from "uuid";
 
 mermaid.initialize({
   startOnLoad: false,
-  theme: "default",
+  theme: document.body.classList.contains("dark") ? "dark" : "default",
   securityLevel: "loose",
 });
 
@@ -66,6 +66,11 @@ export async function renderMermaidBlocks(containerElement) {
       console.error("Failed to render Mermaid diagram:", error);
       node.innerHTML = `<code>Error rendering Mermaid diagram: ${error.message}</code>`;
       node.setAttribute("data-mermaid-processed", "true");
+
+      const mermaidErrorSvg = document.getElementById(mermaidInternalId);
+      if (mermaidErrorSvg) {
+        mermaidErrorSvg.remove();
+      }
     }
   }
 }
