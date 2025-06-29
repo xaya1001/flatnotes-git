@@ -8,6 +8,7 @@ import { onMounted, ref } from "vue";
 
 import baseOptions from "./baseOptions.js";
 import extendedAutolinks from "./extendedAutolinks.js";
+import { renderMermaidBlocks } from "./mermaidRenderer.js";
 
 const props = defineProps({
   initialValue: String,
@@ -22,10 +23,18 @@ onMounted(() => {
     el: viewerElement.value,
     initialValue: props.initialValue,
   });
+
+  setTimeout(() => {
+    renderMermaidBlocks(viewerElement.value);
+  }, 100);
 });
 </script>
 
 <style>
+.custom-mermaid-block[data-processed] {
+  display: none !important;
+}
+
 @import "@toast-ui/editor/dist/toastui-editor-viewer.css";
 @import "prismjs/themes/prism.css";
 @import "@toast-ui/editor-plugin-code-syntax-highlight/dist/toastui-editor-plugin-code-syntax-highlight.css";
