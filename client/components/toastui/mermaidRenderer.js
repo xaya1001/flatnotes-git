@@ -1,26 +1,15 @@
 // client/components/toastui/mermaidRenderer.js
-import mermaid from "mermaid";
+import { createApp } from "vue";
+import InteractiveMermaid from "./InteractiveMermaid.vue";
 
-let mermaidIdCounter = 0;
-function generateMermaidId() {
-  return `mermaid-svg-${Date.now()}-${mermaidIdCounter++}`;
-}
-
-mermaid.initialize({
-  startOnLoad: false,
-  securityLevel: "strict",
-});
-
+// This function is now effectively a no-op at this level. The component handles its own theme.
+// It's kept for now to avoid breaking calls from the editor/viewer, but can be removed later.
 export function reinitializeMermaidTheme(theme) {
-  mermaid.initialize({
-    startOnLoad: false,
-    securityLevel: "strict",
-    theme: theme,
-  });
+  // Intentionally empty.
 }
 
 /**
- * Finds all explicitly marked Mermaid code blocks and renders them.
+ * Finds all explicitly marked Mermaid code blocks and renders them with interactive controls.
  * @param {HTMLElement} containerElement The parent element to search within.
  */
 export async function renderMermaidBlocks(containerElement) {
@@ -29,13 +18,13 @@ export async function renderMermaidBlocks(containerElement) {
   }
 
   // --- CLEANUP STEP ---
-  const oldSvgs = containerElement.querySelectorAll("div[data-mermaid-svg-id]");
-  oldSvgs.forEach((svgNode) => svgNode.remove());
-  const oldErrors = containerElement.querySelectorAll(
-    "div[data-mermaid-error]",
+  // Remove previously rendered diagrams to prevent duplication on re-render.
+  const oldDiagrams = containerElement.querySelectorAll(
+    ".mermaid-diagram-container",
   );
-  oldErrors.forEach((errorNode) => errorNode.remove());
+  oldDiagrams.forEach((diagramNode) => diagramNode.remove());
 
+  // Reset the 'processed' flag on the original code blocks to allow re-rendering.
   const processedBlocks = containerElement.querySelectorAll(
     "pre[data-mermaid-processed]",
   );
@@ -50,8 +39,6 @@ export async function renderMermaidBlocks(containerElement) {
     return;
   }
 
-  const parser = new DOMParser();
-
   // --- RENDER STEP ---
   for (const node of mermaidNodes) {
     if (node.getAttribute("data-mermaid-processed")) {
@@ -63,39 +50,17 @@ export async function renderMermaidBlocks(containerElement) {
       continue;
     }
 
-    const mermaidId = generateMermaidId();
-    const mermaidInternalId = `d${mermaidId}`;
+    // Create a div to mount the Vue component into
+    const mountPoint = document.createElement("div");
+    node.parentNode.insertBefore(mountPoint, node);
+    node.style.display = "none"; // Hide the raw code block
 
-    try {
-      const { svg } = await mermaid.render(mermaidInternalId, diagramText);
-      const svgContainer = document.createElement("div");
-      svgContainer.setAttribute("data-mermaid-svg-id", mermaidId);
+    // Mount the Vue component
+    const app = createApp(InteractiveMermaid, {
+      diagramText: diagramText,
+    });
+    app.mount(mountPoint);
 
-      const svgDoc = parser.parseFromString(svg, "image/svg+xml");
-      const svgElement = svgDoc.documentElement;
-      svgContainer.appendChild(svgElement);
-
-      node.parentNode.insertBefore(svgContainer, node);
-      node.style.display = "none";
-    } catch (error) {
-      console.error("Failed to render Mermaid diagram:", error);
-
-      const errorContainer = document.createElement("div");
-      errorContainer.setAttribute("data-mermaid-error", "true");
-      errorContainer.style.color = "red";
-      errorContainer.style.padding = "10px";
-      errorContainer.style.border = "1px solid red";
-      errorContainer.style.borderRadius = "4px";
-      errorContainer.textContent = `Error rendering Mermaid diagram: ${error.message}`;
-      node.parentNode.insertBefore(errorContainer, node);
-      node.style.display = "none";
-
-      const mermaidErrorSvg = document.getElementById(mermaidInternalId);
-      if (mermaidErrorSvg) {
-        mermaidErrorSvg.remove();
-      }
-    } finally {
-      node.setAttribute("data-mermaid-processed", "true");
-    }
+    node.setAttribute("data-mermaid-processed", "true");
   }
 }
