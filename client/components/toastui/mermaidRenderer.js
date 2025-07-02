@@ -2,11 +2,7 @@
 import { createApp } from "vue";
 import InteractiveMermaid from "./InteractiveMermaid.vue";
 
-// This function is now effectively a no-op at this level. The component handles its own theme.
-// It's kept for now to avoid breaking calls from the editor/viewer, but can be removed later.
-export function reinitializeMermaidTheme(theme) {
-  // Intentionally empty.
-}
+const diagramAppMap = new WeakMap();
 
 /**
  * Finds all explicitly marked Mermaid code blocks and renders them with interactive controls.
@@ -23,8 +19,9 @@ export async function renderMermaidBlocks(containerElement) {
     ".mermaid-diagram-container",
   );
   oldDiagrams.forEach((diagramNode) => {
-    if (diagramNode.__vue_app) {
-      diagramNode.__vue_app.unmount();
+    if (diagramAppMap.has(diagramNode)) {
+      diagramAppMap.get(diagramNode).unmount();
+      diagramAppMap.delete(diagramNode);
     }
     diagramNode.remove();
   });
@@ -65,7 +62,7 @@ export async function renderMermaidBlocks(containerElement) {
       diagramText: diagramText,
     });
     app.mount(mountPoint);
-    mountPoint.__vue_app = app;
+    diagramAppMap.set(mountPoint, app); // Use the WeakMap
 
     node.setAttribute("data-mermaid-processed", "true");
   }

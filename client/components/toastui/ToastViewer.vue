@@ -4,7 +4,7 @@
 
 <script setup>
 import Viewer from "@toast-ui/editor/dist/toastui-editor-viewer";
-import { onMounted, ref, nextTick, watch } from "vue";
+import { onMounted, ref, nextTick, watch, onUnmounted } from "vue";
 import baseOptions from "./baseOptions.js";
 import extendedAutolinks from "./extendedAutolinks.js";
 import { renderMermaidBlocks } from "./mermaidRenderer.js";
@@ -39,6 +39,12 @@ const createOrUpdateViewer = () => {
 onMounted(createOrUpdateViewer);
 
 watch(() => props.initialValue, createOrUpdateViewer);
+
+onUnmounted(() => {
+  if (viewerInstance) {
+    viewerInstance.destroy();
+  }
+});
 </script>
 
 <style>
