@@ -1,40 +1,27 @@
 // client/components/toastui/mermaidRenderer.js
-import mermaid from "mermaid";
+import { onMounted, onUnmounted, nextTick } from "vue";
+import { createApp } from "vue";
+import InteractiveMermaid from "./InteractiveMermaid.vue";
 
-let mermaidIdCounter = 0;
-function generateMermaidId() {
-  return `mermaid-svg-${Date.now()}-${mermaidIdCounter++}`;
-}
-
-mermaid.initialize({
-  startOnLoad: false,
-  securityLevel: "strict",
-});
-
-export function reinitializeMermaidTheme(theme) {
-  mermaid.initialize({
-    startOnLoad: false,
-    securityLevel: "strict",
-    theme: theme,
-  });
-}
+const componentInstanceMap = new WeakMap();
+const WRAPPER_CLASS = "mermaid-component-wrapper";
 
 /**
- * Finds all explicitly marked Mermaid code blocks and renders them.
- * @param {HTMLElement} containerElement The parent element to search within.
+ * Cleans up any previously rendered Mermaid Vue components within a given container.
+ * This is crucial for preventing state leakage when navigating between notes.
+ * @param {HTMLElement} containerElement The parent element to clean up.
  */
-export async function renderMermaidBlocks(containerElement) {
-  if (!containerElement) {
-    return;
-  }
+export function cleanupMermaidRenders(containerElement) {
+  if (!containerElement) return;
 
-  // --- CLEANUP STEP ---
-  const oldSvgs = containerElement.querySelectorAll("div[data-mermaid-svg-id]");
-  oldSvgs.forEach((svgNode) => svgNode.remove());
-  const oldErrors = containerElement.querySelectorAll(
-    "div[data-mermaid-error]",
-  );
-  oldErrors.forEach((errorNode) => errorNode.remove());
+  const oldWrappers = containerElement.querySelectorAll(`.${WRAPPER_CLASS}`);
+  oldWrappers.forEach((wrapperNode) => {
+    if (componentInstanceMap.has(wrapperNode)) {
+      componentInstanceMap.get(wrapperNode).unmount();
+      componentInstanceMap.delete(wrapperNode);
+    }
+    wrapperNode.remove();
+  });
 
   const processedBlocks = containerElement.querySelectorAll(
     "pre[data-mermaid-processed]",
@@ -43,16 +30,22 @@ export async function renderMermaidBlocks(containerElement) {
     block.removeAttribute("data-mermaid-processed");
     block.style.display = "";
   });
+}
 
-  // --- SELECTION STEP ---
+/**
+ * Finds all explicitly marked Mermaid code blocks and renders them with interactive controls.
+ * @param {HTMLElement} containerElement The parent element to search within.
+ */
+export async function renderMermaidBlocks(containerElement) {
+  if (!containerElement) return;
+
+  cleanupMermaidRenders(containerElement);
+
   const mermaidNodes = containerElement.querySelectorAll("pre.lang-mermaid");
   if (mermaidNodes.length === 0) {
     return;
   }
 
-  const parser = new DOMParser();
-
-  // --- RENDER STEP ---
   for (const node of mermaidNodes) {
     if (node.getAttribute("data-mermaid-processed")) {
       continue;
@@ -63,39 +56,43 @@ export async function renderMermaidBlocks(containerElement) {
       continue;
     }
 
-    const mermaidId = generateMermaidId();
-    const mermaidInternalId = `d${mermaidId}`;
+    const mountPoint = document.createElement("div");
+    mountPoint.className = WRAPPER_CLASS;
+    node.parentNode.insertBefore(mountPoint, node);
+    node.style.display = "none";
 
-    try {
-      const { svg } = await mermaid.render(mermaidInternalId, diagramText);
-      const svgContainer = document.createElement("div");
-      svgContainer.setAttribute("data-mermaid-svg-id", mermaidId);
+    const app = createApp(InteractiveMermaid, {
+      diagramText: diagramText,
+    });
+    app.mount(mountPoint);
 
-      const svgDoc = parser.parseFromString(svg, "image/svg+xml");
-      const svgElement = svgDoc.documentElement;
-      svgContainer.appendChild(svgElement);
+    componentInstanceMap.set(mountPoint, app);
 
-      node.parentNode.insertBefore(svgContainer, node);
-      node.style.display = "none";
-    } catch (error) {
-      console.error("Failed to render Mermaid diagram:", error);
-
-      const errorContainer = document.createElement("div");
-      errorContainer.setAttribute("data-mermaid-error", "true");
-      errorContainer.style.color = "red";
-      errorContainer.style.padding = "10px";
-      errorContainer.style.border = "1px solid red";
-      errorContainer.style.borderRadius = "4px";
-      errorContainer.textContent = `Error rendering Mermaid diagram: ${error.message}`;
-      node.parentNode.insertBefore(errorContainer, node);
-      node.style.display = "none";
-
-      const mermaidErrorSvg = document.getElementById(mermaidInternalId);
-      if (mermaidErrorSvg) {
-        mermaidErrorSvg.remove();
-      }
-    } finally {
-      node.setAttribute("data-mermaid-processed", "true");
-    }
+    node.setAttribute("data-mermaid-processed", "true");
   }
+}
+
+/**
+ * A composable to manage the lifecycle of Mermaid diagrams within a ToastUI component.
+ * @param {import('vue').Ref<HTMLElement>} elementRef - The ref pointing to the container element.
+ */
+export function useMermaidRenderer(elementRef) {
+  const render = () => {
+    nextTick(() => {
+      if (elementRef.value) {
+        renderMermaidBlocks(elementRef.value);
+      }
+    });
+  };
+
+  const cleanup = () => {
+    if (elementRef.value) {
+      cleanupMermaidRenders(elementRef.value);
+    }
+  };
+
+  onMounted(render);
+  onUnmounted(cleanup);
+
+  return { render, cleanup };
 }
