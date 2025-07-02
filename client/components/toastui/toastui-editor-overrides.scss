@@ -282,13 +282,12 @@
 .toastui-editor-contents th p {
   color: rgb(var(--theme-text));
 }
-
 /*
 * Mermaid Diagram Interactive Controls
 */
 
 .mermaid-diagram-container {
-  @apply relative flex h-full min-h-[150px] w-full items-center justify-center overflow-hidden rounded border bg-theme-background-elevated p-4 transition-colors;
+  @apply relative flex h-full min-h-[150px] w-full items-center justify-center rounded border bg-theme-background-elevated p-4 transition-colors;
 
   &.has-error {
     @apply border-theme-danger;
@@ -299,11 +298,34 @@
   }
 }
 
+/* This new wrapper handles the scrolling */
+.mermaid-scroll-wrapper {
+  @apply h-full w-full overflow-auto;
+}
+
 .mermaid-render-target {
-  @apply flex h-full w-full items-center justify-center;
-  transition: transform 0.1s linear; /* Smooth panning */
+  /* Let the container grow with the scaled content */
+  transition: transform 0.2s ease-in-out;
+
+  /* Center the SVG inside this target using Grid */
+  @apply grid h-full w-full place-items-center;
+
   svg {
-    @apply mx-auto block max-h-full max-w-full;
+    /*
+      THE FINAL, CORRECT FIX:
+      1. max-width/max-height ensure the SVG never overflows its container by default.
+         This prevents unwanted scrollbars on initial render for large diagrams.
+      2. When the user scales the parent (.mermaid-render-target), this SVG scales with it.
+         If the scaled size exceeds the .mermaid-scroll-wrapper, scrollbars will appear as intended.
+    */
+    max-width: 100%;
+    max-height: 100%;
+
+    /* Allow text selection */
+    user-select: text;
+    -webkit-user-select: text;
+    -moz-user-select: text;
+    -ms-user-select: text;
   }
 }
 

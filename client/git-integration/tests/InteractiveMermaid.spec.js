@@ -10,7 +10,6 @@ vi.mock("mermaid", () => ({
   default: {
     initialize: vi.fn(),
     render: vi.fn().mockImplementation((id, text, container) => {
-      // The mock now simulates Mermaid's behavior of rendering into the provided container.
       if (container) {
         container.innerHTML = `<svg id="${id}" class="mermaid-svg">${text}</svg>`;
       }
@@ -58,7 +57,6 @@ describe("InteractiveMermaid.vue", () => {
       await wrapper.vm.$nextTick();
 
       expect(mermaid.render).toHaveBeenCalledOnce();
-      // FIX: The test now correctly expects a third argument of type HTMLElement.
       expect(mermaid.render).toHaveBeenCalledWith(
         expect.any(String),
         "graph TD; A-->B;",
@@ -81,7 +79,6 @@ describe("InteractiveMermaid.vue", () => {
       wrapper = mountComponent();
       await wrapper.vm.$nextTick();
 
-      // FIX: The selector is updated to find the new error element.
       const errorBox = wrapper.find("pre.mermaid-error-text");
       expect(errorBox.exists()).toBe(true);
       expect(errorBox.text()).toContain(errorMessage);
@@ -98,7 +95,6 @@ describe("InteractiveMermaid.vue", () => {
       await wrapper.vm.$nextTick();
 
       expect(mermaid.render).toHaveBeenCalledTimes(2);
-      // FIX: The assertion is updated for the new call signature.
       expect(mermaid.render).toHaveBeenCalledWith(
         expect.any(String),
         "graph LR; C-->D;",
@@ -141,29 +137,22 @@ describe("InteractiveMermaid.vue", () => {
     });
 
     it("resets view when reset button is clicked", async () => {
+      // Simulate zooming in first
       await wrapper.find('button[title="Zoom In"]').trigger("click");
-      await wrapper
-        .find(".mermaid-diagram-container")
-        .trigger("mousedown", { clientX: 100, clientY: 100 });
-      await wrapper
-        .find(".mermaid-diagram-container")
-        .trigger("mousemove", { clientX: 150, clientY: 150 });
-
       expect(wrapper.vm.scale).not.toBe(1);
-      expect(wrapper.vm.panX).not.toBe(0);
 
+      // Now reset
       await wrapper.find('button[title="Reset View"]').trigger("click");
 
+      // FIX: Only check the scale property, as panX and panY are removed.
       expect(wrapper.vm.scale).toBe(1);
-      expect(wrapper.vm.panX).toBe(0);
-      expect(wrapper.vm.panY).toBe(0);
     });
 
     it("zooms with ctrl/meta key + wheel, but not without", async () => {
       const initialScale = wrapper.vm.scale;
-      const containerElement = wrapper.find(
-        ".mermaid-diagram-container",
-      ).element;
+      // FIX: Find the correct element that listens to the wheel event.
+      const scrollWrapper = wrapper.find(".mermaid-scroll-wrapper");
+      const containerElement = scrollWrapper.element;
 
       const normalWheelEvent = new WheelEvent("wheel", {
         bubbles: true,
@@ -173,7 +162,7 @@ describe("InteractiveMermaid.vue", () => {
       containerElement.dispatchEvent(normalWheelEvent);
       await wrapper.vm.$nextTick();
 
-      expect(wrapper.vm.scale).toBe(initialScale);
+      expect(wrapper.vm.scale).toBe(initialScale); // Should not zoom
 
       const ctrlWheelEvent = new WheelEvent("wheel", {
         bubbles: true,
@@ -183,7 +172,7 @@ describe("InteractiveMermaid.vue", () => {
       containerElement.dispatchEvent(ctrlWheelEvent);
       await wrapper.vm.$nextTick();
 
-      expect(wrapper.vm.scale).toBeGreaterThan(initialScale);
+      expect(wrapper.vm.scale).toBeGreaterThan(initialScale); // Should zoom
     });
   });
 
