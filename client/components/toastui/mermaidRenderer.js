@@ -2,28 +2,27 @@
 import { createApp } from "vue";
 import InteractiveMermaid from "./InteractiveMermaid.vue";
 
-const diagramAppMap = new WeakMap();
+const componentInstanceMap = new WeakMap();
+const WRAPPER_CLASS = "mermaid-component-wrapper";
 
 /**
- * Finds all explicitly marked Mermaid code blocks and renders them with interactive controls.
- * @param {HTMLElement} containerElement The parent element to search within.
+ * Cleans up any previously rendered Mermaid Vue components within a given container.
+ * This is crucial for preventing state leakage when navigating between notes.
+ * @param {HTMLElement} containerElement The parent element to clean up.
  */
-export async function renderMermaidBlocks(containerElement) {
-  if (!containerElement) {
-    return;
-  }
+export function cleanupMermaidRenders(containerElement) {
+  if (!containerElement) return;
 
-  // --- CLEANUP STEP ---
-  // Remove previously rendered diagrams to prevent duplication on re-render.
-  const oldDiagrams = containerElement.querySelectorAll(
-    ".mermaid-diagram-container",
-  );
-  oldDiagrams.forEach((diagramNode) => {
-    if (diagramAppMap.has(diagramNode)) {
-      diagramAppMap.get(diagramNode).unmount();
-      diagramAppMap.delete(diagramNode);
+  // Find all previously created component wrappers.
+  const oldWrappers = containerElement.querySelectorAll(`.${WRAPPER_CLASS}`);
+  oldWrappers.forEach((wrapperNode) => {
+    // Unmount the Vue app instance associated with this wrapper.
+    if (componentInstanceMap.has(wrapperNode)) {
+      componentInstanceMap.get(wrapperNode).unmount();
+      componentInstanceMap.delete(wrapperNode);
     }
-    diagramNode.remove();
+    // Remove the wrapper div from the DOM.
+    wrapperNode.remove();
   });
 
   // Reset the 'processed' flag on the original code blocks to allow re-rendering.
@@ -34,6 +33,18 @@ export async function renderMermaidBlocks(containerElement) {
     block.removeAttribute("data-mermaid-processed");
     block.style.display = "";
   });
+}
+
+/**
+ * Finds all explicitly marked Mermaid code blocks and renders them with interactive controls.
+ * @param {HTMLElement} containerElement The parent element to search within.
+ */
+export async function renderMermaidBlocks(containerElement) {
+  if (!containerElement) return;
+
+  // --- CLEANUP STEP ---
+  // Always clean up previous renders before creating new ones.
+  cleanupMermaidRenders(containerElement);
 
   // --- SELECTION STEP ---
   const mermaidNodes = containerElement.querySelectorAll("pre.lang-mermaid");
@@ -52,17 +63,20 @@ export async function renderMermaidBlocks(containerElement) {
       continue;
     }
 
-    // Create a div to mount the Vue component into
+    // Create a dedicated wrapper div to mount the Vue component into.
     const mountPoint = document.createElement("div");
+    mountPoint.className = WRAPPER_CLASS;
     node.parentNode.insertBefore(mountPoint, node);
     node.style.display = "none"; // Hide the raw code block
 
-    // Mount the Vue component
+    // Create and mount the Vue component.
     const app = createApp(InteractiveMermaid, {
       diagramText: diagramText,
     });
     app.mount(mountPoint);
-    diagramAppMap.set(mountPoint, app); // Use the WeakMap
+
+    // Store the app instance with its mount point as the key.
+    componentInstanceMap.set(mountPoint, app);
 
     node.setAttribute("data-mermaid-processed", "true");
   }

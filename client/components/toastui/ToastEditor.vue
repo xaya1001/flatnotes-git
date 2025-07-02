@@ -6,7 +6,10 @@
 import Editor from "@toast-ui/editor";
 import { onMounted, onUnmounted, ref, nextTick } from "vue";
 import baseOptions from "./baseOptions.js";
-import { renderMermaidBlocks } from "./mermaidRenderer.js";
+import {
+  renderMermaidBlocks,
+  cleanupMermaidRenders,
+} from "./mermaidRenderer.js";
 
 const props = defineProps({
   initialValue: String,
@@ -37,7 +40,9 @@ onMounted(() => {
     events: {
       change: () => {
         emit("change");
-        nextTick(runMermaidRender); // Re-render mermaid on content change
+        // Re-render is needed on 'change' to support live updates in WYSIWYG mode.
+        // For Markdown mode, the preview pane is handled by `afterPreviewRender`.
+        nextTick(runMermaidRender);
       },
       keydown: (_, event) => {
         emit("keydown", event);
@@ -55,7 +60,15 @@ onMounted(() => {
   nextTick(runMermaidRender);
 });
 
-// No onUnmounted needed anymore as there are no global listeners.
+onUnmounted(() => {
+  // CRITICAL FIX: Clean up any mounted Mermaid components when editor is destroyed.
+  if (editorElement.value) {
+    cleanupMermaidRenders(editorElement.value);
+  }
+  if (toastEditor) {
+    toastEditor.destroy();
+  }
+});
 
 function getMarkdown() {
   return toastEditor.getMarkdown();

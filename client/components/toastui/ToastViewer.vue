@@ -7,7 +7,10 @@ import Viewer from "@toast-ui/editor/dist/toastui-editor-viewer";
 import { onMounted, ref, nextTick, watch, onUnmounted } from "vue";
 import baseOptions from "./baseOptions.js";
 import extendedAutolinks from "./extendedAutolinks.js";
-import { renderMermaidBlocks } from "./mermaidRenderer.js";
+import {
+  renderMermaidBlocks,
+  cleanupMermaidRenders,
+} from "./mermaidRenderer.js";
 
 const props = defineProps({
   initialValue: String,
@@ -16,19 +19,26 @@ const props = defineProps({
 const viewerElement = ref();
 let viewerInstance;
 
-const createOrUpdateViewer = () => {
+const destroyViewer = () => {
+  if (viewerElement.value) {
+    cleanupMermaidRenders(viewerElement.value);
+  }
+  if (viewerInstance) {
+    viewerInstance.destroy();
+    viewerInstance = null;
+  }
+};
+
+const createViewer = () => {
   if (!viewerElement.value) return;
 
-  if (viewerInstance) {
-    viewerInstance.setMarkdown(props.initialValue || "");
-  } else {
-    viewerInstance = new Viewer({
-      ...baseOptions,
-      extendedAutolinks,
-      el: viewerElement.value,
-      initialValue: props.initialValue,
-    });
-  }
+  viewerInstance = new Viewer({
+    ...baseOptions,
+    extendedAutolinks,
+    el: viewerElement.value,
+    initialValue: props.initialValue,
+  });
+
   nextTick(() => {
     if (viewerElement.value) {
       renderMermaidBlocks(viewerElement.value);
@@ -36,15 +46,18 @@ const createOrUpdateViewer = () => {
   });
 };
 
-onMounted(createOrUpdateViewer);
+onMounted(createViewer);
 
-watch(() => props.initialValue, createOrUpdateViewer);
+// FINAL FIX: Always destroy and recreate the viewer on content change to prevent state leaks.
+watch(
+  () => props.initialValue,
+  () => {
+    destroyViewer();
+    createViewer();
+  },
+);
 
-onUnmounted(() => {
-  if (viewerInstance) {
-    viewerInstance.destroy();
-  }
-});
+onUnmounted(destroyViewer);
 </script>
 
 <style>

@@ -288,74 +288,36 @@
 */
 
 .mermaid-diagram-container {
-  position: relative;
-  overflow: hidden; /* This is crucial for containing the panned SVG */
-  cursor: grab;
-  border: 1px solid rgb(var(--theme-border));
-  border-radius: 4px;
-  padding: 1rem;
-  background-color: rgb(var(--theme-background-elevated));
+  @apply relative flex h-full min-h-[150px] w-full items-center justify-center overflow-hidden rounded border bg-theme-background-elevated p-4 transition-colors;
+
+  &.has-error {
+    @apply border-theme-danger;
+  }
 
   &:hover .mermaid-controls {
-    opacity: 1;
+    @apply opacity-100;
   }
 }
 
-.mermaid-svg-container {
-  width: 100%;
-  height: 100%;
+.mermaid-render-target {
+  @apply flex h-full w-full items-center justify-center;
   transition: transform 0.1s linear; /* Smooth panning */
   svg {
-    display: block;
-    margin: auto; /* Center the diagram initially */
+    @apply mx-auto block max-h-full max-w-full;
   }
 }
 
 .mermaid-controls {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  z-index: 10;
-  display: flex;
-  gap: 4px;
-  background-color: rgba(var(--theme-background), 0.8);
-  padding: 4px;
-  border-radius: 4px;
-  border: 1px solid rgb(var(--theme-border));
-  opacity: 0;
-  transition: opacity 0.2s ease-in-out;
+  @apply absolute right-2 top-2 z-10 flex items-center space-x-1 opacity-0 transition-opacity duration-200;
 
   button {
-    background-color: transparent;
-    color: rgb(var(--theme-text-muted));
-    border: none;
-    border-radius: 4px; /* A slightly softer radius */
-    cursor: pointer;
-    width: 28px;
-    height: 28px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.2s ease-in-out; /* Smooth transition for hover */
-
-    &:hover {
-      background-color: rgb(var(--theme-border));
-      color: rgb(var(--theme-text));
-    }
+    @apply flex h-8 w-8 items-center justify-center rounded-full bg-theme-background/80 text-theme-text-muted transition-colors hover:bg-theme-border hover:text-theme-text disabled:cursor-not-allowed disabled:opacity-50;
   }
 }
 
-.mermaid-error-box {
-  color: #c7254e; /* A more standard error red */
-  background-color: #f9f2f4;
-  border: 1px solid #c7254e;
-  padding: 10px 15px;
-  border-radius: 4px;
-  font-family: monospace;
-}
-
-.dark .mermaid-error-box {
-  background-color: #2b1c1c;
-  color: #ff8a8a;
-  border-color: #ff8a8a;
+.mermaid-error-text {
+  @apply whitespace-pre-wrap p-2 text-left text-xs text-theme-danger;
+  font-family: Consolas, "Lucida Console", Monaco, "Andale Mono", monospace;
+  max-height: 100%;
+  overflow-y: auto;
 }
