@@ -4,25 +4,52 @@
 
 <script setup>
 import Viewer from "@toast-ui/editor/dist/toastui-editor-viewer";
-import { onMounted, ref } from "vue";
-
+import { onMounted, ref, watch, onUnmounted } from "vue";
 import baseOptions from "./baseOptions.js";
 import extendedAutolinks from "./extendedAutolinks.js";
+import { useMermaidRenderer } from "./mermaidRenderer.js";
 
 const props = defineProps({
   initialValue: String,
 });
 
 const viewerElement = ref();
+let viewerInstance;
 
-onMounted(() => {
-  new Viewer({
+const { render: runMermaidRender, cleanup } = useMermaidRenderer(viewerElement);
+
+const destroyViewer = () => {
+  cleanup();
+  if (viewerInstance) {
+    viewerInstance.destroy();
+    viewerInstance = null;
+  }
+};
+
+const createViewer = () => {
+  if (!viewerElement.value) return;
+
+  viewerInstance = new Viewer({
     ...baseOptions,
     extendedAutolinks,
     el: viewerElement.value,
     initialValue: props.initialValue,
   });
-});
+
+  runMermaidRender();
+};
+
+onMounted(createViewer);
+
+watch(
+  () => props.initialValue,
+  () => {
+    destroyViewer();
+    createViewer();
+  },
+);
+
+onUnmounted(destroyViewer);
 </script>
 
 <style>
