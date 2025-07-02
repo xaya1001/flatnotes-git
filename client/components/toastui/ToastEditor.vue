@@ -5,13 +5,8 @@
 <script setup>
 import Editor from "@toast-ui/editor";
 import { onMounted, onUnmounted, ref, nextTick } from "vue";
-
-import eventBus from "../../git-integration/services/eventBus.js";
 import baseOptions from "./baseOptions.js";
-import {
-  renderMermaidBlocks,
-  reinitializeMermaidTheme,
-} from "./mermaidRenderer.js";
+import { renderMermaidBlocks } from "./mermaidRenderer.js";
 
 const props = defineProps({
   initialValue: String,
@@ -33,20 +28,7 @@ const runMermaidRender = () => {
   }
 };
 
-const handleThemeChange = () => {
-  const newTheme = document.body.classList.contains("dark")
-    ? "dark"
-    : "default";
-  reinitializeMermaidTheme(newTheme);
-  runMermaidRender();
-};
-
 onMounted(() => {
-  const initialTheme = document.body.classList.contains("dark")
-    ? "dark"
-    : "default";
-  reinitializeMermaidTheme(initialTheme);
-
   toastEditor = new Editor({
     ...baseOptions,
     el: editorElement.value,
@@ -55,6 +37,7 @@ onMounted(() => {
     events: {
       change: () => {
         emit("change");
+        nextTick(runMermaidRender); // Re-render mermaid on content change
       },
       keydown: (_, event) => {
         emit("keydown", event);
@@ -70,13 +53,9 @@ onMounted(() => {
   });
 
   nextTick(runMermaidRender);
-
-  eventBus.on("theme-changed", handleThemeChange);
 });
 
-onUnmounted(() => {
-  eventBus.off("theme-changed", handleThemeChange);
-});
+// No onUnmounted needed anymore as there are no global listeners.
 
 function getMarkdown() {
   return toastEditor.getMarkdown();

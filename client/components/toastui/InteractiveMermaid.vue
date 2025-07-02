@@ -42,10 +42,6 @@ import {
   mdiRestore,
   mdiCheck,
 } from "@mdi/js";
-import eventBus from "../../git-integration/services/eventBus";
-
-const ZOOM_BUTTON_FACTOR = 1.2;
-const ZOOM_WHEEL_FACTOR = 1.1;
 
 const props = defineProps({
   diagramText: {
@@ -63,19 +59,26 @@ const startX = ref(0);
 const startY = ref(0);
 const isCopied = ref(false);
 const cursorStyle = ref("grab");
+let themeObserver = null;
+
+const ZOOM_BUTTON_FACTOR = 1.2;
+const ZOOM_WHEEL_FACTOR = 1.1;
 
 const transformStyle = computed(() => {
   return `transform: translate(${panX.value}px, ${panY.value}px) scale(${scale.value});`;
 });
 
-// This function ONLY renders the SVG. It assumes Mermaid is already configured.
-const renderDiagram = async () => {
+const initializeAndRender = async (theme) => {
   if (!svgContainer.value || !props.diagramText.trim()) return;
 
+  mermaid.initialize({
+    startOnLoad: false,
+    securityLevel: "strict",
+    theme: theme,
+  });
+
   svgContainer.value.innerHTML = ""; // Clean previous render
-  const mermaidInternalId = `d${Date.now()}-${Math.random()
-    .toString(36)
-    .substring(2, 11)}`;
+  const mermaidInternalId = `d${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
 
   try {
     const { svg } = await mermaid.render(mermaidInternalId, props.diagramText);
@@ -89,30 +92,48 @@ const renderDiagram = async () => {
   }
 };
 
-// This function ONLY handles theme changes by re-initializing and re-rendering.
-const handleThemeChange = () => {
-  const currentTheme = document.body.classList.contains("dark")
-    ? "dark"
-    : "default";
-  mermaid.initialize({
-    startOnLoad: false,
-    securityLevel: "strict",
-    theme: currentTheme,
-  });
-  renderDiagram();
+const handleThemeChange = (newTheme) => {
+  initializeAndRender(newTheme);
 };
 
 onMounted(() => {
-  // On mount, configure the theme and render for the first time.
-  handleThemeChange();
-  eventBus.on("theme-changed", handleThemeChange);
+  const initialTheme = document.body.classList.contains("dark")
+    ? "dark"
+    : "default";
+  initializeAndRender(initialTheme);
+
+  // Set up the observer to watch for theme changes on the body
+  themeObserver = new MutationObserver((mutationsList) => {
+    for (const mutation of mutationsList) {
+      if (
+        mutation.type === "attributes" &&
+        mutation.attributeName === "class"
+      ) {
+        const newTheme = document.body.classList.contains("dark")
+          ? "dark"
+          : "default";
+        handleThemeChange(newTheme);
+      }
+    }
+  });
+
+  themeObserver.observe(document.body, { attributes: true });
 });
 
-// When the diagram text changes, just re-render, don't re-initialize the theme.
-watch(() => props.diagramText, renderDiagram);
+watch(
+  () => props.diagramText,
+  () => {
+    const currentTheme = document.body.classList.contains("dark")
+      ? "dark"
+      : "default";
+    initializeAndRender(currentTheme);
+  },
+);
 
 onUnmounted(() => {
-  eventBus.off("theme-changed", handleThemeChange);
+  if (themeObserver) {
+    themeObserver.disconnect();
+  }
 });
 
 // --- User Interaction functions ---
@@ -171,8 +192,6 @@ const copySource = async () => {
     }, 1500);
   } catch (err) {
     console.error("Failed to copy diagram source:", err);
-    // Optional: You could add a toast notification here to inform the user.
-    // For now, logging the error is sufficient.
   }
 };
 </script>
