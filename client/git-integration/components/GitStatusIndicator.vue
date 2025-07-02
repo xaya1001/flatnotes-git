@@ -82,7 +82,7 @@
 </template>
 
 <script setup>
-import { computed, ref, defineExpose } from "vue";
+import { computed, ref } from "vue";
 import { useStatusStore } from "../stores/statusStore";
 import { usePanelUiStore } from "../stores/panelUiStore";
 import SvgIcon from "@jamescoyle/vue-icon";
