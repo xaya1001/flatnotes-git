@@ -50,6 +50,11 @@ describe("InteractiveMermaid.vue", () => {
     document.body.className = "";
   });
 
+  // ADD THIS HOOK
+  afterEach(() => {
+    document.body.className = "";
+  });
+
   describe("Rendering", () => {
     it("renders the Mermaid SVG when mounted", async () => {
       wrapper = mountComponent();
@@ -208,27 +213,39 @@ describe("InteractiveMermaid.vue", () => {
       );
     });
 
-    it("re-initializes and re-renders when a theme-changed event is emitted", async () => {
-      const eventBus = (await import("../../git-integration/services/eventBus"))
-        .default;
+    it("re-initializes and re-renders when the body class changes", async () => {
+      // 1. Arrange: Mount the component.
+      const wrapper = mountComponent();
+      await wrapper.vm.$nextTick(); // Wait for initial render.
 
-      wrapper = mountComponent();
-      await wrapper.vm.$nextTick();
-
+      // Initial state assertion
       expect(mermaid.initialize).toHaveBeenCalledTimes(1);
+      expect(mermaid.initialize).toHaveBeenLastCalledWith(
+        expect.objectContaining({ theme: "default" }),
+      );
       expect(mermaid.render).toHaveBeenCalledTimes(1);
 
+      // 2. Act: Simulate the theme change by modifying the DOM.
       document.body.classList.add("dark");
-      eventBus.emit("theme-changed");
-      await wrapper.vm.$nextTick();
+      await wrapper.vm.$nextTick(); // Wait for the MutationObserver and Vue to react.
 
+      // 3. Assert: Verify the re-initialization and re-render with the new theme.
       expect(mermaid.initialize).toHaveBeenCalledTimes(2);
       expect(mermaid.initialize).toHaveBeenLastCalledWith(
-        expect.objectContaining({
-          theme: "dark",
-        }),
+        expect.objectContaining({ theme: "dark" }),
       );
       expect(mermaid.render).toHaveBeenCalledTimes(2);
+
+      // 4. Act again: Revert the theme.
+      document.body.classList.remove("dark");
+      await wrapper.vm.$nextTick();
+
+      // 5. Assert again: Verify it switches back correctly.
+      expect(mermaid.initialize).toHaveBeenCalledTimes(3);
+      expect(mermaid.initialize).toHaveBeenLastCalledWith(
+        expect.objectContaining({ theme: "default" }),
+      );
+      expect(mermaid.render).toHaveBeenCalledTimes(3);
     });
   });
 });
