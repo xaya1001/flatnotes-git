@@ -4,9 +4,9 @@
 
 <script setup>
 import Editor from "@toast-ui/editor";
-import { onMounted, ref } from "vue";
-
+import { onMounted, onUnmounted, ref } from "vue";
 import baseOptions from "./baseOptions.js";
+import { useMermaidRenderer } from "./mermaidRenderer.js";
 
 const props = defineProps({
   initialValue: String,
@@ -22,6 +22,8 @@ const emit = defineEmits(["change", "keydown"]);
 const editorElement = ref();
 let toastEditor;
 
+const { render: runMermaidRender } = useMermaidRenderer(editorElement);
+
 onMounted(() => {
   toastEditor = new Editor({
     ...baseOptions,
@@ -31,15 +33,26 @@ onMounted(() => {
     events: {
       change: () => {
         emit("change");
+        runMermaidRender();
       },
       keydown: (_, event) => {
         emit("keydown", event);
+      },
+      afterPreviewRender: (html) => {
+        runMermaidRender();
+        return html;
       },
     },
     hooks: props.addImageBlobHook
       ? { addImageBlobHook: props.addImageBlobHook }
       : {},
   });
+});
+
+onUnmounted(() => {
+  if (toastEditor) {
+    toastEditor.destroy();
+  }
 });
 
 function getMarkdown() {
