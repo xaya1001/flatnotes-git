@@ -1,6 +1,7 @@
 <template>
   <div
     class="mermaid-diagram-container"
+    :style="{ cursor: cursorStyle }"
     @mousedown="startPan"
     @mousemove="pan"
     @mouseup="endPan"
@@ -43,6 +44,9 @@ import {
 } from "@mdi/js";
 import eventBus from "../../git-integration/services/eventBus";
 
+const ZOOM_BUTTON_FACTOR = 1.2;
+const ZOOM_WHEEL_FACTOR = 1.1;
+
 const props = defineProps({
   diagramText: {
     type: String,
@@ -58,6 +62,7 @@ const isPanning = ref(false);
 const startX = ref(0);
 const startY = ref(0);
 const isCopied = ref(false);
+const cursorStyle = ref("grab");
 
 const transformStyle = computed(() => {
   return `transform: translate(${panX.value}px, ${panY.value}px) scale(${scale.value});`;
@@ -70,7 +75,7 @@ const renderDiagram = async () => {
   svgContainer.value.innerHTML = ""; // Clean previous render
   const mermaidInternalId = `d${Date.now()}-${Math.random()
     .toString(36)
-    .substr(2, 9)}`;
+    .substring(2, 11)}`;
 
   try {
     const { svg } = await mermaid.render(mermaidInternalId, props.diagramText);
@@ -117,7 +122,7 @@ const startPan = (e) => {
   isPanning.value = true;
   startX.value = e.clientX - panX.value;
   startY.value = e.clientY - panY.value;
-  e.currentTarget.style.cursor = "grabbing";
+  cursorStyle.value = "grabbing";
 };
 
 const pan = (e) => {
@@ -129,23 +134,24 @@ const pan = (e) => {
 
 const endPan = (e) => {
   isPanning.value = false;
-  e.currentTarget.style.cursor = "grab";
+  cursorStyle.value = "grab";
 };
 
 const zoom = (e) => {
   if (e.ctrlKey || e.metaKey) {
     e.preventDefault();
-    const scaleAmount = e.deltaY > 0 ? 1 / 1.1 : 1.1;
+    const scaleAmount =
+      e.deltaY > 0 ? 1 / ZOOM_WHEEL_FACTOR : ZOOM_WHEEL_FACTOR;
     scale.value *= scaleAmount;
   }
 };
 
 const zoomIn = () => {
-  scale.value *= 1.2;
+  scale.value *= ZOOM_BUTTON_FACTOR;
 };
 
 const zoomOut = () => {
-  scale.value /= 1.2;
+  scale.value /= ZOOM_BUTTON_FACTOR;
 };
 
 const resetView = () => {
@@ -154,12 +160,19 @@ const resetView = () => {
   panY.value = 0;
 };
 
-const copySource = () => {
+const copySource = async () => {
   if (isCopied.value) return;
-  navigator.clipboard.writeText(props.diagramText);
-  isCopied.value = true;
-  setTimeout(() => {
-    isCopied.value = false;
-  }, 1500);
+
+  try {
+    await navigator.clipboard.writeText(props.diagramText);
+    isCopied.value = true;
+    setTimeout(() => {
+      isCopied.value = false;
+    }, 1500);
+  } catch (err) {
+    console.error("Failed to copy diagram source:", err);
+    // Optional: You could add a toast notification here to inform the user.
+    // For now, logging the error is sufficient.
+  }
 };
 </script>

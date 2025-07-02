@@ -22,7 +22,12 @@ export async function renderMermaidBlocks(containerElement) {
   const oldDiagrams = containerElement.querySelectorAll(
     ".mermaid-diagram-container",
   );
-  oldDiagrams.forEach((diagramNode) => diagramNode.remove());
+  oldDiagrams.forEach((diagramNode) => {
+    if (diagramNode.__vue_app) {
+      diagramNode.__vue_app.unmount();
+    }
+    diagramNode.remove();
+  });
 
   // Reset the 'processed' flag on the original code blocks to allow re-rendering.
   const processedBlocks = containerElement.querySelectorAll(
@@ -60,6 +65,7 @@ export async function renderMermaidBlocks(containerElement) {
       diagramText: diagramText,
     });
     app.mount(mountPoint);
+    mountPoint.__vue_app = app;
 
     node.setAttribute("data-mermaid-processed", "true");
   }
