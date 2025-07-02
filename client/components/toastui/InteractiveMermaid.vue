@@ -4,14 +4,24 @@
     class="mermaid-diagram-container"
     :class="{ 'has-error': !!errorMessage }"
   >
-    <!-- New wrapper for native scrolling -->
+    <!-- wrapper for native scrolling -->
     <div ref="scrollWrapper" class="mermaid-scroll-wrapper" @wheel="zoom">
       <!-- The target where the SVG or error message will be rendered -->
       <div
         ref="renderTarget"
         class="mermaid-render-target"
         :style="transformStyle"
-      ></div>
+      >
+        <!-- Use v-if/v-else-if for fully declarative rendering -->
+        <pre v-if="errorMessage" class="mermaid-error-text">{{
+          errorMessage
+        }}</pre>
+        <div
+          v-else-if="svgContent"
+          class="svg-wrapper"
+          v-html="svgContent"
+        ></div>
+      </div>
     </div>
 
     <!-- Controls are positioned relative to the main container, outside the scroll wrapper -->
@@ -53,10 +63,11 @@ const props = defineProps({
 });
 
 const renderTarget = ref(null);
-const scrollWrapper = ref(null); // Ref for the new scroll container
+const scrollWrapper = ref(null);
 const scale = ref(1);
 const isCopied = ref(false);
 const errorMessage = ref(null);
+const svgContent = ref("");
 let themeObserver = null;
 
 const ZOOM_BUTTON_FACTOR = 1.2;
@@ -69,8 +80,9 @@ const transformStyle = computed(() => {
 const initializeAndRender = async (theme) => {
   if (!renderTarget.value || !props.diagramText.trim()) return;
 
+  // Reset state refs
   errorMessage.value = null;
-  renderTarget.value.innerHTML = "";
+  svgContent.value = "";
 
   mermaid.initialize({
     startOnLoad: false,
@@ -93,14 +105,12 @@ const initializeAndRender = async (theme) => {
       props.diagramText,
       tempContainer,
     );
-    renderTarget.value.innerHTML = svg;
+    // On success, update the state ref. Let Vue handle the DOM.
+    svgContent.value = svg;
   } catch (error) {
     console.error("Failed to render Mermaid diagram:", error);
+    // On failure, update the error state ref.
     errorMessage.value = error.message;
-    const pre = document.createElement("pre");
-    pre.className = "mermaid-error-text";
-    pre.textContent = errorMessage.value;
-    renderTarget.value.appendChild(pre);
   } finally {
     if (tempContainer && document.body.contains(tempContainer)) {
       document.body.removeChild(tempContainer);
@@ -163,12 +173,11 @@ const zoomIn = () => {
 };
 
 const zoomOut = () => {
-  scale.value /= ZOOM_WHEEL_FACTOR;
+  scale.value /= ZOOM_BUTTON_FACTOR;
 };
 
 const resetView = () => {
   scale.value = 1;
-  // Reset scroll position on the scroll wrapper
   if (scrollWrapper.value) {
     scrollWrapper.value.scrollTop = 0;
     scrollWrapper.value.scrollLeft = 0;

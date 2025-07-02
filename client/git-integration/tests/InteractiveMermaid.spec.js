@@ -28,6 +28,10 @@ Object.assign(navigator, {
 });
 // --- End Mocking Area ---
 
+// Helper function to wait for all promises to resolve in the test environment.
+// This is crucial for testing components with async setup logic.
+const flushPromises = () => new Promise(setImmediate);
+
 describe("InteractiveMermaid.vue", () => {
   let wrapper;
 
@@ -54,7 +58,7 @@ describe("InteractiveMermaid.vue", () => {
   describe("Rendering", () => {
     it("renders the Mermaid SVG when mounted", async () => {
       wrapper = mountComponent();
-      await wrapper.vm.$nextTick();
+      await flushPromises();
 
       expect(mermaid.render).toHaveBeenCalledOnce();
       expect(mermaid.render).toHaveBeenCalledWith(
@@ -63,9 +67,13 @@ describe("InteractiveMermaid.vue", () => {
         expect.any(HTMLElement),
       );
 
-      const svgElement = wrapper.find("svg.mermaid-svg");
-      expect(svgElement.exists()).toBe(true);
-      expect(svgElement.text()).toBe("graph TD; A-->B;");
+      // Now that the state has been updated and Vue has rendered, we can find the element.
+      const svgWrapper = wrapper.find(".svg-wrapper");
+      expect(svgWrapper.exists()).toBe(true);
+      // Check the raw DOM because v-html content isn't part of the Vue component tree.
+      const svgElement = svgWrapper.element.querySelector("svg.mermaid-svg");
+      expect(svgElement).not.toBeNull();
+      expect(svgElement.textContent).toBe("graph TD; A-->B;");
     });
 
     it("displays an error message if Mermaid rendering fails", async () => {
@@ -77,7 +85,8 @@ describe("InteractiveMermaid.vue", () => {
       mermaid.render.mockRejectedValueOnce(new Error(errorMessage));
 
       wrapper = mountComponent();
-      await wrapper.vm.$nextTick();
+      // FIX: Wait for the async rejection and subsequent state update.
+      await flushPromises();
 
       const errorBox = wrapper.find("pre.mermaid-error-text");
       expect(errorBox.exists()).toBe(true);
@@ -88,11 +97,12 @@ describe("InteractiveMermaid.vue", () => {
 
     it("re-renders when the diagramText prop changes", async () => {
       wrapper = mountComponent();
-      await wrapper.vm.$nextTick();
+      await flushPromises();
       expect(mermaid.render).toHaveBeenCalledTimes(1);
 
+      // Act: change props
       await wrapper.setProps({ diagramText: "graph LR; C-->D;" });
-      await wrapper.vm.$nextTick();
+      await flushPromises();
 
       expect(mermaid.render).toHaveBeenCalledTimes(2);
       expect(mermaid.render).toHaveBeenCalledWith(
@@ -101,14 +111,19 @@ describe("InteractiveMermaid.vue", () => {
         expect.any(HTMLElement),
       );
 
-      const svgElement = wrapper.find("svg.mermaid-svg");
-      expect(svgElement.text()).toBe("graph LR; C-->D;");
+      const svgWrapper = wrapper.find(".svg-wrapper");
+      expect(svgWrapper.exists()).toBe(true);
+      const svgElement = svgWrapper.element.querySelector("svg.mermaid-svg");
+      expect(svgElement).not.toBeNull();
+      expect(svgElement.textContent).toBe("graph LR; C-->D;");
     });
   });
 
   describe("User Interaction", () => {
-    beforeEach(() => {
+    beforeEach(async () => {
       wrapper = mountComponent();
+      // Ensure component is rendered before each interaction test
+      await flushPromises();
     });
 
     it("copies the diagram source to the clipboard when copy button is clicked", async () => {
@@ -137,20 +152,16 @@ describe("InteractiveMermaid.vue", () => {
     });
 
     it("resets view when reset button is clicked", async () => {
-      // Simulate zooming in first
       await wrapper.find('button[title="Zoom In"]').trigger("click");
       expect(wrapper.vm.scale).not.toBe(1);
 
-      // Now reset
       await wrapper.find('button[title="Reset View"]').trigger("click");
 
-      // FIX: Only check the scale property, as panX and panY are removed.
       expect(wrapper.vm.scale).toBe(1);
     });
 
     it("zooms with ctrl/meta key + wheel, but not without", async () => {
       const initialScale = wrapper.vm.scale;
-      // FIX: Find the correct element that listens to the wheel event.
       const scrollWrapper = wrapper.find(".mermaid-scroll-wrapper");
       const containerElement = scrollWrapper.element;
 
@@ -162,7 +173,7 @@ describe("InteractiveMermaid.vue", () => {
       containerElement.dispatchEvent(normalWheelEvent);
       await wrapper.vm.$nextTick();
 
-      expect(wrapper.vm.scale).toBe(initialScale); // Should not zoom
+      expect(wrapper.vm.scale).toBe(initialScale);
 
       const ctrlWheelEvent = new WheelEvent("wheel", {
         bubbles: true,
@@ -172,14 +183,14 @@ describe("InteractiveMermaid.vue", () => {
       containerElement.dispatchEvent(ctrlWheelEvent);
       await wrapper.vm.$nextTick();
 
-      expect(wrapper.vm.scale).toBeGreaterThan(initialScale); // Should zoom
+      expect(wrapper.vm.scale).toBeGreaterThan(initialScale);
     });
   });
 
   describe("Theming", () => {
     it("initializes with the default theme when body has no dark class", async () => {
       wrapper = mountComponent();
-      await wrapper.vm.$nextTick();
+      await flushPromises();
 
       expect(mermaid.initialize).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -191,7 +202,7 @@ describe("InteractiveMermaid.vue", () => {
     it("initializes with the dark theme when body has a dark class", async () => {
       document.body.classList.add("dark");
       wrapper = mountComponent();
-      await wrapper.vm.$nextTick();
+      await flushPromises();
 
       expect(mermaid.initialize).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -202,7 +213,7 @@ describe("InteractiveMermaid.vue", () => {
 
     it("re-initializes and re-renders when the body class changes", async () => {
       const wrapper = mountComponent();
-      await wrapper.vm.$nextTick();
+      await flushPromises();
 
       expect(mermaid.initialize).toHaveBeenCalledTimes(1);
       expect(mermaid.initialize).toHaveBeenLastCalledWith(
@@ -211,7 +222,8 @@ describe("InteractiveMermaid.vue", () => {
       expect(mermaid.render).toHaveBeenCalledTimes(1);
 
       document.body.classList.add("dark");
-      await wrapper.vm.$nextTick();
+      await wrapper.vm.$nextTick(); // Wait for observer to fire
+      await flushPromises(); // Wait for async render to finish
 
       expect(mermaid.initialize).toHaveBeenCalledTimes(2);
       expect(mermaid.initialize).toHaveBeenLastCalledWith(
@@ -221,6 +233,7 @@ describe("InteractiveMermaid.vue", () => {
 
       document.body.classList.remove("dark");
       await wrapper.vm.$nextTick();
+      await flushPromises();
 
       expect(mermaid.initialize).toHaveBeenCalledTimes(3);
       expect(mermaid.initialize).toHaveBeenLastCalledWith(

@@ -282,6 +282,7 @@
 .toastui-editor-contents th p {
   color: rgb(var(--theme-text));
 }
+
 /*
 * Mermaid Diagram Interactive Controls
 */
@@ -298,26 +299,18 @@
   }
 }
 
-/* This new wrapper handles the scrolling */
 .mermaid-scroll-wrapper {
   @apply h-full w-full overflow-auto;
 }
 
 .mermaid-render-target {
-  /* Let the container grow with the scaled content */
-  transition: transform 0.2s ease-in-out;
-
-  /* Center the SVG inside this target using Grid */
   @apply grid h-full w-full place-items-center;
 
+  .svg-wrapper {
+    @apply flex h-full w-full items-center justify-center;
+  }
+
   svg {
-    /*
-      THE FINAL, CORRECT FIX:
-      1. max-width/max-height ensure the SVG never overflows its container by default.
-         This prevents unwanted scrollbars on initial render for large diagrams.
-      2. When the user scales the parent (.mermaid-render-target), this SVG scales with it.
-         If the scaled size exceeds the .mermaid-scroll-wrapper, scrollbars will appear as intended.
-    */
     max-width: 100%;
     max-height: 100%;
 

@@ -4,12 +4,9 @@
 
 <script setup>
 import Editor from "@toast-ui/editor";
-import { onMounted, onUnmounted, ref, nextTick } from "vue";
+import { onMounted, onUnmounted, ref } from "vue";
 import baseOptions from "./baseOptions.js";
-import {
-  renderMermaidBlocks,
-  cleanupMermaidRenders,
-} from "./mermaidRenderer.js";
+import { useMermaidRenderer } from "./mermaidRenderer.js";
 
 const props = defineProps({
   initialValue: String,
@@ -25,11 +22,7 @@ const emit = defineEmits(["change", "keydown"]);
 const editorElement = ref();
 let toastEditor;
 
-const runMermaidRender = () => {
-  if (editorElement.value) {
-    renderMermaidBlocks(editorElement.value);
-  }
-};
+const { render: runMermaidRender } = useMermaidRenderer(editorElement);
 
 onMounted(() => {
   toastEditor = new Editor({
@@ -40,9 +33,7 @@ onMounted(() => {
     events: {
       change: () => {
         emit("change");
-        // Re-render is needed on 'change' to support live updates in WYSIWYG mode.
-        // For Markdown mode, the preview pane is handled by `afterPreviewRender`.
-        nextTick(runMermaidRender);
+        runMermaidRender();
       },
       keydown: (_, event) => {
         emit("keydown", event);
@@ -56,15 +47,9 @@ onMounted(() => {
       ? { addImageBlobHook: props.addImageBlobHook }
       : {},
   });
-
-  nextTick(runMermaidRender);
 });
 
 onUnmounted(() => {
-  // CRITICAL FIX: Clean up any mounted Mermaid components when editor is destroyed.
-  if (editorElement.value) {
-    cleanupMermaidRenders(editorElement.value);
-  }
   if (toastEditor) {
     toastEditor.destroy();
   }

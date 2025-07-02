@@ -4,13 +4,10 @@
 
 <script setup>
 import Viewer from "@toast-ui/editor/dist/toastui-editor-viewer";
-import { onMounted, ref, nextTick, watch, onUnmounted } from "vue";
+import { onMounted, ref, watch, onUnmounted } from "vue";
 import baseOptions from "./baseOptions.js";
 import extendedAutolinks from "./extendedAutolinks.js";
-import {
-  renderMermaidBlocks,
-  cleanupMermaidRenders,
-} from "./mermaidRenderer.js";
+import { useMermaidRenderer } from "./mermaidRenderer.js";
 
 const props = defineProps({
   initialValue: String,
@@ -19,10 +16,10 @@ const props = defineProps({
 const viewerElement = ref();
 let viewerInstance;
 
+const { render: runMermaidRender, cleanup } = useMermaidRenderer(viewerElement);
+
 const destroyViewer = () => {
-  if (viewerElement.value) {
-    cleanupMermaidRenders(viewerElement.value);
-  }
+  cleanup();
   if (viewerInstance) {
     viewerInstance.destroy();
     viewerInstance = null;
@@ -39,16 +36,11 @@ const createViewer = () => {
     initialValue: props.initialValue,
   });
 
-  nextTick(() => {
-    if (viewerElement.value) {
-      renderMermaidBlocks(viewerElement.value);
-    }
-  });
+  runMermaidRender();
 };
 
 onMounted(createViewer);
 
-// FINAL FIX: Always destroy and recreate the viewer on content change to prevent state leaks.
 watch(
   () => props.initialValue,
   () => {

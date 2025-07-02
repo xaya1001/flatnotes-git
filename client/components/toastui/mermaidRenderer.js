@@ -1,4 +1,5 @@
 // client/components/toastui/mermaidRenderer.js
+import { onMounted, onUnmounted, nextTick } from "vue";
 import { createApp } from "vue";
 import InteractiveMermaid from "./InteractiveMermaid.vue";
 
@@ -13,19 +14,15 @@ const WRAPPER_CLASS = "mermaid-component-wrapper";
 export function cleanupMermaidRenders(containerElement) {
   if (!containerElement) return;
 
-  // Find all previously created component wrappers.
   const oldWrappers = containerElement.querySelectorAll(`.${WRAPPER_CLASS}`);
   oldWrappers.forEach((wrapperNode) => {
-    // Unmount the Vue app instance associated with this wrapper.
     if (componentInstanceMap.has(wrapperNode)) {
       componentInstanceMap.get(wrapperNode).unmount();
       componentInstanceMap.delete(wrapperNode);
     }
-    // Remove the wrapper div from the DOM.
     wrapperNode.remove();
   });
 
-  // Reset the 'processed' flag on the original code blocks to allow re-rendering.
   const processedBlocks = containerElement.querySelectorAll(
     "pre[data-mermaid-processed]",
   );
@@ -42,17 +39,13 @@ export function cleanupMermaidRenders(containerElement) {
 export async function renderMermaidBlocks(containerElement) {
   if (!containerElement) return;
 
-  // --- CLEANUP STEP ---
-  // Always clean up previous renders before creating new ones.
   cleanupMermaidRenders(containerElement);
 
-  // --- SELECTION STEP ---
   const mermaidNodes = containerElement.querySelectorAll("pre.lang-mermaid");
   if (mermaidNodes.length === 0) {
     return;
   }
 
-  // --- RENDER STEP ---
   for (const node of mermaidNodes) {
     if (node.getAttribute("data-mermaid-processed")) {
       continue;
@@ -63,21 +56,43 @@ export async function renderMermaidBlocks(containerElement) {
       continue;
     }
 
-    // Create a dedicated wrapper div to mount the Vue component into.
     const mountPoint = document.createElement("div");
     mountPoint.className = WRAPPER_CLASS;
     node.parentNode.insertBefore(mountPoint, node);
-    node.style.display = "none"; // Hide the raw code block
+    node.style.display = "none";
 
-    // Create and mount the Vue component.
     const app = createApp(InteractiveMermaid, {
       diagramText: diagramText,
     });
     app.mount(mountPoint);
 
-    // Store the app instance with its mount point as the key.
     componentInstanceMap.set(mountPoint, app);
 
     node.setAttribute("data-mermaid-processed", "true");
   }
+}
+
+/**
+ * A composable to manage the lifecycle of Mermaid diagrams within a ToastUI component.
+ * @param {import('vue').Ref<HTMLElement>} elementRef - The ref pointing to the container element.
+ */
+export function useMermaidRenderer(elementRef) {
+  const render = () => {
+    nextTick(() => {
+      if (elementRef.value) {
+        renderMermaidBlocks(elementRef.value);
+      }
+    });
+  };
+
+  const cleanup = () => {
+    if (elementRef.value) {
+      cleanupMermaidRenders(elementRef.value);
+    }
+  };
+
+  onMounted(render);
+  onUnmounted(cleanup);
+
+  return { render, cleanup };
 }
