@@ -1,4 +1,3 @@
-<!-- client/components/toastui/InteractiveMermaid.vue -->
 <template>
   <div
     data-mermaid-wrapper
@@ -23,6 +22,7 @@
         <div
           v-else-if="svgContent"
           class="svg-wrapper"
+          ref="svgWrapper"
           v-html="svgContent"
         ></div>
       </div>
@@ -48,7 +48,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from "vue";
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from "vue";
 import mermaid from "mermaid";
 import SvgIcon from "@jamescoyle/vue-icon";
 import {
@@ -65,109 +65,145 @@ const props = defineProps({
 
 // --- State Refs ---
 const container = ref(null);
+const svgWrapper = ref(null);
 const scale = ref(1);
 const panX = ref(0);
 const panY = ref(0);
-const isSpacePressed = ref(false); // Activates panning mode
-const isPanning = ref(false); // True while mouse is down in panning mode
+const isSpacePressed = ref(false);
+const isPanning = ref(false);
 let panStart = { x: 0, y: 0 };
 
 const isCopied = ref(false);
 const errorMessage = ref(null);
 const svgContent = ref("");
-let themeObserver = null;
 
 const ZOOM_BUTTON_FACTOR = 1.25;
 const MAX_SCALE = 8;
 const MIN_SCALE = 0.2;
 
 // --- Computed Properties ---
-// Computes the transform style for pan and zoom
 const transformStyle = computed(() => {
   return `transform: translate(${panX.value}px, ${panY.value}px) scale(${scale.value});`;
 });
 
+/**
+ * Reads a CSS variable from the document's root element.
+ * @param {string} name - The name of the CSS variable (e.g., '--theme-text').
+ * @returns {string} The trimmed value of the variable.
+ */
+const getThemeColor = (name) => {
+  // Fallback to a default color if the CSS variable is not available (e.g., in tests)
+  if (typeof window === "undefined") return "#000000";
+  return getComputedStyle(document.documentElement)
+    .getPropertyValue(name)
+    .trim();
+};
+
 // --- Core Rendering Logic ---
-// Initializes Mermaid and renders the diagram text
-const initializeAndRender = async (theme) => {
+const initializeAndRender = async () => {
   if (!props.diagramText.trim()) return;
 
-  // Reset state before rendering
   errorMessage.value = null;
   svgContent.value = "";
   resetView();
 
+  const isDarkMode =
+    typeof document !== "undefined" && document.body.classList.contains("dark");
+
   mermaid.initialize({
+    // Behavior
     startOnLoad: false,
     securityLevel: "strict",
-    theme: theme,
-    // Ensure text is selectable in the final SVG
-    flowchart: { useMaxWidth: false },
-    sequence: { useMaxWidth: false },
+    suppressErrorRendering: true,
+
+    // Theming
+    theme: "base",
+    fontFamily: '"Poppins", sans-serif',
+    darkMode: isDarkMode,
+
+    // Theme Variables for deep customization
+    themeVariables: {
+      background: getThemeColor("--theme-background"),
+      primaryColor: getThemeColor("--theme-background-elevated"),
+      primaryTextColor: getThemeColor("--theme-text"),
+      primaryBorderColor: getThemeColor("--theme-border"),
+      lineColor: getThemeColor("--theme-border"),
+      textColor: getThemeColor("--theme-text"),
+      actorBkg: getThemeColor("--theme-background-elevated"),
+      actorBorder: getThemeColor("--theme-border"),
+      actorTextColor: getThemeColor("--theme-text"),
+      signalColor: getThemeColor("--theme-text"),
+      signalTextColor: getThemeColor("--theme-text"),
+    },
   });
 
   const mermaidId = `mermaid-id-${Math.random().toString(36).substring(2, 9)}`;
 
   try {
-    // Renders to an off-screen div to prevent Mermaid's default error UI.
-    // This is the key to preventing the "bomb" icon on syntax errors.
-    const { svg } = await mermaid.render(mermaidId, props.diagramText);
+    const { svg, bindFunctions } = await mermaid.render(
+      mermaidId,
+      props.diagramText,
+    );
     svgContent.value = svg;
+
+    await nextTick();
+    if (bindFunctions && svgWrapper.value) {
+      bindFunctions(svgWrapper.value);
+    }
   } catch (error) {
     console.error("Failed to render Mermaid diagram:", error);
     errorMessage.value = error.message;
   }
 };
 
-// --- Event Handlers for Pan and Zoom ---
+// --- Event Handlers and UI Actions ---
 const handleMouseDown = (e) => {
-  // Only start panning if spacebar is held down
   if (isSpacePressed.value) {
-    e.preventDefault(); // Prevents text selection during pan
+    e.preventDefault();
     isPanning.value = true;
     panStart.x = e.clientX - panX.value;
     panStart.y = e.clientY - panY.value;
   }
 };
-
 const handleMouseMove = (e) => {
   if (!isPanning.value) return;
   panX.value = e.clientX - panStart.x;
   panY.value = e.clientY - panStart.y;
 };
-
 const handleMouseUp = () => {
   isPanning.value = false;
 };
-
 const handleWheel = (e) => {
-  // Only zoom if Ctrl or Cmd key is held down
-  if (!e.ctrlKey && !e.metaKey) return;
+  if (!container.value || (!e.ctrlKey && !e.metaKey)) return;
   e.preventDefault();
-
+  const rect = container.value.getBoundingClientRect();
+  const mouseX = e.clientX - rect.left;
+  const mouseY = e.clientY - rect.top;
   const scaleFactor = e.deltaY > 0 ? 1 / 1.1 : 1.1;
   const newScale = Math.max(
     MIN_SCALE,
     Math.min(scale.value * scaleFactor, MAX_SCALE),
   );
-
-  // Get mouse position relative to the container
-  const rect = container.value.getBoundingClientRect();
-  const mouseX = e.clientX - rect.left;
-  const mouseY = e.clientY - rect.top;
-
-  // Adjust pan to zoom towards the mouse pointer
   panX.value = mouseX - (mouseX - panX.value) * (newScale / scale.value);
   panY.value = mouseY - (mouseY - panY.value) * (newScale / scale.value);
   scale.value = newScale;
 };
-
-// --- UI Control Actions ---
+const zoomWithCenterFocus = (newScale) => {
+  if (!container.value) return;
+  const rect = container.value.getBoundingClientRect();
+  const centerX = rect.width / 2;
+  const centerY = rect.height / 2;
+  panX.value = centerX - (centerX - panX.value) * (newScale / scale.value);
+  panY.value = centerY - (centerY - panY.value) * (newScale / scale.value);
+  scale.value = newScale;
+};
 const zoomIn = () => {
-  scale.value = Math.min(scale.value * ZOOM_BUTTON_FACTOR, MAX_SCALE);
+  const newScale = Math.min(scale.value * ZOOM_BUTTON_FACTOR, MAX_SCALE);
+  zoomWithCenterFocus(newScale);
 };
 const zoomOut = () => {
-  scale.value = Math.max(scale.value / ZOOM_BUTTON_FACTOR, MIN_SCALE);
+  const newScale = Math.max(scale.value / ZOOM_BUTTON_FACTOR, MIN_SCALE);
+  zoomWithCenterFocus(newScale);
 };
 const resetView = () => {
   scale.value = 1;
@@ -181,7 +217,7 @@ const copySource = async () => {
     isCopied.value = true;
     setTimeout(() => {
       isCopied.value = false;
-    }, 1500); // Reset after 1.5 seconds
+    }, 1500);
   } catch (err) {
     console.error("Failed to copy diagram source:", err);
   }
@@ -189,17 +225,14 @@ const copySource = async () => {
 
 // --- Lifecycle Hooks ---
 onMounted(() => {
-  const initialTheme = document.body.classList.contains("dark")
-    ? "dark"
-    : "default";
-  initializeAndRender(initialTheme);
+  initializeAndRender();
 
-  // Add global event listeners
   window.addEventListener("mousemove", handleMouseMove);
   window.addEventListener("mouseup", handleMouseUp);
-  container.value.addEventListener("wheel", handleWheel, { passive: false });
+  if (container.value) {
+    container.value.addEventListener("wheel", handleWheel, { passive: false });
+  }
 
-  // Spacebar listener for panning mode
   const handleKeydown = (e) => {
     if (e.code === "Space") isSpacePressed.value = true;
   };
@@ -209,19 +242,14 @@ onMounted(() => {
   window.addEventListener("keydown", handleKeydown);
   window.addEventListener("keyup", handleKeyup);
 
-  // Theme change observer
-  themeObserver = new MutationObserver(() => {
-    const newTheme = document.body.classList.contains("dark")
-      ? "dark"
-      : "default";
-    initializeAndRender(newTheme);
-  });
-  themeObserver.observe(document.body, {
-    attributes: true,
-    attributeFilter: ["class"],
-  });
+  // A simple re-render when visibility changes can help sync theme
+  const handleVisibilityChange = () => {
+    if (document.visibilityState === "visible") {
+      initializeAndRender();
+    }
+  };
+  document.addEventListener("visibilitychange", handleVisibilityChange);
 
-  // Cleanup listeners on unmount
   onUnmounted(() => {
     window.removeEventListener("mousemove", handleMouseMove);
     window.removeEventListener("mouseup", handleMouseUp);
@@ -230,18 +258,14 @@ onMounted(() => {
     }
     window.removeEventListener("keydown", handleKeydown);
     window.removeEventListener("keyup", handleKeyup);
-    if (themeObserver) themeObserver.disconnect();
+    document.removeEventListener("visibilitychange", handleVisibilityChange);
   });
 });
 
-// Re-render when the source text changes
 watch(
   () => props.diagramText,
   () => {
-    const currentTheme = document.body.classList.contains("dark")
-      ? "dark"
-      : "default";
-    initializeAndRender(currentTheme);
+    initializeAndRender();
   },
 );
 </script>

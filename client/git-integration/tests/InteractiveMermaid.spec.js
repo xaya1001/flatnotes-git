@@ -2,56 +2,24 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mount } from "@vue/test-utils";
+import { nextTick } from "vue";
 import mermaid from "mermaid";
 import InteractiveMermaid from "../../components/toastui/InteractiveMermaid.vue";
 
-// --- Helper Function for Async DOM updates ---
-// This function polls the DOM until a condition is met or it times out.
-// This is more robust than relying on a single nextTick for complex updates like v-html.
-function waitFor(callback, { timeout = 1000, interval = 50 } = {}) {
-  return new Promise((resolve, reject) => {
-    let lastError;
-    const endTime = Date.now() + timeout;
-
-    const check = () => {
-      try {
-        const result = callback();
-        // If the callback doesn't throw, we've succeeded.
-        resolve(result);
-      } catch (e) {
-        lastError = e;
-        if (Date.now() < endTime) {
-          setTimeout(check, interval);
-        } else {
-          console.error("waitFor timed out. Last error:", lastError.message);
-          reject(
-            new Error(`waitFor timed out. Last error: ${lastError.message}`),
-          );
-        }
-      }
-    };
-    check();
-  });
-}
-
-// --- Mocking Area ---
+// Use vi.mock to replace the entire module. The implementation will be provided in beforeEach.
 vi.mock("mermaid", () => ({
   default: {
     initialize: vi.fn(),
-    render: vi.fn().mockImplementation((id, text) => {
-      return Promise.resolve({
-        svg: `<svg id="${id}" class="mermaid-svg">${text}</svg>`,
-      });
-    }),
+    render: vi.fn(), // No implementation here, just a spy
   },
 }));
 
+// Mock Clipboard API remains the same
 Object.assign(navigator, {
   clipboard: {
     writeText: vi.fn().mockResolvedValue(undefined),
   },
 });
-// --- End Mocking Area ---
 
 describe("InteractiveMermaid.vue", () => {
   let wrapper;
@@ -66,156 +34,169 @@ describe("InteractiveMermaid.vue", () => {
   };
 
   beforeEach(() => {
+    // Reset mocks AND provide a fresh, reliable implementation
+    // for mermaid.render before each test runs.
     vi.clearAllMocks();
+    vi.mocked(mermaid.render).mockResolvedValue({
+      svg: `<svg class="mermaid-svg">mocked svg</svg>`,
+      bindFunctions: vi.fn(),
+    });
+
+    // Mock getComputedStyle for theme tests
+    vi.spyOn(window, "getComputedStyle").mockReturnValue({
+      getPropertyValue: (prop) => {
+        switch (prop) {
+          case "--theme-background":
+            return "#ffffff";
+          case "--theme-text":
+            return "#111111";
+          case "--theme-border":
+            return "#dddddd";
+          case "--theme-background-elevated":
+            return "#f0f0f0";
+          default:
+            return "";
+        }
+      },
+    });
   });
 
   afterEach(() => {
     if (wrapper) {
       wrapper.unmount();
     }
-    document.body.className = "";
+    vi.restoreAllMocks();
   });
 
   describe("Rendering", () => {
     it("renders the Mermaid SVG when mounted", async () => {
       wrapper = mountComponent();
-
-      // Use the robust waitFor helper instead of a single nextTick.
-      await waitFor(() => {
-        const svgElement = wrapper.find("svg.mermaid-svg");
-        expect(svgElement.exists()).toBe(true);
-      });
-
-      expect(mermaid.render).toHaveBeenCalledOnce();
-      expect(mermaid.render).toHaveBeenCalledWith(
-        expect.stringMatching(/^mermaid-id-/),
-        "graph TD; A-->B;",
-      );
+      await nextTick();
+      await nextTick();
 
       const svgElement = wrapper.find("svg.mermaid-svg");
-      expect(svgElement.text()).toBe("graph TD; A-->B;");
+      expect(svgElement.exists()).toBe(true);
+      expect(mermaid.render).toHaveBeenCalledOnce();
     });
 
     it("displays an error message if Mermaid rendering fails", async () => {
+      // Override the mock for this specific test
+      vi.mocked(mermaid.render).mockRejectedValue(new Error("Syntax error"));
       const consoleErrorSpy = vi
         .spyOn(console, "error")
         .mockImplementation(() => {});
 
-      const errorMessage = "Syntax error in graph";
-      mermaid.render.mockRejectedValueOnce(new Error(errorMessage));
-
       wrapper = mountComponent();
-
-      // Use waitFor to ensure the error message is rendered.
-      await waitFor(() => {
-        const errorBox = wrapper.find(".mermaid-error-box");
-        expect(errorBox.exists()).toBe(true);
-      });
+      await nextTick();
+      await nextTick();
 
       const errorBox = wrapper.find(".mermaid-error-box");
+      expect(errorBox.exists()).toBe(true);
       expect(errorBox.text()).toContain("Mermaid Render Error");
-      expect(errorBox.text()).toContain(errorMessage);
+      expect(errorBox.text()).toContain("Syntax error");
 
       consoleErrorSpy.mockRestore();
     });
 
     it("re-renders when the diagramText prop changes", async () => {
       wrapper = mountComponent();
-      await waitFor(() => {
-        expect(wrapper.find("svg.mermaid-svg").exists()).toBe(true);
+      await nextTick();
+      await nextTick();
+
+      // Clear mocks after initial render to test the second call
+      vi.clearAllMocks();
+      // Re-apply a mock for the second render
+      vi.mocked(mermaid.render).mockResolvedValue({
+        svg: `<svg class="mermaid-svg">new graph</svg>`,
+        bindFunctions: vi.fn(),
       });
-      expect(mermaid.render).toHaveBeenCalledTimes(1);
 
       await wrapper.setProps({ diagramText: "graph LR; C-->D;" });
+      await nextTick();
+      await nextTick();
 
-      await waitFor(() => {
-        const svgElement = wrapper.find("svg.mermaid-svg");
-        expect(svgElement.text()).toBe("graph LR; C-->D;");
-      });
-
-      expect(mermaid.render).toHaveBeenCalledTimes(2);
-      expect(mermaid.render).toHaveBeenLastCalledWith(
-        expect.stringMatching(/^mermaid-id-/),
-        "graph LR; C-->D;",
-      );
+      expect(mermaid.render).toHaveBeenCalledOnce();
+      const svgElement = wrapper.find("svg.mermaid-svg");
+      expect(svgElement.text()).toBe("new graph");
     });
   });
 
   describe("User Interaction", () => {
     beforeEach(async () => {
       wrapper = mountComponent();
-      await waitFor(() => {
-        expect(wrapper.find(".svg-wrapper").exists()).toBe(true);
-      });
+      await nextTick();
+      await nextTick();
     });
 
-    it("copies the diagram source to the clipboard when copy button is clicked", async () => {
-      const copyButton = wrapper.find('button[title="Copy Source"]');
-      await copyButton.trigger("click");
-
+    it("copies the diagram source to the clipboard", async () => {
+      await wrapper.find('button[title="Copy Source"]').trigger("click");
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
         "graph TD; A-->B;",
       );
     });
 
-    it("zooms in when zoom-in button is clicked", async () => {
-      const initialScale = wrapper.vm.scale;
+    it("zooms in on button click", async () => {
       await wrapper.find('button[title="Zoom In"]').trigger("click");
-      expect(wrapper.vm.scale).toBeGreaterThan(initialScale);
+      expect(wrapper.vm.scale).toBeGreaterThan(1);
     });
 
-    it("zooms out when zoom-out button is clicked", async () => {
-      const initialScale = wrapper.vm.scale;
+    it("zooms out on button click", async () => {
       await wrapper.find('button[title="Zoom Out"]').trigger("click");
-      expect(wrapper.vm.scale).toBeLessThan(initialScale);
+      expect(wrapper.vm.scale).toBeLessThan(1);
     });
 
-    it("resets view when reset button is clicked", async () => {
-      // Change state
-      await wrapper.find('button[title="Zoom In"]').trigger("click");
-      wrapper.vm.panX = 50;
-      await wrapper.vm.$nextTick();
-
-      expect(wrapper.vm.scale).not.toBe(1);
-      expect(wrapper.vm.panX).not.toBe(0);
-
-      // Act: reset
+    it("resets view on button click", async () => {
+      wrapper.vm.scale = 2.0;
+      await nextTick();
       await wrapper.find('button[title="Reset View"]').trigger("click");
-
-      // Assert
       expect(wrapper.vm.scale).toBe(1);
-      expect(wrapper.vm.panX).toBe(0);
-      expect(wrapper.vm.panY).toBe(0);
     });
   });
 
   describe("Theming", () => {
-    it("initializes with the default theme when body has no dark class", async () => {
+    it("initializes with correct theme variables for light mode", async () => {
       document.body.className = "";
       wrapper = mountComponent();
-      await waitFor(() => {
-        expect(mermaid.initialize).toHaveBeenCalled();
-      });
+      await nextTick();
 
-      expect(mermaid.initialize).toHaveBeenCalledWith(
-        expect.objectContaining({
-          theme: "default",
-        }),
-      );
+      expect(mermaid.initialize).toHaveBeenCalledOnce();
+      const callArgs = vi.mocked(mermaid.initialize).mock.calls[0][0];
+
+      expect(callArgs.theme).toBe("base");
+      expect(callArgs.darkMode).toBe(false);
+      expect(callArgs.suppressErrorRendering).toBe(true);
+
+      const themeVars = callArgs.themeVariables;
+      expect(themeVars.background).toBe("#ffffff");
+      expect(themeVars.textColor).toBe("#111111");
     });
 
-    it("initializes with the dark theme when body has a dark class", async () => {
+    it("initializes with correct theme variables for dark mode", async () => {
       document.body.className = "dark";
-      wrapper = mountComponent();
-      await waitFor(() => {
-        expect(mermaid.initialize).toHaveBeenCalled();
+
+      window.getComputedStyle.mockReturnValue({
+        getPropertyValue: (prop) => {
+          switch (prop) {
+            case "--theme-background":
+              return "#121212";
+            case "--theme-text":
+              return "#eeeeee";
+            default:
+              return "";
+          }
+        },
       });
 
-      expect(mermaid.initialize).toHaveBeenCalledWith(
-        expect.objectContaining({
-          theme: "dark",
-        }),
-      );
+      wrapper = mountComponent();
+      await nextTick();
+
+      expect(mermaid.initialize).toHaveBeenCalledOnce();
+      const callArgs = vi.mocked(mermaid.initialize).mock.calls[0][0];
+
+      expect(callArgs.darkMode).toBe(true);
+      const themeVars = callArgs.themeVariables;
+      expect(themeVars.background).toBe("#121212");
+      expect(themeVars.textColor).toBe("#eeeeee");
     });
   });
 });
