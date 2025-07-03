@@ -8,10 +8,7 @@ import { onMounted, ref, watch, onUnmounted } from "vue";
 
 import baseOptions from "./baseOptions.js";
 import extendedAutolinks from "./extendedAutolinks.js";
-import {
-  renderMermaidBlocks,
-  cleanupMermaidRenders,
-} from "./mermaidRenderer.js";
+import { renderMermaidBlocks } from "./mermaidRenderer.js";
 
 const props = defineProps({
   initialValue: String,
@@ -42,7 +39,6 @@ watch(
 );
 
 onUnmounted(() => {
-  cleanupMermaidRenders(viewerElement.value);
   if (viewerInstance) {
     viewerInstance.destroy();
   }
