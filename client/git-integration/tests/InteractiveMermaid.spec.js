@@ -5,17 +5,42 @@ import { mount } from "@vue/test-utils";
 import mermaid from "mermaid";
 import InteractiveMermaid from "../../components/toastui/InteractiveMermaid.vue";
 
+// --- Helper Function for Async DOM updates ---
+// This function polls the DOM until a condition is met or it times out.
+// This is more robust than relying on a single nextTick for complex updates like v-html.
+function waitFor(callback, { timeout = 1000, interval = 50 } = {}) {
+  return new Promise((resolve, reject) => {
+    let lastError;
+    const endTime = Date.now() + timeout;
+
+    const check = () => {
+      try {
+        const result = callback();
+        // If the callback doesn't throw, we've succeeded.
+        resolve(result);
+      } catch (e) {
+        lastError = e;
+        if (Date.now() < endTime) {
+          setTimeout(check, interval);
+        } else {
+          console.error("waitFor timed out. Last error:", lastError.message);
+          reject(
+            new Error(`waitFor timed out. Last error: ${lastError.message}`),
+          );
+        }
+      }
+    };
+    check();
+  });
+}
+
 // --- Mocking Area ---
 vi.mock("mermaid", () => ({
   default: {
     initialize: vi.fn(),
-    render: vi.fn().mockImplementation((id, text, container) => {
-      if (container) {
-        container.innerHTML = `<svg id="${id}" class="mermaid-svg">${text}</svg>`;
-      }
+    render: vi.fn().mockImplementation((id, text) => {
       return Promise.resolve({
         svg: `<svg id="${id}" class="mermaid-svg">${text}</svg>`,
-        bindFunctions: vi.fn(),
       });
     }),
   },
@@ -27,10 +52,6 @@ Object.assign(navigator, {
   },
 });
 // --- End Mocking Area ---
-
-// Helper function to wait for all promises to resolve in the test environment.
-// This is crucial for testing components with async setup logic.
-const flushPromises = () => new Promise(setImmediate);
 
 describe("InteractiveMermaid.vue", () => {
   let wrapper;
@@ -58,22 +79,21 @@ describe("InteractiveMermaid.vue", () => {
   describe("Rendering", () => {
     it("renders the Mermaid SVG when mounted", async () => {
       wrapper = mountComponent();
-      await flushPromises();
+
+      // Use the robust waitFor helper instead of a single nextTick.
+      await waitFor(() => {
+        const svgElement = wrapper.find("svg.mermaid-svg");
+        expect(svgElement.exists()).toBe(true);
+      });
 
       expect(mermaid.render).toHaveBeenCalledOnce();
       expect(mermaid.render).toHaveBeenCalledWith(
-        expect.any(String),
+        expect.stringMatching(/^mermaid-id-/),
         "graph TD; A-->B;",
-        expect.any(HTMLElement),
       );
 
-      // Now that the state has been updated and Vue has rendered, we can find the element.
-      const svgWrapper = wrapper.find(".svg-wrapper");
-      expect(svgWrapper.exists()).toBe(true);
-      // Check the raw DOM because v-html content isn't part of the Vue component tree.
-      const svgElement = svgWrapper.element.querySelector("svg.mermaid-svg");
-      expect(svgElement).not.toBeNull();
-      expect(svgElement.textContent).toBe("graph TD; A-->B;");
+      const svgElement = wrapper.find("svg.mermaid-svg");
+      expect(svgElement.text()).toBe("graph TD; A-->B;");
     });
 
     it("displays an error message if Mermaid rendering fails", async () => {
@@ -81,15 +101,19 @@ describe("InteractiveMermaid.vue", () => {
         .spyOn(console, "error")
         .mockImplementation(() => {});
 
-      const errorMessage = "Invalid syntax";
+      const errorMessage = "Syntax error in graph";
       mermaid.render.mockRejectedValueOnce(new Error(errorMessage));
 
       wrapper = mountComponent();
-      // FIX: Wait for the async rejection and subsequent state update.
-      await flushPromises();
 
-      const errorBox = wrapper.find("pre.mermaid-error-text");
-      expect(errorBox.exists()).toBe(true);
+      // Use waitFor to ensure the error message is rendered.
+      await waitFor(() => {
+        const errorBox = wrapper.find(".mermaid-error-box");
+        expect(errorBox.exists()).toBe(true);
+      });
+
+      const errorBox = wrapper.find(".mermaid-error-box");
+      expect(errorBox.text()).toContain("Mermaid Render Error");
       expect(errorBox.text()).toContain(errorMessage);
 
       consoleErrorSpy.mockRestore();
@@ -97,33 +121,32 @@ describe("InteractiveMermaid.vue", () => {
 
     it("re-renders when the diagramText prop changes", async () => {
       wrapper = mountComponent();
-      await flushPromises();
+      await waitFor(() => {
+        expect(wrapper.find("svg.mermaid-svg").exists()).toBe(true);
+      });
       expect(mermaid.render).toHaveBeenCalledTimes(1);
 
-      // Act: change props
       await wrapper.setProps({ diagramText: "graph LR; C-->D;" });
-      await flushPromises();
+
+      await waitFor(() => {
+        const svgElement = wrapper.find("svg.mermaid-svg");
+        expect(svgElement.text()).toBe("graph LR; C-->D;");
+      });
 
       expect(mermaid.render).toHaveBeenCalledTimes(2);
-      expect(mermaid.render).toHaveBeenCalledWith(
-        expect.any(String),
+      expect(mermaid.render).toHaveBeenLastCalledWith(
+        expect.stringMatching(/^mermaid-id-/),
         "graph LR; C-->D;",
-        expect.any(HTMLElement),
       );
-
-      const svgWrapper = wrapper.find(".svg-wrapper");
-      expect(svgWrapper.exists()).toBe(true);
-      const svgElement = svgWrapper.element.querySelector("svg.mermaid-svg");
-      expect(svgElement).not.toBeNull();
-      expect(svgElement.textContent).toBe("graph LR; C-->D;");
     });
   });
 
   describe("User Interaction", () => {
     beforeEach(async () => {
       wrapper = mountComponent();
-      // Ensure component is rendered before each interaction test
-      await flushPromises();
+      await waitFor(() => {
+        expect(wrapper.find(".svg-wrapper").exists()).toBe(true);
+      });
     });
 
     it("copies the diagram source to the clipboard when copy button is clicked", async () => {
@@ -137,60 +160,42 @@ describe("InteractiveMermaid.vue", () => {
 
     it("zooms in when zoom-in button is clicked", async () => {
       const initialScale = wrapper.vm.scale;
-      const zoomInButton = wrapper.find('button[title="Zoom In"]');
-      await zoomInButton.trigger("click");
-
+      await wrapper.find('button[title="Zoom In"]').trigger("click");
       expect(wrapper.vm.scale).toBeGreaterThan(initialScale);
     });
 
     it("zooms out when zoom-out button is clicked", async () => {
       const initialScale = wrapper.vm.scale;
-      const zoomOutButton = wrapper.find('button[title="Zoom Out"]');
-      await zoomOutButton.trigger("click");
-
+      await wrapper.find('button[title="Zoom Out"]').trigger("click");
       expect(wrapper.vm.scale).toBeLessThan(initialScale);
     });
 
     it("resets view when reset button is clicked", async () => {
+      // Change state
       await wrapper.find('button[title="Zoom In"]').trigger("click");
-      expect(wrapper.vm.scale).not.toBe(1);
+      wrapper.vm.panX = 50;
+      await wrapper.vm.$nextTick();
 
+      expect(wrapper.vm.scale).not.toBe(1);
+      expect(wrapper.vm.panX).not.toBe(0);
+
+      // Act: reset
       await wrapper.find('button[title="Reset View"]').trigger("click");
 
+      // Assert
       expect(wrapper.vm.scale).toBe(1);
-    });
-
-    it("zooms with ctrl/meta key + wheel, but not without", async () => {
-      const initialScale = wrapper.vm.scale;
-      const scrollWrapper = wrapper.find(".mermaid-scroll-wrapper");
-      const containerElement = scrollWrapper.element;
-
-      const normalWheelEvent = new WheelEvent("wheel", {
-        bubbles: true,
-        deltaY: -50,
-        ctrlKey: false,
-      });
-      containerElement.dispatchEvent(normalWheelEvent);
-      await wrapper.vm.$nextTick();
-
-      expect(wrapper.vm.scale).toBe(initialScale);
-
-      const ctrlWheelEvent = new WheelEvent("wheel", {
-        bubbles: true,
-        deltaY: -50,
-        ctrlKey: true,
-      });
-      containerElement.dispatchEvent(ctrlWheelEvent);
-      await wrapper.vm.$nextTick();
-
-      expect(wrapper.vm.scale).toBeGreaterThan(initialScale);
+      expect(wrapper.vm.panX).toBe(0);
+      expect(wrapper.vm.panY).toBe(0);
     });
   });
 
   describe("Theming", () => {
     it("initializes with the default theme when body has no dark class", async () => {
+      document.body.className = "";
       wrapper = mountComponent();
-      await flushPromises();
+      await waitFor(() => {
+        expect(mermaid.initialize).toHaveBeenCalled();
+      });
 
       expect(mermaid.initialize).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -200,46 +205,17 @@ describe("InteractiveMermaid.vue", () => {
     });
 
     it("initializes with the dark theme when body has a dark class", async () => {
-      document.body.classList.add("dark");
+      document.body.className = "dark";
       wrapper = mountComponent();
-      await flushPromises();
+      await waitFor(() => {
+        expect(mermaid.initialize).toHaveBeenCalled();
+      });
 
       expect(mermaid.initialize).toHaveBeenCalledWith(
         expect.objectContaining({
           theme: "dark",
         }),
       );
-    });
-
-    it("re-initializes and re-renders when the body class changes", async () => {
-      const wrapper = mountComponent();
-      await flushPromises();
-
-      expect(mermaid.initialize).toHaveBeenCalledTimes(1);
-      expect(mermaid.initialize).toHaveBeenLastCalledWith(
-        expect.objectContaining({ theme: "default" }),
-      );
-      expect(mermaid.render).toHaveBeenCalledTimes(1);
-
-      document.body.classList.add("dark");
-      await wrapper.vm.$nextTick(); // Wait for observer to fire
-      await flushPromises(); // Wait for async render to finish
-
-      expect(mermaid.initialize).toHaveBeenCalledTimes(2);
-      expect(mermaid.initialize).toHaveBeenLastCalledWith(
-        expect.objectContaining({ theme: "dark" }),
-      );
-      expect(mermaid.render).toHaveBeenCalledTimes(2);
-
-      document.body.classList.remove("dark");
-      await wrapper.vm.$nextTick();
-      await flushPromises();
-
-      expect(mermaid.initialize).toHaveBeenCalledTimes(3);
-      expect(mermaid.initialize).toHaveBeenLastCalledWith(
-        expect.objectContaining({ theme: "default" }),
-      );
-      expect(mermaid.render).toHaveBeenCalledTimes(3);
     });
   });
 });

@@ -1,93 +1,105 @@
 // client/git-integration/tests/mermaidRenderer.spec.js
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { defineComponent } from "vue";
 import { renderMermaidBlocks } from "../../components/toastui/mermaidRenderer.js";
 
-// --- THIS IS THE PART TO CHANGE ---
-// Mock the InteractiveMermaid component to accurately represent its root element.
+// --- Mock the actual InteractiveMermaid component ---
+//
+// THE KEY FIX IS HERE: The mocked component's template MUST NOT have the
+// same class name as the wrapper div we search for in the tests.
+// The real component has this class on its root, but for the isolated test,
+// this creates a nested structure that fools querySelectorAll.
+//
 vi.mock("../../components/toastui/InteractiveMermaid.vue", () => ({
-  default: {
+  default: defineComponent({
     name: "InteractiveMermaid",
-    // The mock now has the real component's root class, so the cleanup step can find it.
-    template:
-      '<div class="mermaid-diagram-container"><div class="mock-internal-content"></div></div>',
     props: ["diagramText"],
-  },
+    // We give it a unique, "internal" class name instead.
+    template: `<div class="mocked-interactive-mermaid">Mocked: {{ diagramText }}</div>`,
+  }),
 }));
 
-describe("mermaidRenderer.js", () => {
+describe("mermaidRenderer function", () => {
   let container;
 
   beforeEach(() => {
     container = document.createElement("div");
     document.body.appendChild(container);
-    vi.clearAllMocks();
   });
 
   afterEach(() => {
+    container.innerHTML = "";
     document.body.removeChild(container);
     container = null;
+    vi.clearAllMocks();
   });
 
-  // This test and the others will now pass without changes to their logic.
-  it("should find and replace a single mermaid block with a component container", async () => {
-    const diagramText = "graph TD; A-->B;";
-    container.innerHTML = `<pre class="lang-mermaid"><code>${diagramText}</code></pre>`;
+  it("should find and replace a single mermaid block", () => {
+    container.innerHTML = `<pre class="lang-mermaid"><code>graph TD; A-->B;</code></pre>`;
+    renderMermaidBlocks(container);
 
-    await renderMermaidBlocks(container);
-
-    const preElement = container.querySelector("pre.lang-mermaid");
-    expect(preElement.style.display).toBe("none");
-
-    // We now look for the class that the cleanup step uses.
-    const componentContainer = container.querySelector(
-      ".mermaid-diagram-container",
+    // Assert that the wrapper div was created
+    expect(
+      container.querySelectorAll(".mermaid-component-wrapper"),
+    ).toHaveLength(1);
+    // Assert that the mocked component was mounted inside it
+    expect(
+      container.querySelector(".mocked-interactive-mermaid"),
+    ).not.toBeNull();
+    // Assert the original element is hidden
+    expect(container.querySelector("pre.lang-mermaid").style.display).toBe(
+      "none",
     );
-    expect(componentContainer).not.toBeNull();
   });
 
-  it("should replace multiple mermaid blocks", async () => {
+  it("should replace multiple mermaid blocks", () => {
     container.innerHTML = `
-      <p>Some text</p>
       <pre class="lang-mermaid"><code>graph LR; X-->Y;</code></pre>
       <pre class="lang-mermaid"><code>sequenceDiagram; A->>B: Hello;</code></pre>
     `;
-
-    await renderMermaidBlocks(container);
-
-    const componentContainers = container.querySelectorAll(
-      ".mermaid-diagram-container",
-    );
-    expect(componentContainers).toHaveLength(2);
+    renderMermaidBlocks(container);
+    expect(
+      container.querySelectorAll(".mermaid-component-wrapper"),
+    ).toHaveLength(2);
   });
 
-  // --- THIS TEST WILL NOW PASS ---
-  it("should clean up old component containers before re-rendering", async () => {
+  it("should correctly clean up and re-render on subsequent calls", () => {
     container.innerHTML = `<pre class="lang-mermaid"><code>graph TD; C-->D;</code></pre>`;
 
     // First render
-    await renderMermaidBlocks(container);
-    // We assert based on the class that is used for cleanup.
+    renderMermaidBlocks(container);
     expect(
-      container.querySelectorAll(".mermaid-diagram-container"),
+      container.querySelectorAll(".mermaid-component-wrapper"),
     ).toHaveLength(1);
 
-    // Second render on the same container
-    await renderMermaidBlocks(container);
-    // The cleanup step should have removed the old one before adding the new one.
+    // Modify the DOM and re-render
+    container.innerHTML += `<pre class="lang-mermaid"><code>graph TD; E-->F;</code></pre>`;
+    renderMermaidBlocks(container);
+
+    // The atomic nature of renderMermaidBlocks should result in exactly 2 wrappers.
     expect(
-      container.querySelectorAll(".mermaid-diagram-container"),
-    ).toHaveLength(1);
+      container.querySelectorAll(".mermaid-component-wrapper"),
+    ).toHaveLength(2);
   });
 
-  it("should ignore empty or whitespace-only mermaid blocks", async () => {
+  it("should ignore empty or whitespace-only mermaid blocks", () => {
     container.innerHTML = `<pre class="lang-mermaid"><code>    </code></pre>`;
+    renderMermaidBlocks(container);
+    expect(
+      container.querySelectorAll(".mermaid-component-wrapper"),
+    ).toHaveLength(0);
+  });
 
-    await renderMermaidBlocks(container);
-
-    const componentContainer = container.querySelector(
-      ".mermaid-diagram-container",
-    );
-    expect(componentContainer).toBeNull();
+  it("should handle a mix of valid and empty blocks", () => {
+    container.innerHTML = `
+      <pre class="lang-mermaid"><code>graph TD; A-->B;</code></pre>
+      <pre class="lang-mermaid"><code></code></pre>
+      <pre class="lang-mermaid"><code>graph TD; C-->D;</code></pre>
+    `;
+    renderMermaidBlocks(container);
+    expect(
+      container.querySelectorAll(".mermaid-component-wrapper"),
+    ).toHaveLength(2);
   });
 });

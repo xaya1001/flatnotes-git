@@ -5,9 +5,13 @@
 <script setup>
 import Viewer from "@toast-ui/editor/dist/toastui-editor-viewer";
 import { onMounted, ref, watch, onUnmounted } from "vue";
+
 import baseOptions from "./baseOptions.js";
 import extendedAutolinks from "./extendedAutolinks.js";
-import { useMermaidRenderer } from "./mermaidRenderer.js";
+import {
+  renderMermaidBlocks,
+  cleanupMermaidRenders,
+} from "./mermaidRenderer.js";
 
 const props = defineProps({
   initialValue: String,
@@ -16,19 +20,7 @@ const props = defineProps({
 const viewerElement = ref();
 let viewerInstance;
 
-const { render: runMermaidRender, cleanup } = useMermaidRenderer(viewerElement);
-
-const destroyViewer = () => {
-  cleanup();
-  if (viewerInstance) {
-    viewerInstance.destroy();
-    viewerInstance = null;
-  }
-};
-
-const createViewer = () => {
-  if (!viewerElement.value) return;
-
+onMounted(() => {
   viewerInstance = new Viewer({
     ...baseOptions,
     extendedAutolinks,
@@ -36,20 +28,25 @@ const createViewer = () => {
     initialValue: props.initialValue,
   });
 
-  runMermaidRender();
-};
-
-onMounted(createViewer);
+  renderMermaidBlocks(viewerElement.value);
+});
 
 watch(
   () => props.initialValue,
-  () => {
-    destroyViewer();
-    createViewer();
+  (newValue) => {
+    if (viewerInstance) {
+      viewerInstance.setMarkdown(newValue);
+      renderMermaidBlocks(viewerElement.value);
+    }
   },
 );
 
-onUnmounted(destroyViewer);
+onUnmounted(() => {
+  cleanupMermaidRenders(viewerElement.value);
+  if (viewerInstance) {
+    viewerInstance.destroy();
+  }
+});
 </script>
 
 <style>
