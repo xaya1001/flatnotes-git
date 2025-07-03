@@ -2,124 +2,196 @@
   <div
     data-mermaid-wrapper
     class="mermaid-diagram-container"
-    :class="{ 'has-error': !!errorMessage }"
+    :class="{
+      'has-error': !!errorMessage,
+      'is-fullscreen': isFullscreen,
+    }"
   >
-    <!-- wrapper for native scrolling -->
-    <div ref="scrollWrapper" class="mermaid-scroll-wrapper" @wheel="zoom">
-      <!-- The target where the SVG or error message will be rendered -->
-      <div
-        ref="renderTarget"
-        class="mermaid-render-target"
-        :style="transformStyle"
-      >
-        <!-- Use v-if/v-else-if for fully declarative rendering -->
-        <pre v-if="errorMessage" class="mermaid-error-text">{{
-          errorMessage
-        }}</pre>
+    <!-- Wrapper for overflow, panning, and zooming -->
+    <div class="mermaid-scroll-wrapper">
+      <div class="mermaid-render-target" :style="transformStyle">
+        <!-- Error Box -->
+        <div v-if="errorMessage" class="mermaid-error-box">
+          <h4 class="mermaid-error-title">Mermaid Render Error</h4>
+          <pre class="mermaid-error-text">{{ errorMessage }}</pre>
+        </div>
+        <!-- SVG Content -->
         <div
           v-else-if="svgContent"
           class="svg-wrapper"
+          ref="svgWrapper"
           v-html="svgContent"
         ></div>
       </div>
     </div>
 
-    <!-- Controls are positioned relative to the main container, outside the scroll wrapper -->
-    <div v-if="!errorMessage" class="mermaid-controls">
-      <button title="Copy Source" @click="copySource" :disabled="isCopied">
-        <SvgIcon v-if="isCopied" type="mdi" :path="mdiCheck" :size="18" />
-        <SvgIcon v-else type="mdi" :path="mdiContentCopy" :size="18" />
-      </button>
-      <button title="Zoom In" @click="zoomIn">
-        <SvgIcon type="mdi" :path="mdiMagnifyPlus" :size="18" />
-      </button>
-      <button title="Zoom Out" @click="zoomOut">
-        <SvgIcon type="mdi" :path="mdiMagnifyMinus" :size="18" />
-      </button>
-      <button title="Reset View" @click="resetView">
-        <SvgIcon type="mdi" :path="mdiRestore" :size="18" />
-      </button>
+    <!-- Bottom-Right Controls: 3x3 Grid Layout -->
+    <div v-if="!errorMessage" class="mermaid-controls-br">
+      <div class="control-grid">
+        <!-- Row 1 -->
+        <button title="Copy Source" @click="copySource">
+          <SvgIcon v-if="isCopied" type="mdi" :path="mdiCheck" :size="20" />
+          <SvgIcon v-else type="mdi" :path="mdiContentCopy" :size="20" />
+        </button>
+        <button title="Pan Up" @click="pan('up')">
+          <SvgIcon type="mdi" :path="mdiChevronUp" :size="20" />
+        </button>
+        <button title="Zoom In" @click="zoomIn">
+          <SvgIcon type="mdi" :path="mdiMagnifyPlus" :size="20" />
+        </button>
+
+        <!-- Row 2 -->
+        <button title="Pan Left" @click="pan('left')">
+          <SvgIcon type="mdi" :path="mdiChevronLeft" :size="20" />
+        </button>
+        <button title="Reset View" @click="resetView">
+          <SvgIcon type="mdi" :path="mdiRestore" :size="20" />
+        </button>
+        <button title="Pan Right" @click="pan('right')">
+          <SvgIcon type="mdi" :path="mdiChevronRight" :size="20" />
+        </button>
+
+        <!-- Row 3 -->
+        <button title="Toggle Fullscreen" @click="toggleFullscreen">
+          <SvgIcon
+            v-if="isFullscreen"
+            type="mdi"
+            :path="mdiFullscreenExit"
+            :size="20"
+          />
+          <SvgIcon v-else type="mdi" :path="mdiFullscreen" :size="20" />
+        </button>
+        <button title="Pan Down" @click="pan('down')">
+          <SvgIcon type="mdi" :path="mdiChevronDown" :size="20" />
+        </button>
+        <button title="Zoom Out" @click="zoomOut">
+          <SvgIcon type="mdi" :path="mdiMagnifyMinus" :size="20" />
+        </button>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from "vue";
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from "vue";
 import mermaid from "mermaid";
 import SvgIcon from "@jamescoyle/vue-icon";
 import {
+  mdiChevronUp,
+  mdiChevronDown,
+  mdiChevronLeft,
+  mdiChevronRight,
   mdiContentCopy,
   mdiMagnifyPlus,
   mdiMagnifyMinus,
   mdiRestore,
   mdiCheck,
+  mdiFullscreen,
+  mdiFullscreenExit,
 } from "@mdi/js";
 
 const props = defineProps({
-  diagramText: {
-    type: String,
-    required: true,
-  },
+  diagramText: { type: String, required: true },
 });
 
-const renderTarget = ref(null);
-const scrollWrapper = ref(null);
+// --- State Refs ---
+const svgWrapper = ref(null);
 const scale = ref(1);
+const panX = ref(0);
+const panY = ref(0);
 const isCopied = ref(false);
+const isFullscreen = ref(false);
 const errorMessage = ref(null);
 const svgContent = ref("");
 let themeObserver = null;
 
-const ZOOM_BUTTON_FACTOR = 1.2;
-const ZOOM_WHEEL_FACTOR = 1.1;
+const ZOOM_BUTTON_FACTOR = 1.25;
+const PAN_STEP = 50;
+const MAX_SCALE = 8;
+const MIN_SCALE = 0.2;
 
 const transformStyle = computed(() => {
-  return `transform: scale(${scale.value}); transform-origin: center;`;
+  return `transform: translate(${panX.value}px, ${panY.value}px) scale(${scale.value});`;
 });
 
 const initializeAndRender = async (theme) => {
-  if (!renderTarget.value || !props.diagramText.trim()) return;
-
-  // Reset state refs
+  if (!props.diagramText.trim()) return;
   errorMessage.value = null;
   svgContent.value = "";
-
+  resetView();
   mermaid.initialize({
     startOnLoad: false,
     securityLevel: "strict",
     theme: theme,
+    suppressErrorRendering: true,
   });
-
-  const mermaidInternalId = `d${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
-
-  let tempContainer = null;
+  const mermaidId = `mermaid-id-${Math.random().toString(36).substring(2, 9)}`;
   try {
-    tempContainer = document.createElement("div");
-    tempContainer.style.position = "absolute";
-    tempContainer.style.left = "-9999px";
-    tempContainer.style.top = "-9999px";
-    document.body.appendChild(tempContainer);
-
-    const { svg } = await mermaid.render(
-      mermaidInternalId,
+    const { svg, bindFunctions } = await mermaid.render(
+      mermaidId,
       props.diagramText,
-      tempContainer,
     );
-    // On success, update the state ref. Let Vue handle the DOM.
     svgContent.value = svg;
+    await nextTick();
+    if (bindFunctions && svgWrapper.value) {
+      bindFunctions(svgWrapper.value);
+    }
   } catch (error) {
     console.error("Failed to render Mermaid diagram:", error);
-    // On failure, update the error state ref.
     errorMessage.value = error.message;
-  } finally {
-    if (tempContainer && document.body.contains(tempContainer)) {
-      document.body.removeChild(tempContainer);
-    }
   }
 };
 
-const handleThemeChange = (newTheme) => {
-  initializeAndRender(newTheme);
+const pan = (direction) => {
+  switch (direction) {
+    case "up":
+      panY.value -= PAN_STEP;
+      break;
+    case "down":
+      panY.value += PAN_STEP;
+      break;
+    case "left":
+      panX.value -= PAN_STEP;
+      break;
+    case "right":
+      panX.value += PAN_STEP;
+      break;
+  }
+};
+
+const zoomIn = () => {
+  scale.value = Math.min(scale.value * ZOOM_BUTTON_FACTOR, MAX_SCALE);
+};
+const zoomOut = () => {
+  scale.value = Math.max(scale.value / ZOOM_BUTTON_FACTOR, MIN_SCALE);
+};
+const resetView = () => {
+  scale.value = 1;
+  panX.value = 0;
+  panY.value = 0;
+};
+const toggleFullscreen = () => {
+  isFullscreen.value = !isFullscreen.value;
+};
+const copySource = () => {
+  if (isCopied.value) return;
+  navigator.clipboard
+    .writeText(props.diagramText)
+    .then(() => {
+      isCopied.value = true;
+      setTimeout(() => {
+        isCopied.value = false;
+      }, 1500);
+    })
+    .catch((err) => {
+      console.error("Failed to copy diagram source:", err);
+    });
+};
+
+const handleEscKey = (e) => {
+  if (e.key === "Escape" && isFullscreen.value) {
+    isFullscreen.value = false;
+  }
 };
 
 onMounted(() => {
@@ -128,21 +200,23 @@ onMounted(() => {
     : "default";
   initializeAndRender(initialTheme);
 
-  themeObserver = new MutationObserver((mutationsList) => {
-    for (const mutation of mutationsList) {
-      if (
-        mutation.type === "attributes" &&
-        mutation.attributeName === "class"
-      ) {
-        const newTheme = document.body.classList.contains("dark")
-          ? "dark"
-          : "default";
-        handleThemeChange(newTheme);
-      }
-    }
-  });
+  window.addEventListener("keydown", handleEscKey);
 
-  themeObserver.observe(document.body, { attributes: true });
+  themeObserver = new MutationObserver(() => {
+    const newTheme = document.body.classList.contains("dark")
+      ? "dark"
+      : "default";
+    initializeAndRender(newTheme);
+  });
+  themeObserver.observe(document.body, {
+    attributes: true,
+    attributeFilter: ["class"],
+  });
+});
+
+onUnmounted(() => {
+  if (themeObserver) themeObserver.disconnect();
+  window.removeEventListener("keydown", handleEscKey);
 });
 
 watch(
@@ -154,46 +228,4 @@ watch(
     initializeAndRender(currentTheme);
   },
 );
-
-onUnmounted(() => {
-  if (themeObserver) {
-    themeObserver.disconnect();
-  }
-});
-
-const zoom = (e) => {
-  if (errorMessage.value || (!e.ctrlKey && !e.metaKey)) return;
-  e.preventDefault();
-  const scaleAmount = e.deltaY > 0 ? 1 / ZOOM_WHEEL_FACTOR : ZOOM_WHEEL_FACTOR;
-  scale.value *= scaleAmount;
-};
-
-const zoomIn = () => {
-  scale.value *= ZOOM_BUTTON_FACTOR;
-};
-
-const zoomOut = () => {
-  scale.value /= ZOOM_BUTTON_FACTOR;
-};
-
-const resetView = () => {
-  scale.value = 1;
-  if (scrollWrapper.value) {
-    scrollWrapper.value.scrollTop = 0;
-    scrollWrapper.value.scrollLeft = 0;
-  }
-};
-
-const copySource = async () => {
-  if (isCopied.value) return;
-  try {
-    await navigator.clipboard.writeText(props.diagramText);
-    isCopied.value = true;
-    setTimeout(() => {
-      isCopied.value = false;
-    }, 1500);
-  } catch (err) {
-    console.error("Failed to copy diagram source:", err);
-  }
-};
 </script>
