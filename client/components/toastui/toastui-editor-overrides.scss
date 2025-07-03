@@ -288,51 +288,69 @@
 */
 
 .mermaid-diagram-container {
-  @apply relative flex h-full min-h-[150px] w-full items-center justify-center rounded border bg-theme-background-elevated p-4 transition-colors;
+  @apply relative flex h-full min-h-[200px] w-full items-center justify-center rounded-lg border border-theme-border bg-theme-background-elevated transition-colors;
 
   &.has-error {
-    @apply border-theme-danger;
+    @apply border-theme-danger/50 bg-theme-danger/10;
   }
 
+  /* Show controls on hover */
   &:hover .mermaid-controls {
     @apply opacity-100;
+  }
+
+  /* Change cursor to grab when pannable (spacebar held) */
+  &.is-panning {
+    cursor: grab;
+  }
+  &.is-panning:active {
+    cursor: grabbing;
   }
 }
 
 .mermaid-scroll-wrapper {
-  @apply h-full w-full overflow-auto;
+  /* Hides native scrollbars, allowing overflow */
+  @apply h-full w-full overflow-hidden;
 }
 
 .mermaid-render-target {
-  @apply grid h-full w-full place-items-center;
+  /* The element that gets transformed for pan/zoom */
+  @apply grid h-full w-full place-items-center transition-transform duration-75 ease-out;
 
   .svg-wrapper {
     @apply flex h-full w-full items-center justify-center;
   }
 
+  /* Ensures SVG doesn't overflow its wrapper on initial load */
   svg {
     max-width: 100%;
     max-height: 100%;
-
-    /* Allow text selection */
+    /* Allows selecting text inside the SVG nodes */
     user-select: text;
-    -webkit-user-select: text;
-    -moz-user-select: text;
-    -ms-user-select: text;
   }
 }
 
 .mermaid-controls {
-  @apply absolute right-2 top-2 z-10 flex items-center space-x-1 opacity-0 transition-opacity duration-200;
+  @apply absolute right-2 top-2 z-10 flex items-center space-x-1 rounded-full bg-theme-background/50 p-1 opacity-0 shadow-lg backdrop-blur-sm transition-opacity duration-200;
 
   button {
-    @apply flex h-8 w-8 items-center justify-center rounded-full bg-theme-background/80 text-theme-text-muted transition-colors hover:bg-theme-border hover:text-theme-text disabled:cursor-not-allowed disabled:opacity-50;
+    /* Style matches buttons in GitSidebar */
+    @apply flex h-7 w-7 items-center justify-center rounded-full bg-transparent text-theme-text-muted transition-colors hover:bg-theme-border hover:text-theme-text disabled:cursor-not-allowed disabled:opacity-50;
   }
 }
 
+/* Custom error message box styling */
+.mermaid-error-box {
+  @apply w-full self-start p-4 text-left;
+}
+
+.mermaid-error-title {
+  @apply mb-2 font-semibold text-theme-danger;
+}
+
 .mermaid-error-text {
-  @apply whitespace-pre-wrap p-2 text-left text-xs text-theme-danger;
+  /* Allow text selection and wrapping */
+  @apply max-h-64 select-text whitespace-pre-wrap rounded-md bg-theme-background p-2 text-xs text-theme-danger;
   font-family: Consolas, "Lucida Console", Monaco, "Andale Mono", monospace;
-  max-height: 100%;
   overflow-y: auto;
 }
