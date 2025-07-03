@@ -5,11 +5,18 @@
     :class="{
       'has-error': !!errorMessage,
       'is-fullscreen': isFullscreen,
+      'is-pannable': isCtrlPressed,
     }"
+    ref="container"
+    @mousedown="handleMouseDown"
   >
     <!-- Wrapper for overflow, panning, and zooming -->
     <div class="mermaid-scroll-wrapper">
-      <div class="mermaid-render-target" :style="transformStyle">
+      <div
+        class="mermaid-render-target"
+        :class="{ 'is-dragging': isPanning }"
+        :style="transformStyle"
+      >
         <!-- Error Box -->
         <div v-if="errorMessage" class="mermaid-error-box">
           <h4 class="mermaid-error-title">Mermaid Render Error</h4>
@@ -95,6 +102,7 @@ const props = defineProps({
 });
 
 // --- State Refs ---
+const container = ref(null);
 const svgWrapper = ref(null);
 const scale = ref(1);
 const panX = ref(0);
@@ -105,15 +113,22 @@ const errorMessage = ref(null);
 const svgContent = ref("");
 let themeObserver = null;
 
+// --- State for Ctrl+Drag Panning ---
+const isCtrlPressed = ref(false);
+const isPanning = ref(false);
+let panStart = { x: 0, y: 0 };
+
 const ZOOM_BUTTON_FACTOR = 1.25;
 const PAN_STEP = 50;
 const MAX_SCALE = 8;
 const MIN_SCALE = 0.2;
 
+// --- Computed Properties ---
 const transformStyle = computed(() => {
   return `transform: translate(${panX.value}px, ${panY.value}px) scale(${scale.value});`;
 });
 
+// --- Core Rendering Logic ---
 const initializeAndRender = async (theme) => {
   if (!props.diagramText.trim()) return;
   errorMessage.value = null;
@@ -142,19 +157,20 @@ const initializeAndRender = async (theme) => {
   }
 };
 
+// --- UI Control Actions ---
 const pan = (direction) => {
   switch (direction) {
     case "up":
-      panY.value -= PAN_STEP;
-      break;
-    case "down":
       panY.value += PAN_STEP;
       break;
+    case "down":
+      panY.value -= PAN_STEP;
+      break;
     case "left":
-      panX.value -= PAN_STEP;
+      panX.value += PAN_STEP;
       break;
     case "right":
-      panX.value += PAN_STEP;
+      panX.value -= PAN_STEP;
       break;
   }
 };
@@ -188,19 +204,47 @@ const copySource = () => {
     });
 };
 
-const handleEscKey = (e) => {
-  if (e.key === "Escape" && isFullscreen.value) {
-    isFullscreen.value = false;
+// --- Handlers for Ctrl+Drag Panning ---
+const handleMouseDown = (e) => {
+  if (isCtrlPressed.value) {
+    e.preventDefault();
+    isPanning.value = true;
+    panStart.x = e.clientX - panX.value;
+    panStart.y = e.clientY - panY.value;
   }
 };
+const handleMouseMove = (e) => {
+  if (isPanning.value) {
+    panX.value = e.clientX - panStart.x;
+    panY.value = e.clientY - panStart.y;
+  }
+};
+const handleMouseUp = () => {
+  isPanning.value = false;
+};
 
+// --- Lifecycle Hooks for Global Event Listeners ---
 onMounted(() => {
   const initialTheme = document.body.classList.contains("dark")
     ? "dark"
     : "default";
   initializeAndRender(initialTheme);
 
-  window.addEventListener("keydown", handleEscKey);
+  const handleKeydown = (e) => {
+    if (e.key === "Control" || e.metaKey) isCtrlPressed.value = true;
+    if (e.key === "Escape" && isFullscreen.value) isFullscreen.value = false;
+  };
+  const handleKeyup = (e) => {
+    if (e.key === "Control" || e.metaKey) {
+      isCtrlPressed.value = false;
+      isPanning.value = false;
+    }
+  };
+  window.addEventListener("keydown", handleKeydown);
+  window.addEventListener("keyup", handleKeyup);
+
+  window.addEventListener("mousemove", handleMouseMove);
+  window.addEventListener("mouseup", handleMouseUp);
 
   themeObserver = new MutationObserver(() => {
     const newTheme = document.body.classList.contains("dark")
@@ -212,11 +256,14 @@ onMounted(() => {
     attributes: true,
     attributeFilter: ["class"],
   });
-});
 
-onUnmounted(() => {
-  if (themeObserver) themeObserver.disconnect();
-  window.removeEventListener("keydown", handleEscKey);
+  onUnmounted(() => {
+    if (themeObserver) themeObserver.disconnect();
+    window.removeEventListener("keydown", handleKeydown);
+    window.removeEventListener("keyup", handleKeyup);
+    window.removeEventListener("mousemove", handleMouseMove);
+    window.removeEventListener("mouseup", handleMouseUp);
+  });
 });
 
 watch(
