@@ -161,16 +161,16 @@ const initializeAndRender = async (theme) => {
 const pan = (direction) => {
   switch (direction) {
     case "up":
-      panY.value += PAN_STEP;
-      break;
-    case "down":
       panY.value -= PAN_STEP;
       break;
+    case "down":
+      panY.value += PAN_STEP;
+      break;
     case "left":
-      panX.value += PAN_STEP;
+      panX.value -= PAN_STEP;
       break;
     case "right":
-      panX.value -= PAN_STEP;
+      panX.value += PAN_STEP;
       break;
   }
 };
