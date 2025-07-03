@@ -5,8 +5,9 @@
 <script setup>
 import Editor from "@toast-ui/editor";
 import { onMounted, onUnmounted, ref } from "vue";
+
 import baseOptions from "./baseOptions.js";
-import { useMermaidRenderer } from "./mermaidRenderer.js";
+import { renderMermaidBlocks } from "./mermaidRenderer.js";
 
 const props = defineProps({
   initialValue: String,
@@ -22,8 +23,6 @@ const emit = defineEmits(["change", "keydown"]);
 const editorElement = ref();
 let toastEditor;
 
-const { render: runMermaidRender } = useMermaidRenderer(editorElement);
-
 onMounted(() => {
   toastEditor = new Editor({
     ...baseOptions,
@@ -33,13 +32,13 @@ onMounted(() => {
     events: {
       change: () => {
         emit("change");
-        runMermaidRender();
+        renderMermaidBlocks(editorElement.value);
       },
       keydown: (_, event) => {
         emit("keydown", event);
       },
       afterPreviewRender: (html) => {
-        runMermaidRender();
+        renderMermaidBlocks(editorElement.value);
         return html;
       },
     },
@@ -47,6 +46,8 @@ onMounted(() => {
       ? { addImageBlobHook: props.addImageBlobHook }
       : {},
   });
+
+  renderMermaidBlocks(editorElement.value);
 });
 
 onUnmounted(() => {
