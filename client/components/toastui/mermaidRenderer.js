@@ -1,5 +1,4 @@
 // client/components/toastui/mermaidRenderer.js
-import { onMounted, onUnmounted, nextTick } from "vue";
 import { createApp } from "vue";
 import InteractiveMermaid from "./InteractiveMermaid.vue";
 
@@ -7,11 +6,11 @@ const componentInstanceMap = new WeakMap();
 const WRAPPER_CLASS = "mermaid-component-wrapper";
 
 /**
- * Cleans up any previously rendered Mermaid Vue components within a given container.
- * This is crucial for preventing state leakage when navigating between notes.
+ * Cleans up any previously rendered Mermaid Vue components within a container.
+ * This function is now intended to be used primarily by renderMermaidBlocks.
  * @param {HTMLElement} containerElement The parent element to clean up.
  */
-export function cleanupMermaidRenders(containerElement) {
+function cleanupMermaidRenders(containerElement) {
   if (!containerElement) return;
 
   const oldWrappers = containerElement.querySelectorAll(`.${WRAPPER_CLASS}`);
@@ -33,66 +32,36 @@ export function cleanupMermaidRenders(containerElement) {
 }
 
 /**
- * Finds all explicitly marked Mermaid code blocks and renders them with interactive controls.
+ * Finds all Mermaid code blocks in a container, cleans up any previous
+ * renders, and then renders new interactive components. This is an
+ * atomic "refresh" operation.
  * @param {HTMLElement} containerElement The parent element to search within.
  */
-export async function renderMermaidBlocks(containerElement) {
+export function renderMermaidBlocks(containerElement) {
   if (!containerElement) return;
 
+  // STEP 1: Always perform a full cleanup first.
   cleanupMermaidRenders(containerElement);
 
+  // STEP 2: Find all potential mermaid blocks and render them.
   const mermaidNodes = containerElement.querySelectorAll("pre.lang-mermaid");
-  if (mermaidNodes.length === 0) {
-    return;
-  }
+
+  if (mermaidNodes.length === 0) return;
 
   for (const node of mermaidNodes) {
-    if (node.getAttribute("data-mermaid-processed")) {
-      continue;
-    }
-
     const diagramText = node.textContent;
-    if (!diagramText.trim()) {
-      continue;
-    }
+    if (!diagramText.trim()) continue;
+
+    node.setAttribute("data-mermaid-processed", "true");
+    node.style.display = "none";
 
     const mountPoint = document.createElement("div");
     mountPoint.className = WRAPPER_CLASS;
     node.parentNode.insertBefore(mountPoint, node);
-    node.style.display = "none";
 
-    const app = createApp(InteractiveMermaid, {
-      diagramText: diagramText,
-    });
+    const app = createApp(InteractiveMermaid, { diagramText });
     app.mount(mountPoint);
 
     componentInstanceMap.set(mountPoint, app);
-
-    node.setAttribute("data-mermaid-processed", "true");
   }
-}
-
-/**
- * A composable to manage the lifecycle of Mermaid diagrams within a ToastUI component.
- * @param {import('vue').Ref<HTMLElement>} elementRef - The ref pointing to the container element.
- */
-export function useMermaidRenderer(elementRef) {
-  const render = () => {
-    nextTick(() => {
-      if (elementRef.value) {
-        renderMermaidBlocks(elementRef.value);
-      }
-    });
-  };
-
-  const cleanup = () => {
-    if (elementRef.value) {
-      cleanupMermaidRenders(elementRef.value);
-    }
-  };
-
-  onMounted(render);
-  onUnmounted(cleanup);
-
-  return { render, cleanup };
 }
