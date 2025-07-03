@@ -6,7 +6,6 @@ import mermaid from "mermaid";
 import InteractiveMermaid from "../../components/toastui/InteractiveMermaid.vue";
 
 // --- Mock Setup ---
-// Mock the entire Mermaid module
 vi.mock("mermaid", () => ({
   default: {
     initialize: vi.fn(),
@@ -14,10 +13,8 @@ vi.mock("mermaid", () => ({
   },
 }));
 
-// Mock the Clipboard API globally
 Object.assign(navigator, {
   clipboard: {
-    // Ensure the mock for writeText is defined and returns a Promise
     writeText: vi.fn(),
   },
 });
@@ -25,9 +22,10 @@ Object.assign(navigator, {
 describe("InteractiveMermaid.vue", () => {
   let wrapper;
 
-  // Helper to mount the component
   const mountComponent = (props = {}) => {
+    // Attach to the document's body so the MutationObserver can see it
     return mount(InteractiveMermaid, {
+      attachTo: document.body,
       props: {
         diagramText: "graph TD; A-->B;",
         ...props,
@@ -35,30 +33,25 @@ describe("InteractiveMermaid.vue", () => {
     });
   };
 
-  // Setup mocks before each test
   beforeEach(() => {
-    // Provide a fresh mock implementation for mermaid.render
+    document.body.className = ""; // Reset body class
     vi.mocked(mermaid.render).mockResolvedValue({
       svg: `<svg class="mermaid-svg">mocked svg</svg>`,
       bindFunctions: vi.fn(),
     });
-    // FIX: Ensure navigator.clipboard.writeText returns a Promise to prevent '.then' of undefined error
     vi.mocked(navigator.clipboard.writeText).mockResolvedValue(undefined);
   });
 
-  // Cleanup after each test
   afterEach(() => {
     if (wrapper) {
       wrapper.unmount();
     }
-    // Clears all mock history and restores original implementations if they were spied on
     vi.restoreAllMocks();
   });
 
   describe("Rendering", () => {
     it("renders the Mermaid SVG when mounted", async () => {
       wrapper = mountComponent();
-      // flushPromises will wait for all pending async operations to complete
       await flushPromises();
 
       const svgElement = wrapper.find("svg.mermaid-svg");
@@ -68,6 +61,9 @@ describe("InteractiveMermaid.vue", () => {
 
     it("displays an error message if Mermaid rendering fails", async () => {
       vi.mocked(mermaid.render).mockRejectedValue(new Error("Syntax error"));
+      const consoleErrorSpy = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
 
       wrapper = mountComponent();
       await flushPromises();
@@ -75,18 +71,12 @@ describe("InteractiveMermaid.vue", () => {
       const errorBox = wrapper.find(".mermaid-error-box");
       expect(errorBox.exists()).toBe(true);
       expect(errorBox.text()).toContain("Syntax error");
-
-      // No need to restore spy here, afterEach with vi.restoreAllMocks() handles it.
     });
 
     it("re-renders when the diagramText prop changes", async () => {
       wrapper = mountComponent();
       await flushPromises();
-
-      // Clear call history from the initial render
       vi.mocked(mermaid.render).mockClear();
-
-      // Setup a new mock return value for the re-render
       vi.mocked(mermaid.render).mockResolvedValue({
         svg: `<svg class="mermaid-svg">new graph</svg>`,
         bindFunctions: vi.fn(),
@@ -108,7 +98,6 @@ describe("InteractiveMermaid.vue", () => {
 
     it("copies the diagram source to the clipboard", async () => {
       await wrapper.find('button[title="Copy Source"]').trigger("click");
-
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
         "graph TD; A-->B;",
       );
@@ -127,7 +116,7 @@ describe("InteractiveMermaid.vue", () => {
     });
 
     it("resets view on button click", async () => {
-      wrapper.vm.scale = 2.0; // Manually change state
+      wrapper.vm.scale = 2.0;
       await wrapper.find('button[title="Reset View"]').trigger("click");
       expect(wrapper.vm.scale).toBe(1);
     });
@@ -160,6 +149,44 @@ describe("InteractiveMermaid.vue", () => {
       expect(mermaid.initialize).toHaveBeenCalledWith(
         expect.objectContaining({ theme: "dark" }),
       );
+    });
+
+    // RESTORED AND IMPROVED TEST CASE
+    it("re-initializes and re-renders when the body class changes", async () => {
+      // 1. Initial state (light mode)
+      document.body.className = "";
+      wrapper = mountComponent();
+      await flushPromises();
+
+      // Assert initial call
+      expect(mermaid.initialize).toHaveBeenCalledTimes(1);
+      expect(mermaid.initialize).toHaveBeenLastCalledWith(
+        expect.objectContaining({ theme: "default" }),
+      );
+      // The render call happens after initialize
+      expect(mermaid.render).toHaveBeenCalledTimes(1);
+
+      // 2. Act: Change the DOM, simulating a theme toggle
+      document.body.className = "dark";
+      await flushPromises(); // Wait for MutationObserver and re-render
+
+      // 3. Assert: Check for re-initialization and re-render with the new theme
+      expect(mermaid.initialize).toHaveBeenCalledTimes(2);
+      expect(mermaid.initialize).toHaveBeenLastCalledWith(
+        expect.objectContaining({ theme: "dark" }),
+      );
+      expect(mermaid.render).toHaveBeenCalledTimes(2);
+
+      // 4. Act: Change it back to light mode
+      document.body.className = "";
+      await flushPromises();
+
+      // 5. Assert: Check again
+      expect(mermaid.initialize).toHaveBeenCalledTimes(3);
+      expect(mermaid.initialize).toHaveBeenLastCalledWith(
+        expect.objectContaining({ theme: "default" }),
+      );
+      expect(mermaid.render).toHaveBeenCalledTimes(3);
     });
   });
 });

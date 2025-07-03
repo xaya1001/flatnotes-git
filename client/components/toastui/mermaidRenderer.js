@@ -1,5 +1,4 @@
 // client/components/toastui/mermaidRenderer.js
-import { onMounted, onUnmounted, nextTick } from "vue";
 import { createApp } from "vue";
 import InteractiveMermaid from "./InteractiveMermaid.vue";
 
@@ -65,29 +64,4 @@ export function renderMermaidBlocks(containerElement) {
 
     componentInstanceMap.set(mountPoint, app);
   }
-}
-
-/**
- * A composable that manages the lifecycle of Mermaid diagrams within a component.
- * @param {import('vue').Ref<HTMLElement>} elementRef - The ref pointing to the container.
- */
-export function useMermaidRenderer(elementRef) {
-  const render = () => {
-    nextTick(() => {
-      if (elementRef.value) {
-        renderMermaidBlocks(elementRef.value);
-      }
-    });
-  };
-
-  const cleanup = () => {
-    if (elementRef.value) {
-      cleanupMermaidRenders(elementRef.value);
-    }
-  };
-
-  onMounted(render);
-  onUnmounted(cleanup);
-
-  return { render, cleanup };
 }

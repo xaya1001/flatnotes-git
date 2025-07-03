@@ -313,8 +313,12 @@
 }
 
 .mermaid-render-target {
-  @apply will-change: grid h-full w-full transform place-items-center transition-transform duration-200 ease-in-out;
+  @apply grid h-full w-full place-items-center transition-transform duration-200 ease-in-out;
 
+  /* Add browser optimization hint for smoother transforms */
+  will-change: transform;
+
+  /* When dragging with the mouse, disable the transition for instant, smooth feedback */
   &.is-dragging {
     transition: none;
   }
