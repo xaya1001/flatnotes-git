@@ -1,0 +1,138 @@
+/* client/components/milkdown/theme-flatnotes/style.scss */
+
+.flatnotes-theme {
+  // --- Base Styles ---
+  font-family: "Poppins", sans-serif;
+  color: rgb(var(--theme-text));
+  padding: 1rem 0;
+
+  // --- Typography & Block Elements ---
+  p {
+    line-height: 1.6rem;
+    margin: 0 0 1rem 0;
+  }
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-weight: bold;
+    line-height: 1.4;
+    margin: 1em 0 0.5em 0;
+  }
+  h1 {
+    font-size: 1.75rem;
+  }
+  h2 {
+    font-size: 1.6rem;
+  }
+  h3 {
+    font-size: 1.45rem;
+  }
+  h4 {
+    font-size: 1.3rem;
+  }
+  h5 {
+    font-size: 1.15rem;
+  }
+  h6 {
+    font-size: 1rem;
+  }
+  a {
+    color: rgb(var(--theme-brand));
+    text-decoration: underline;
+  }
+  hr {
+    border: none;
+    border-top: 1px solid rgb(var(--theme-border));
+    margin: 2em 0;
+  }
+  blockquote {
+    padding-left: 1em;
+    border-left: 4px solid rgb(var(--theme-border));
+    color: rgb(var(--theme-text-muted));
+    margin: 1rem 0;
+  }
+
+  // --- LISTS ---
+
+  .milkdown-list-item-block {
+    margin: 0 !important;
+    padding: 0 !important;
+
+    > .list-item {
+      margin: 0 0 0.25rem 0;
+
+      display: flex;
+      align-items: baseline;
+
+      .label-wrapper {
+        width: 2em;
+        flex-shrink: 0;
+        display: flex;
+        justify-content: flex-end;
+        align-items: center;
+        padding-right: 0.5em;
+        color: rgb(var(--theme-text-muted));
+        font-weight: 600;
+
+        svg {
+          width: 1.25em;
+          height: 1.25em;
+          position: relative;
+          top: 0.2em;
+        }
+      }
+
+      .children {
+        flex-grow: 1;
+        min-width: 0;
+
+        p {
+          margin: 0 !important;
+          padding: 0 !important;
+        }
+      }
+    }
+  }
+
+  // --- Code & Tables ---
+  code {
+    background-color: rgb(var(--theme-background-elevated));
+    padding: 0.2em 0.4em;
+    border-radius: 4px;
+    font-family: Consolas, "Lucida Console", Monaco, "Andale Mono", monospace;
+    font-size: 0.9em;
+  }
+  pre {
+    font-family: Consolas, "Lucida Console", Monaco, "Andale Mono", monospace;
+    background-color: rgb(var(--theme-background-elevated)) !important;
+    color: rgb(var(--theme-text));
+    padding: 1em;
+    border-radius: 8px;
+    margin: 1em 0;
+    code {
+      background-color: transparent !important;
+      padding: 0;
+      font-size: 1em;
+    }
+  }
+  table {
+    width: 100%;
+    border-spacing: 0;
+    border-collapse: collapse;
+    margin: 1em 0;
+    border: 1px solid rgb(var(--theme-border));
+    th,
+    td {
+      border: 1px solid rgb(var(--theme-border));
+      padding: 0.5em 1em;
+      text-align: left;
+    }
+    th {
+      background-color: rgb(var(--theme-background-elevated));
+      font-weight: bold;
+    }
+  }
+}

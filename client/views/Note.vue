@@ -89,34 +89,26 @@
     <hr v-if="!editMode" class="my-4 border-theme-border" />
 
     <!-- Content -->
-    <div class="flex-1">
-      <ToastViewer
-        v-if="!editMode"
-        :initialValue="note.content"
-        class="toast-viewer pb-4"
-      />
-      <ToastEditor
-        v-if="editMode"
-        ref="toastEditor"
-        :initialValue="getInitialEditorValue()"
-        :initialEditType="loadDefaultEditorMode()"
-        :addImageBlobHook="addImageBlobHook"
-        @change="startContentChangedTimeout"
-        @keydown="keydownHandler"
-      />
-    </div>
+    <MilkdownProvider>
+      <div class="flex-1">
+        <MilkdownViewer
+          v-if="!editMode"
+          :initialValue="note.content"
+          class="pb-4"
+        />
+        <ToastEditor
+          v-if="editMode"
+          ref="toastEditor"
+          :initialValue="getInitialEditorValue()"
+          :initialEditType="loadDefaultEditorMode()"
+          :addImageBlobHook="addImageBlobHook"
+          @change="startContentChangedTimeout"
+          @keydown="keydownHandler"
+        />
+      </div>
+    </MilkdownProvider>
   </LoadingIndicator>
 </template>
-
-<style>
-/* Disable checkboxes in view mode. See https://github.com/nhn/tui.editor/issues/1087. */
-.toast-viewer li.task-list-item {
-  pointer-events: none;
-}
-.toast-viewer li.task-list-item a {
-  pointer-events: auto;
-}
-</style>
 
 <script setup>
 import { mdiNoteOffOutline } from "@mdi/js";
@@ -140,7 +132,9 @@ import CustomButton from "../components/CustomButton.vue";
 import LoadingIndicator from "../components/LoadingIndicator.vue";
 import Toggle from "../components/Toggle.vue";
 import ToastEditor from "../components/toastui/ToastEditor.vue";
-import ToastViewer from "../components/toastui/ToastViewer.vue";
+// NEW: Import the Milkdown viewer and provider
+import { MilkdownProvider } from "@milkdown/vue";
+import MilkdownViewer from "../components/milkdown/MilkdownViewer.vue";
 import { authTypes } from "../constants.js";
 import { useGlobalStore } from "../globalStore.js";
 import { getToastOptions } from "../helpers.js";

@@ -22,6 +22,9 @@
     "@mdi/light-js": "0.2.63",
     "@toast-ui/editor": "3.2.2",
     "@toast-ui/editor-plugin-code-syntax-highlight": "3.1.0",
+    "@milkdown/kit": "^7.15.1",
+    "@milkdown/plugin-prism": "^7.15.1",
+    "@milkdown/vue": "^7.15.1",
     "axios": "1.8.4",
     "compressorjs": "^1.2.1",
     "mermaid": "^11.7.0",
@@ -29,6 +32,7 @@
     "mousetrap": "1.6.5",
     "pinia": "2.3.1",
     "primevue": "3.53.1",
+    "prismjs": "^1.30.0",
     "uuid": "^11.1.0",
     "vue": "3.5.13",
     "vue-router": "4.5.0"
