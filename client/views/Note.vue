@@ -38,75 +38,80 @@
     "
   />
 
-  <LoadingIndicator ref="loadingIndicator" class="flex h-full flex-col">
+  <LoadingIndicator ref="loadingIndicator">
     <!-- Header -->
-    <div class="flex flex-col-reverse md:flex-row md:items-baseline">
-      <!-- Title -->
-      <div class="grow truncate text-3xl leading-[1.6em]">
-        <span v-show="!editMode" :title="note.title">{{ note.title }}</span>
-        <input
-          v-show="editMode"
-          v-model.trim="newTitle"
-          class="w-full bg-theme-background outline-none"
-          placeholder="Title"
-        />
-      </div>
+    <div
+      class="fixed left-0 right-0 top-20 z-10 h-16 border-b border-theme-border bg-theme-background"
+    >
+      <div class="container mx-auto flex h-full items-center px-2">
+        <!-- Title -->
+        <div class="grow truncate text-3xl leading-[1.6em]">
+          <span v-show="!editMode" :title="note.title">{{ note.title }}</span>
+          <input
+            v-show="editMode"
+            v-model.trim="newTitle"
+            class="w-full bg-theme-background outline-none"
+            placeholder="Title"
+          />
+        </div>
 
-      <!-- Buttons -->
-      <div class="flex shrink-0 self-end md:self-baseline print:hidden">
-        <!-- Delete Button -->
-        <CustomButton
-          v-show="canModify && !isNewNote"
-          label="Delete"
-          :iconPath="mdilDelete"
-          @click="deleteHandler"
-        />
-        <!-- Save Button -->
-        <CustomButton
-          v-show="editMode"
-          label="Save"
-          :iconPath="mdilContentSave"
-          @click="saveHandler((close = false))"
-          class="relative ml-1"
-        >
-          <!-- Unsaved Changes Indicator -->
-          <div
-            v-show="unsavedChanges"
-            class="absolute right-1 h-1.5 w-1.5 rounded-full bg-theme-brand"
-          ></div>
-        </CustomButton>
-        <!-- Edit Toggle -->
-        <Toggle
-          v-if="canModify"
-          label="Edit"
-          :isOn="editMode"
-          class="ml-1"
-          @click="toggleEditModeHandler"
-        />
+        <!-- Buttons -->
+        <div class="flex shrink-0 self-center print:hidden">
+          <!-- Delete Button -->
+          <CustomButton
+            v-show="canModify && !isNewNote"
+            label="Delete"
+            :iconPath="mdilDelete"
+            @click="deleteHandler"
+          />
+          <!-- Save Button -->
+          <CustomButton
+            v-show="editMode"
+            label="Save"
+            :iconPath="mdilContentSave"
+            @click="saveHandler((close = false))"
+            class="relative ml-1"
+          >
+            <!-- Unsaved Changes Indicator -->
+            <div
+              v-show="unsavedChanges"
+              class="absolute right-1 h-1.5 w-1.5 rounded-full bg-theme-brand"
+            ></div>
+          </CustomButton>
+          <!-- Edit Toggle -->
+          <Toggle
+            v-if="canModify"
+            label="Edit"
+            :isOn="editMode"
+            class="ml-1"
+            @click="toggleEditModeHandler"
+          />
+        </div>
       </div>
     </div>
 
-    <hr v-if="!editMode" class="my-4 border-theme-border" />
-
     <!-- Content -->
-    <MilkdownProvider>
-      <div class="flex-1">
-        <MilkdownViewer
-          v-if="!editMode"
-          :initialValue="note.content"
-          class="pb-4"
-        />
-        <ToastEditor
-          v-if="editMode"
-          ref="toastEditor"
-          :initialValue="getInitialEditorValue()"
-          :initialEditType="loadDefaultEditorMode()"
-          :addImageBlobHook="addImageBlobHook"
-          @change="startContentChangedTimeout"
-          @keydown="keydownHandler"
-        />
-      </div>
-    </MilkdownProvider>
+    <div class="pt-36">
+      <MilkdownProvider>
+        <div class="px-1 pt-4">
+          <MilkdownViewer
+            v-if="!editMode && note.content !== undefined"
+            :key="note.title"
+            :initialValue="note.content || ''"
+            class="pb-4"
+          />
+          <MilkdownEditor
+            v-if="editMode"
+            ref="milkdownEditor"
+            :key="`editor-${note.title}`"
+            :initialValue="getInitialEditorValue()"
+            :addImageBlobHook="addImageBlobHook"
+            @change="startContentChangedTimeout"
+            @keydown="keydownHandler"
+          />
+        </div>
+      </MilkdownProvider>
+    </div>
   </LoadingIndicator>
 </template>
 
@@ -117,6 +122,7 @@ import Mousetrap from "mousetrap";
 import { useToast } from "primevue/usetoast";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
+import Compressor from "compressorjs";
 
 import {
   apiErrorHandler,
@@ -131,15 +137,14 @@ import ConfirmModal from "../components/ConfirmModal.vue";
 import CustomButton from "../components/CustomButton.vue";
 import LoadingIndicator from "../components/LoadingIndicator.vue";
 import Toggle from "../components/Toggle.vue";
-import ToastEditor from "../components/toastui/ToastEditor.vue";
-// NEW: Import the Milkdown viewer and provider
 import { MilkdownProvider } from "@milkdown/vue";
+import MilkdownEditor from "../components/milkdown/MilkdownEditor.vue";
 import MilkdownViewer from "../components/milkdown/MilkdownViewer.vue";
+
 import { authTypes } from "../constants.js";
 import { useGlobalStore } from "../globalStore.js";
 import { getToastOptions } from "../helpers.js";
 import eventBus from "../git-integration/services/eventBus";
-import Compressor from "compressorjs";
 
 const props = defineProps({
   title: String,
@@ -161,7 +166,7 @@ const reservedFilenameCharacters = /[<>:"/\\|?*]/;
 const router = useRouter();
 const newTitle = ref();
 const toast = useToast();
-const toastEditor = ref();
+const milkdownEditor = ref(null);
 const unsavedChanges = ref(false);
 
 function init() {
@@ -184,13 +189,11 @@ function init() {
           loadingIndicator.value.setFailed();
           apiErrorHandler(error, toast);
         }
+        console.error("Note.vue: Failed to load note.", error);
       });
   } else {
     newTitle.value = "";
-    note.value = new Note();
-    // Set the editMode to false to close any existing editors.
-    // This ensures the editor is cleanly reinitialised in an empty state.
-    // Simple fix for #266 without requiring a full re-work of the logic.
+    note.value = new Note({ content: "" });
     editMode.value = false;
     nextTick(() => {
       editHandler();
@@ -225,7 +228,9 @@ function setEditMode() {
 
 function getInitialEditorValue() {
   const draftContent = loadDraft();
-  return draftContent ? draftContent : note.value.content;
+  const initialValue = draftContent ? draftContent : note.value.content;
+
+  return initialValue;
 }
 
 // Note Deletion
@@ -247,9 +252,6 @@ function deleteConfirmedHandler() {
 
 // Note Saving
 function saveHandler(close = false) {
-  // Save Default Editor Mode
-  saveDefaultEditorMode();
-
   // Empty Title Validation
   if (!newTitle.value) {
     toast.add(
@@ -263,9 +265,14 @@ function saveHandler(close = false) {
     badFilenameToast("Title");
     return;
   }
-
+  if (!milkdownEditor.value) {
+    console.error(
+      "Note.vue: Save handler called but editor ref is not available.",
+    );
+    return;
+  }
   // Save Note
-  let newContent = toastEditor.value.getMarkdown();
+  let newContent = milkdownEditor.value.getMarkdown();
   if (isNewNote.value) {
     saveNew(newTitle.value, newContent, close);
   } else {
@@ -294,7 +301,9 @@ function saveNew(newTitle, newContent, close = false) {
 
 function saveExisting(newTitle, newContent, close = false) {
   // Return if no changes
-  if (newTitle == note.value.title && newContent == note.value.content) {
+  const titleChanged = newTitle !== note.value.title;
+  const contentChanged = newContent !== note.value.content;
+  if (!titleChanged && !contentChanged) {
     noteSaveSuccess(close);
     return;
   }
@@ -303,13 +312,17 @@ function saveExisting(newTitle, newContent, close = false) {
     .then((data) => {
       clearDraft();
       note.value = data;
-      router.replace({ name: "note", params: { title: note.value.title } });
+      if (titleChanged) {
+        router.replace({ name: "note", params: { title: note.value.title } });
+      } else {
+      }
       noteSaveSuccess(close);
     })
     .catch(noteSaveFailure);
 }
 
 function noteSaveFailure(error) {
+  console.error("Note.vue: Note save failed.", error);
   if (error.response?.status === 409) {
     toast.add(
       getToastOptions(
@@ -349,23 +362,15 @@ function closeNote() {
   editMode.value = false;
   if (isNewNote.value) {
     router.push({ name: "home" });
-  } else {
-    editMode.value = false;
   }
 }
 
 // Image Upload
 function uploadAndInsert(fileToUpload, callback) {
-  const altTextInputValue = document.getElementById(
-    "toastuiAltTextInput",
-  )?.value;
-
   // Upload the image then use the callback to insert the URL into the editor
   postAttachment(fileToUpload).then(function (data) {
     if (data) {
-      // If the user has entered an alt text, use it. Otherwise, use the filename returned by the API.
-      const altText = altTextInputValue ? altTextInputValue : data.filename;
-      callback(data.url, altText);
+      callback(data.url, data.filename);
     }
   });
 }
@@ -491,9 +496,11 @@ function contentChangedHandler() {
 
 // Drafts
 function saveDraft() {
-  const content = toastEditor.value.getMarkdown();
-  if (content) {
-    localStorage.setItem(note.value.title, content);
+  if (milkdownEditor.value) {
+    const content = milkdownEditor.value.getMarkdown();
+    if (content) {
+      localStorage.setItem(note.value.title, content);
+    }
   }
 }
 
@@ -554,27 +561,16 @@ function setBeforeUnloadConfirmation(enable = true) {
     window.onbeforeunload = null;
   }
 }
-
-function saveDefaultEditorMode() {
-  const isWysiwygMode = toastEditor.value.isWysiwygMode();
-  localStorage.setItem(
-    "defaultEditorMode",
-    isWysiwygMode ? "wysiwyg" : "markdown",
-  );
-}
-
-function loadDefaultEditorMode() {
-  const defaultWysiwygMode = localStorage.getItem("defaultEditorMode");
-  return defaultWysiwygMode || "markdown";
-}
-
 function isContentChanged() {
+  if (!milkdownEditor.value) return false;
   return (
     newTitle.value != note.value.title ||
-    toastEditor.value.getMarkdown() != note.value.content
+    milkdownEditor.value.getMarkdown() != note.value.content
   );
 }
 
 watch(() => props.title, init);
-onMounted(init);
+onMounted(() => {
+  init();
+});
 </script>

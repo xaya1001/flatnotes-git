@@ -1,23 +1,35 @@
 <template>
   <LoadingIndicator
     ref="loadingIndicator"
-    class="container mx-auto flex h-screen flex-col px-2 py-4 print:max-w-full"
+    class="container mx-auto px-2 py-4 print:max-w-full"
   >
     <PrimeToast />
     <ConfirmDialog />
     <SearchModal v-model="isSearchModalVisible" />
+
+    <!-- The fixed NavBar -->
+    <div
+      v-if="showNavBar"
+      class="fixed left-0 right-0 top-0 z-20 h-20 bg-theme-background"
+    >
+      <div class="container mx-auto h-full px-2 py-3">
+        <NavBar
+          ref="navBar"
+          :class="{ 'print:hidden': route.name == 'note' }"
+          class="h-full"
+          :hide-logo="!showNavBarLogo"
+          @toggleSearchModal="toggleSearchModal"
+        />
+      </div>
+    </div>
+
     <template v-if="isConfigLoaded">
-      <NavBar
-        v-if="showNavBar"
-        ref="navBar"
-        :class="{ 'print:hidden': route.name == 'note' }"
-        :hide-logo="!showNavBarLogo"
-        @toggleSearchModal="toggleSearchModal"
-      />
-      <RouterView :key="route.fullPath" />
+      <div>
+        <RouterView :key="route.fullPath" />
+      </div>
       <GitSidebar v-if="gitIntegrationEnabled" />
     </template>
-    <div v-else class="flex flex-grow items-center justify-center">
+    <div v-else class="flex h-screen flex-grow items-center justify-center">
       <p class="text-theme-text-muted">Loading application...</p>
     </div>
   </LoadingIndicator>
@@ -96,13 +108,8 @@ onMounted(() => {
   loadTheme();
 });
 
-const showNavBar = computed(() => {
-  return route.name !== "login";
-});
-
-const showNavBarLogo = computed(() => {
-  return route.name !== "home";
-});
+const showNavBar = computed(() => route.name !== "login");
+const showNavBarLogo = computed(() => route.name !== "home");
 
 function toggleSearchModal() {
   isSearchModalVisible.value = !isSearchModalVisible.value;
