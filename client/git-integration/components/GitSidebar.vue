@@ -99,29 +99,115 @@
           </div>
         </div>
 
-        <!-- Uninitialized State View -->
+        <!-- Welcome / Setup Guide View -->
         <div
           v-else-if="
             statusStore.summaryError &&
-            statusStore.summaryError.includes('not initialized')
+            (statusStore.summaryError.includes('not initialized') ||
+              statusStore.summaryError.includes('not found'))
           "
-          class="flex flex-grow flex-col items-center justify-center p-8 text-center"
+          class="flex h-full flex-col p-4 text-sm"
         >
-          <SvgIcon
-            type="mdi"
-            :path="mdiSourceRepository"
-            :size="48"
-            class="mb-4 text-theme-text-muted"
-          />
-          <h3 class="text-lg font-semibold">Git Repository Not Found</h3>
-          <p class="mt-2 text-sm text-theme-text-muted">
-            The notes directory is not a Git repository.
-          </p>
-          <p class="mt-4 text-xs text-theme-text-very-muted">
-            To get started, you can either initialize it manually on your
-            server, or restart Flatnotes with the environment variable
-            <code class="font-semibold">FLATNOTES_GIT_AUTO_INIT=true</code>.
-          </p>
+          <div class="mb-4 flex-shrink-0 text-center">
+            <SvgIcon
+              type="mdi"
+              :path="mdiSourceRepository"
+              :size="48"
+              class="mb-2 text-theme-text-muted"
+            />
+            <h3 class="text-lg font-semibold">Connect Your Git Repository</h3>
+            <p class="mt-1 text-theme-text-muted">
+              We couldn't find a Git repository in your notes directory.
+            </p>
+            <p class="mt-1 text-theme-text-muted">
+              Please choose one of the options below.
+            </p>
+          </div>
+
+          <div class="flex-grow space-y-4 overflow-y-auto pr-2">
+            <!-- Option 1: Start a New Repository -->
+            <div class="rounded-lg bg-theme-background p-4">
+              <h4 class="font-semibold text-theme-text">
+                Option 1: Start a New Repository
+              </h4>
+              <p class="mt-1 text-xs text-theme-text-muted">
+                Choose this if you want to create a brand-new repository for
+                your existing notes.
+              </p>
+              <div class="mt-3 rounded bg-black/10 p-3 text-left">
+                <p class="font-semibold">Easiest Method:</p>
+                <p class="mt-1 text-xs">
+                  Set this environment variable and restart Flatnotes:
+                </p>
+                <code
+                  class="font-mono mt-2 block rounded bg-black/20 px-2 py-1 text-xs text-theme-text"
+                  >FLATNOTES_GIT_AUTO_INIT=true</code
+                >
+              </div>
+            </div>
+
+            <!-- Option 2: Connect an Existing Remote Repository -->
+            <div class="rounded-lg bg-theme-background p-4">
+              <h4 class="font-semibold text-theme-text">
+                Option 2: Connect an Existing Remote Repo
+              </h4>
+              <p class="mt-1 text-xs text-theme-text-muted">
+                Choose this if you already have a notes repository on GitHub,
+                etc. This requires command-line access to your server.
+              </p>
+              <div class="mt-3 rounded bg-black/10 p-3 text-left">
+                <p class="font-semibold">Instructions:</p>
+                <div class="mt-2 space-y-3 text-xs">
+                  <p>
+                    <strong class="text-orange-400">1. IMPORTANT:</strong> Your
+                    notes directory on the server
+                    <strong class="text-orange-400">must not exist</strong> or
+                    be completely empty for `git clone` to work.
+                  </p>
+                  <p>
+                    <strong>2. Clean Up (if needed):</strong> If you have an
+                    existing `data` directory (e.g., from a previous setup or
+                    accidental `AUTO_INIT`), back up any important files from
+                    it, then
+                    <strong class="text-orange-400"
+                      >remove the entire directory</strong
+                    >:
+                  </p>
+                  <code
+                    class="font-mono mt-1 block rounded bg-black/20 px-2 py-1 text-xs text-theme-text"
+                    ># From the PARENT directory of 'data': # 1. Back up your
+                    notes first! # 2. Then run: rm -rf data</code
+                  >
+                  <p>
+                    <strong>3. Clone the Repository:</strong> In the same parent
+                    directory, run `git clone`. This will create a new `data`
+                    directory linked to your remote.
+                  </p>
+                  <p class="mt-1">
+                    <strong class="text-orange-400"
+                      >You must use the SSH URL</strong
+                    >, not HTTPS. You can find it under the "Code" button on
+                    your GitHub repository page.
+                  </p>
+                  <code
+                    class="font-mono block rounded bg-black/20 px-2 py-1 text-xs text-theme-text"
+                    >git clone git@github.com:YOUR_USERNAME/YOUR_REPO.git
+                    data</code
+                  >
+                  <p>
+                    <strong>4.</strong> Ensure file permissions are correct and
+                    <strong class="text-orange-400"
+                      >your server's SSH key is added to GitHub</strong
+                    >. Then, <strong>restart Flatnotes</strong>.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div
+            class="mt-4 flex-shrink-0 border-t border-theme-border pt-3 text-center"
+          ></div>
         </div>
 
         <!-- Main View (for initialized repos) -->

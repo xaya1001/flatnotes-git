@@ -83,7 +83,7 @@ describe("GitSidebar.vue", () => {
     expect(wrapper.find("#conflict-view").exists()).toBe(true);
   });
 
-  it("renders uninitialized message on specific error", async () => {
+  it("renders the setup guide on specific error", async () => {
     const wrapper = mountComponent();
     const store = useStatusStore();
     store.isInitialLoadComplete = true;
@@ -91,7 +91,17 @@ describe("GitSidebar.vue", () => {
 
     await wrapper.vm.$nextTick();
 
-    expect(wrapper.text()).toContain("Git Repository Not Found");
+    // Check for the new, user-friendly title
+    expect(wrapper.text()).toContain("Connect Your Git Repository");
+
+    // Verify that both setup options are present
+    expect(wrapper.text()).toContain("Option 1: Start a New Repository");
+    expect(wrapper.text()).toContain(
+      "Option 2: Connect an Existing Remote Repo",
+    );
+
+    // Ensure the old, less helpful text is gone
+    expect(wrapper.text()).not.toContain("Git Repository Not Found");
   });
 
   it("shows loading state initially", () => {

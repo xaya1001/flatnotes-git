@@ -1,5 +1,5 @@
 # server/git_integration/websockets.py
-from typing import List
+from typing import List, Optional
 
 from fastapi import (
     APIRouter,
@@ -10,8 +10,8 @@ from fastapi import (
     status,
 )
 
+from auth.base import BaseAuth
 from logger import logger
-from main import auth
 
 # Create a new, dedicated router for WebSocket endpoints
 ws_router = APIRouter()
@@ -23,7 +23,9 @@ async def get_websocket_token(websocket: WebSocket):
     If authentication fails, it raises a WebSocketException, which cleanly
     terminates the connection and prevents the endpoint from running.
     """
-    if not auth:
+    auth_service: Optional[BaseAuth] = getattr(websocket.app.state, "auth", None)
+
+    if not auth_service:
         # If auth is disabled, allow the connection to proceed.
         return
 
@@ -38,7 +40,7 @@ async def get_websocket_token(websocket: WebSocket):
 
     try:
         # Use the now-public validation logic from the existing auth module
-        auth.validate_token(token)
+        auth_service.validate_token(token)
         logger.debug(
             f"WebSocket client authenticated successfully: {websocket.client.host}"
         )

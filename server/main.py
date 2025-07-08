@@ -78,17 +78,15 @@ async def lifespan(app: FastAPI):
     """Handles application startup and shutdown events."""
     logger.info("Application startup...")
 
+    app.state.auth = auth
+    app.state.git_service = None
+
     # Only configure scheduler and webhooks if git integration was successfully loaded
     if git_integration_router and git_config.GIT_ENABLED:
         logger.info("Git integration is enabled.")
 
         # --- Create and store the singleton GitService instance ---
         try:
-            repository = Repository(
-                repo_path=git_config.GIT_REPO_PATH,
-                default_branch=git_config.GIT_DEFAULT_BRANCH,
-                default_remote=git_config.GIT_REMOTE_NAME,
-            )
             executor = Executor(
                 repo_path=git_config.GIT_REPO_PATH,
                 default_branch=git_config.GIT_DEFAULT_BRANCH,
@@ -96,64 +94,71 @@ async def lifespan(app: FastAPI):
                 user_name=git_config.GIT_COMMIT_USER_NAME,
                 user_email=git_config.GIT_COMMIT_USER_EMAIL,
             )
+            repository = Repository(
+                repo_path=git_config.GIT_REPO_PATH,
+                default_branch=git_config.GIT_DEFAULT_BRANCH,
+                default_remote=git_config.GIT_REMOTE_NAME,
+            )
             app.state.git_service = GitService(repository=repository, executor=executor)
             logger.info("Singleton GitService instance created and stored.")
+
+            # Determine the active automatic sync method. Webhook takes precedence.
+            if git_config.GIT_WEBHOOK_ACTIVE:
+                logger.info("Sync Mode: Real-time fetch via Webhook is active.")
+
+            elif git_config.GIT_AUTO_FETCH_INTERVAL > 0:
+                interval = git_config.GIT_AUTO_FETCH_INTERVAL
+                logger.info(
+                    f"Sync Mode: Scheduled fetch is active with an interval of {interval} minutes (fallback mode)."
+                )
+
+                scheduler = BackgroundScheduler(daemon=True)
+
+                # This must be a standard 'def' function, not 'async def',
+                # because APScheduler runs it in a separate thread.
+                def scheduled_fetch_job():
+                    """A lightweight job that only performs a git fetch."""
+                    if not app.state.git_service:
+                        logger.warning(
+                            "Scheduled fetch skipped: Git service not available."
+                        )
+                        return
+
+                    logger.debug("Executing scheduled git fetch...")
+                    try:
+                        # Use the singleton instance
+                        service: GitService = app.state.git_service
+                        service.executor.fetch()
+                        # Run the async broadcast function from this sync thread
+                        asyncio.run(connection_manager.broadcast_status_update())
+                        add_git_log(
+                            LogLevel.SUCCESS,
+                            "Scheduled fetch successful",
+                            details="Remote changes (if any) have been fetched.",
+                            persist=False,
+                            log_id=AUTO_FETCH_LOG_ID,
+                        )
+                    except Exception as e:
+                        logger.error(f"Scheduled git fetch failed: {e}")
+                        add_git_log(
+                            LogLevel.ERROR,
+                            "Scheduled fetch failed",
+                            details=str(e),
+                            persist=True,
+                            log_id=AUTO_FETCH_LOG_ID,
+                        )
+
+                scheduler.add_job(scheduled_fetch_job, "interval", minutes=interval)
+                scheduler.start()
+                app.state.scheduler = scheduler
+                logger.info("Scheduler for auto-fetch started.")
+            else:
+                logger.info(
+                    "Sync Mode: Manual sync only. No automatic fetch configured."
+                )
+
         except Exception as e:
             logger.error(f"FATAL: Failed to initialize GitService on startup: {e}")
-            app.state.git_service = None
-
-        # Determine the active automatic sync method. Webhook takes precedence.
-        if git_config.GIT_WEBHOOK_ACTIVE:
-            logger.info("Sync Mode: Real-time fetch via Webhook is active.")
-
-        elif git_config.GIT_AUTO_FETCH_INTERVAL > 0:
-            interval = git_config.GIT_AUTO_FETCH_INTERVAL
-            logger.info(
-                f"Sync Mode: Scheduled fetch is active with an interval of {interval} minutes (fallback mode)."
-            )
-
-            scheduler = BackgroundScheduler(daemon=True)
-
-            # This must be a standard 'def' function, not 'async def',
-            # because APScheduler runs it in a separate thread.
-            def scheduled_fetch_job():
-                """A lightweight job that only performs a git fetch."""
-                if not app.state.git_service:
-                    logger.warning(
-                        "Scheduled fetch skipped: Git service not available."
-                    )
-                    return
-
-                logger.debug("Executing scheduled git fetch...")
-                try:
-                    # Use the singleton instance
-                    service: GitService = app.state.git_service
-                    service.executor.fetch()
-                    # Run the async broadcast function from this sync thread
-                    asyncio.run(connection_manager.broadcast_status_update())
-                    add_git_log(
-                        LogLevel.SUCCESS,
-                        "Scheduled fetch successful",
-                        details="Remote changes (if any) have been fetched.",
-                        persist=False,
-                        log_id=AUTO_FETCH_LOG_ID,
-                    )
-                except Exception as e:
-                    logger.error(f"Scheduled git fetch failed: {e}")
-                    add_git_log(
-                        LogLevel.ERROR,
-                        "Scheduled fetch failed",
-                        details=str(e),
-                        persist=True,
-                        log_id=AUTO_FETCH_LOG_ID,
-                    )
-
-            scheduler.add_job(scheduled_fetch_job, "interval", minutes=interval)
-            scheduler.start()
-            app.state.scheduler = scheduler
-            logger.info("Scheduler for auto-fetch started.")
-        else:
-            logger.info("Sync Mode: Manual sync only. No automatic fetch configured.")
 
     yield
 

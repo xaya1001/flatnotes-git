@@ -9,7 +9,12 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pygit2
 from pygit2 import GitError
-from pygit2.enums import FileStatus, RepositoryState, SortMode
+from pygit2.enums import (
+    FileStatus,
+    RepositoryOpenFlag,
+    RepositoryState,
+    SortMode,
+)
 
 from logger import logger
 
@@ -32,14 +37,7 @@ class Repository:
         self.default_branch = default_branch
         self.default_remote = default_remote
         try:
-            git_repo_path = pygit2.discover_repository(repo_path)
-            if git_repo_path is None:
-                # The decision to auto-init is handled by the Executor.
-                # The Repository reader assumes a valid repo exists.
-                raise RepositoryInvalidError(
-                    f"No Git repository found at or above '{repo_path}'."
-                )
-            self.repo = pygit2.Repository(git_repo_path)
+            self.repo = pygit2.Repository(repo_path, flags=RepositoryOpenFlag.NO_SEARCH)
             logger.info(f"Repository reader initialized for repo at: {self.repo.path}")
         except GitError as e:
             raise RepositoryInvalidError(

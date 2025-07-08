@@ -26,7 +26,12 @@
     >
       <!-- Base Info: Branch Icon and Name (Always Visible) -->
       <div class="flex items-center space-x-2 text-theme-text">
-        <SvgIcon type="mdi" :path="mdilSitemap" :size="20" class="h-5 w-5" />
+        <SvgIcon
+          type="mdi"
+          :path="mdiSourceBranch"
+          :size="20"
+          class="h-5 w-5"
+        />
         <span class="text-sm font-semibold">{{ statusStore.branchName }}</span>
       </div>
 
@@ -87,7 +92,6 @@ import { useStatusStore } from "../stores/statusStore";
 import { usePanelUiStore } from "../stores/panelUiStore";
 import SvgIcon from "@jamescoyle/vue-icon";
 import {
-  mdilSitemap,
   mdilAlert,
   mdilChevronLeft,
   mdilChevronRight,
@@ -95,6 +99,7 @@ import {
   mdilArrowUp,
   mdilAlertOctagon,
 } from "@mdi/light-js";
+import { mdiSourceBranch } from "@mdi/js";
 
 defineEmits(["toggle-sidebar"]);
 

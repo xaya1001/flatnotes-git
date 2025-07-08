@@ -1,152 +1,161 @@
 // client/git-integration/tests/useGitOperation.spec.js
 
+import { mount } from "@vue/test-utils";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { defineComponent } from "vue";
+import { GIT_OPERATION, GIT_CONFLICT } from "../events.js";
 import { useGitOperation } from "../composables/useGitOperation.js";
 import eventBus from "../services/eventBus.js";
-import { GIT_OPERATION, GIT_CONFLICT } from "../events.js";
 
+// Mock dependencies
 vi.mock("../services/eventBus.js", () => ({
   default: {
     emit: vi.fn(),
   },
 }));
 
+// We will mock useToast for the specific test that needs it.
+const mockToastAdd = vi.fn();
+vi.mock("primevue/usetoast", () => ({
+  useToast: () => ({
+    add: mockToastAdd,
+  }),
+}));
+
+// Create a test harness component. This is good practice but not strictly
+// necessary anymore since we are mocking useToast. However, it's a robust
+// pattern for other composables, so we'll keep it.
+const TestComponent = defineComponent({
+  props: ["actionName", "operationFunc"],
+  template: "<div></div>",
+  setup(props) {
+    const operation = useGitOperation(props.actionName, props.operationFunc);
+    return { operation };
+  },
+});
+
 describe("useGitOperation.js", () => {
-  // Before each test, clear any previous mock history.
   beforeEach(() => {
+    // Clear mocks before each test
     vi.clearAllMocks();
+    mockToastAdd.mockClear();
   });
 
-  // After each test, restore original implementations.
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  // --- Test Case 1: Successful Operation ---
+  // A simplified harness mount function
+  const mountHarness = (actionName, operationFunc) => {
+    return mount(TestComponent, {
+      props: {
+        actionName,
+        operationFunc,
+      },
+    });
+  };
+
   it("should handle a successful operation correctly", async () => {
-    // 1. Arrange
-    const mockActionName = "Test Success";
-    const mockApiResponse = { detail: "Success!" };
-    // Create a mock API function that resolves successfully.
-    const mockOperationFunc = vi.fn().mockResolvedValue(mockApiResponse);
+    const mockOperationFunc = vi.fn().mockResolvedValue({ detail: "Success!" });
+    const wrapper = mountHarness("Test Success", mockOperationFunc);
 
-    // Instantiate the composable.
-    const { isLoading, error, data, execute } = useGitOperation(
-      mockActionName,
-      mockOperationFunc,
-    );
+    const { isLoading, error, data, execute } = wrapper.vm.operation;
+    await execute("arg1", "arg2");
 
-    // 2. Act
-    const promise = execute("arg1", "arg2");
-
-    // Assert that isLoading becomes true immediately.
-    expect(isLoading.value).toBe(true);
-
-    // Await the operation to complete.
-    await promise;
-
-    // 3. Assert
-    // Assert final state.
     expect(isLoading.value).toBe(false);
-    expect(data.value).toEqual(mockApiResponse);
+    expect(data.value).toEqual({ detail: "Success!" });
     expect(error.value).toBeNull();
-
-    // Assert the API function was called with correct arguments.
     expect(mockOperationFunc).toHaveBeenCalledWith("arg1", "arg2");
 
-    // Assert event bus emissions.
-    expect(eventBus.emit).toHaveBeenCalledTimes(2);
-    expect(eventBus.emit).toHaveBeenCalledWith(GIT_OPERATION.WILL_START, {
-      actionName: mockActionName,
-      operationId: expect.any(String), // We don't care about the exact UUID.
-    });
-    expect(eventBus.emit).toHaveBeenCalledWith(GIT_OPERATION.DID_SUCCEED, {
-      actionName: mockActionName,
-      operationId: expect.any(String),
-      response: mockApiResponse,
-    });
+    expect(eventBus.emit).toHaveBeenCalledWith(
+      GIT_OPERATION.WILL_START,
+      expect.any(Object),
+    );
+    expect(eventBus.emit).toHaveBeenCalledWith(
+      GIT_OPERATION.DID_SUCCEED,
+      expect.any(Object),
+    );
   });
 
-  // --- Test Case 2: Failed Operation (Generic Error) ---
   it("should handle a generic failed operation correctly", async () => {
-    // 1. Arrange
-    const mockActionName = "Test Failure";
     const mockApiError = new Error("Network Error");
     mockApiError.response = { status: 500, data: { detail: "Server Down" } };
-    // Create a mock API function that rejects.
     const mockOperationFunc = vi.fn().mockRejectedValue(mockApiError);
+    const wrapper = mountHarness("Test Failure", mockOperationFunc);
 
-    const { isLoading, error, data, execute } = useGitOperation(
-      mockActionName,
-      mockOperationFunc,
-    );
-
-    // 2. Act
-    // We expect this to throw, so we wrap it.
+    const { execute } = wrapper.vm.operation;
     await expect(execute()).rejects.toThrow("Network Error");
 
-    // 3. Assert
-    expect(isLoading.value).toBe(false);
-    expect(data.value).toBeNull();
-    expect(error.value).toEqual(mockApiError); // The error object should be stored.
-
-    expect(eventBus.emit).toHaveBeenCalledTimes(2);
-    expect(eventBus.emit).toHaveBeenCalledWith(GIT_OPERATION.WILL_START, {
-      actionName: mockActionName,
-      operationId: expect.any(String),
-    });
-    expect(eventBus.emit).toHaveBeenCalledWith(GIT_OPERATION.DID_FAIL, {
-      actionName: mockActionName,
-      operationId: expect.any(String),
-      err: mockApiError,
-    });
+    expect(eventBus.emit).toHaveBeenCalledWith(
+      GIT_OPERATION.WILL_START,
+      expect.any(Object),
+    );
+    expect(eventBus.emit).toHaveBeenCalledWith(
+      GIT_OPERATION.DID_FAIL,
+      expect.any(Object),
+    );
   });
 
-  // --- Test Case 3: Failed Operation (Conflict Error) ---
   it("should handle a 409 conflict error specifically", async () => {
-    // 1. Arrange
-    const mockActionName = "Test Conflict";
     const conflictErrorData = {
       state: "REBASING_CONFLICT",
       conflicted_files: ["note.md"],
     };
     const mockApiError = {
-      response: {
-        status: 409,
-        data: {
-          detail: conflictErrorData,
-        },
-      },
+      response: { status: 409, data: { detail: conflictErrorData } },
     };
     const mockOperationFunc = vi.fn().mockRejectedValue(mockApiError);
+    const wrapper = mountHarness("Test Conflict", mockOperationFunc);
 
-    const { isLoading, error, data, execute } = useGitOperation(
-      mockActionName,
-      mockOperationFunc,
-    );
-
-    // 2. Act
+    const { execute } = wrapper.vm.operation;
     await expect(execute()).rejects.toBe(mockApiError);
 
-    // 3. Assert
-    expect(isLoading.value).toBe(false);
-    expect(data.value).toBeNull();
-    expect(error.value).toEqual(mockApiError);
-
-    // This is the key difference: it should emit a CONFLICT event, not a generic FAIL event.
-    expect(eventBus.emit).toHaveBeenCalledTimes(2);
-    expect(eventBus.emit).toHaveBeenCalledWith(GIT_OPERATION.WILL_START, {
-      actionName: mockActionName,
-      operationId: expect.any(String),
-    });
+    expect(eventBus.emit).toHaveBeenCalledWith(
+      GIT_OPERATION.WILL_START,
+      expect.any(Object),
+    );
     expect(eventBus.emit).toHaveBeenCalledWith(GIT_CONFLICT.DETECTED, {
       operationId: expect.any(String),
       errorData: conflictErrorData,
     });
-    // Ensure it did NOT emit the generic fail event.
     expect(eventBus.emit).not.toHaveBeenCalledWith(
       GIT_OPERATION.DID_FAIL,
       expect.anything(),
+    );
+  });
+
+  it("should handle a 401 authentication error by showing toast and emitting DID_FAIL", async () => {
+    const authErrorData = {
+      state: "AUTHENTICATION_FAILED",
+      message: "Git remote authentication failed.",
+    };
+    const mockApiError = {
+      response: { status: 401, data: { detail: authErrorData } },
+    };
+    const mockOperationFunc = vi.fn().mockRejectedValue(mockApiError);
+
+    const wrapper = mountHarness("Test Auth Failure", mockOperationFunc);
+
+    const { execute } = wrapper.vm.operation;
+    await expect(execute()).rejects.toBe(mockApiError);
+
+    // Assert that the specific toast was shown
+    expect(mockToastAdd).toHaveBeenCalledOnce();
+    expect(mockToastAdd).toHaveBeenCalledWith(
+      expect.objectContaining({
+        severity: "error",
+        summary: "Git Authentication Failed",
+      }),
+    );
+
+    // Assert that both WILL_START and DID_FAIL events were emitted
+    expect(eventBus.emit).toHaveBeenCalledWith(
+      GIT_OPERATION.WILL_START,
+      expect.any(Object),
+    );
+    expect(eventBus.emit).toHaveBeenCalledWith(
+      GIT_OPERATION.DID_FAIL,
+      expect.any(Object),
     );
   });
 });

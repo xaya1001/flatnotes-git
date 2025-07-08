@@ -18,6 +18,7 @@ from logger import logger
 from . import git_config
 from .core.git_exceptions import (
     BranchNotFoundError,
+    GitAuthenticationError,
     GitManagerError,
     MergeConflictError,
     NoChangesError,
@@ -74,6 +75,17 @@ router = APIRouter()
 
 def handle_git_exception(e: Exception, action: str, service: GitService):
     """Centralized exception handler for Git operations."""
+    if isinstance(e, GitAuthenticationError):
+        error_message = f"Authentication failed during '{action}'."
+        add_git_log(LogLevel.ERROR, error_message, str(e))
+        raise HTTPException(
+            status_code=401,  # 401 Unauthorized
+            detail={
+                "message": "Git remote authentication failed. This is likely an issue with your remote URL (e.g., using HTTPS instead of SSH) or misconfigured SSH keys on the server.",
+                "state": "AUTHENTICATION_FAILED",
+                "raw_error": str(e),
+            },
+        )
     if isinstance(e, MergeConflictError):
         repo_state = service.repository.get_repository_state()
         conflicted_files = service.repository.get_conflicted_files()
@@ -101,7 +113,6 @@ def handle_git_exception(e: Exception, action: str, service: GitService):
     if isinstance(e, (RemoteNotFoundError, BranchNotFoundError)):
         add_git_log(LogLevel.ERROR, f"Not Found: {action}", str(e))
         raise HTTPException(status_code=404, detail=str(e))
-    # This is the new part from the previous fix, which is still relevant
     if isinstance(e, KeyError):
         add_git_log(LogLevel.ERROR, f"Not Found: {action}", str(e))
         raise HTTPException(status_code=404, detail=str(e))

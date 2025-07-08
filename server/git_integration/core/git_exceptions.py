@@ -31,3 +31,7 @@ class BranchNotFoundError(GitManagerError):
 
 class NoChangesError(GitManagerError):
     """Raised when an operation expects changes (e.g., a commit) but finds none."""
+
+
+class GitAuthenticationError(GitManagerError):
+    """Raised when a Git operation fails due to authentication issues."""

@@ -5,13 +5,14 @@ from typing import Any, Dict, List, Optional
 
 import pygit2
 from pygit2 import GitError, IndexEntry, Signature
-from pygit2.enums import SortMode
+from pygit2.enums import RepositoryOpenFlag, SortMode
 
 from logger import logger
 
 from .. import git_config
 from .git_exceptions import (
     BranchNotFoundError,
+    GitAuthenticationError,
     GitManagerError,
     MergeConflictError,
     NoChangesError,
@@ -43,20 +44,25 @@ class Executor:
         self.committer = self.author
 
         try:
-            git_repo_path = pygit2.discover_repository(repo_path)
-            if git_repo_path is None:
+            try:
+                self.repo = pygit2.Repository(
+                    repo_path, flags=RepositoryOpenFlag.NO_SEARCH
+                )
+                logger.info(f"Found existing Git repository at: {repo_path}")
+            except GitError:
                 if git_config.GIT_AUTO_INIT:
                     logger.info(f"Initializing a new Git repository at '{repo_path}'")
                     self.repo = pygit2.init_repository(
                         repo_path, initial_head=self.default_branch
                     )
+                    logger.info(
+                        f"Successfully initialized new Git repository at: {repo_path}"
+                    )
                 else:
                     raise RepositoryInvalidError(
-                        f"No Git repository found at or above '{repo_path}'. "
+                        f"No Git repository found at '{repo_path}'. "
                         "To automatically create one, set FLATNOTES_GIT_AUTO_INIT=true."
                     )
-            else:
-                self.repo = pygit2.Repository(git_repo_path)
 
             # Set user info at repo level if provided, for subprocess commands
             if self.author:
@@ -178,6 +184,15 @@ class Executor:
 STDOUT: {e.stdout}
 STDERR: {e.stderr}"""
             )
+
+            auth_error_patterns = [
+                "could not read username",
+                "permission denied (publickey)",
+                "authentication failed",
+                "fatal: repository not found",
+            ]
+            if any(p in output_lower for p in auth_error_patterns):
+                raise GitAuthenticationError(e.stderr or e.stdout) from e
 
             if command[0] == "push" and (
                 "non-fast-forward" in output_lower

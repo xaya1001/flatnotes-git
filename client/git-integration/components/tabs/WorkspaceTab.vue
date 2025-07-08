@@ -217,7 +217,7 @@
         :title="branchSwitchingTitle"
       >
         <div class="flex items-center space-x-2 text-sm text-theme-text-muted">
-          <SvgIcon type="mdi" :path="mdilSitemap" :size="16" />
+          <SvgIcon type="mdi" :path="mdiSourceBranch" :size="16" />
           <span>{{ statusStore.branchName || "No Branch" }}</span>
 
           <button
@@ -343,7 +343,6 @@ import * as gitApi from "../../gitApi";
 import FileTable from "../shared/FileTable.vue";
 import SvgIcon from "@jamescoyle/vue-icon";
 import {
-  mdilSitemap,
   mdilChevronUp,
   mdilArrowUp,
   mdilArrowDown,
@@ -351,6 +350,7 @@ import {
 } from "@mdi/light-js";
 import {
   mdiCheck,
+  mdiSourceBranch,
   mdiAlertCircleOutline,
   mdiInformationOutline,
 } from "@mdi/js";
