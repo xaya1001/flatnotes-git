@@ -361,6 +361,46 @@ function closeNote() {
 }
 
 // Image Upload
+function addImageBlobHook(file, callback) {
+  if (!file) return;
+
+  const config = globalStore.config;
+
+  if (config && config.frontendImageCompressionEnabled) {
+    const options = {
+      quality: config.frontendImageCompressionQuality,
+      maxWidth: config.frontendImageMaxWidth,
+      mimeType: file.type,
+      success(compressedResult) {
+        toast.add(
+          getToastOptions(
+            `Image compressed: ${Math.round(file.size / 1024)}KB -> ${Math.round(
+              compressedResult.size / 1024,
+            )}KB`,
+            "Info",
+            "info",
+          ),
+        );
+        uploadAndInsert(compressedResult, callback);
+      },
+      error(err) {
+        console.error("Image compression failed:", err.message);
+        toast.add(
+          getToastOptions(
+            "Image compression failed, uploading original file.",
+            "Warning",
+            "warn",
+          ),
+        );
+        uploadAndInsert(file, callback);
+      },
+    };
+    new Compressor(file, options);
+  } else {
+    uploadAndInsert(file, callback);
+  }
+}
+
 function uploadAndInsert(fileToUpload, callback) {
   const altTextInputValue = document.getElementById(
     "toastuiAltTextInput",
@@ -431,44 +471,6 @@ function postAttachment(fileToUpload) {
       }
       return Promise.reject(error);
     });
-}
-
-function addImageBlobHook(file, callback) {
-  if (!file) return;
-
-  const config = globalStore.config.value;
-
-  if (config && config.frontendImageCompressionEnabled) {
-    const options = {
-      quality: config.frontendImageCompressionQuality,
-      maxWidth: config.frontendImageMaxWidth,
-      mimeType: file.type,
-      success(compressedResult) {
-        toast.add(
-          getToastOptions(
-            `Image compressed: ${Math.round(file.size / 1024)}KB -> ${Math.round(compressedResult.size / 1024)}KB`,
-            "Info",
-            "info",
-          ),
-        );
-        uploadAndInsert(compressedResult, callback);
-      },
-      error(err) {
-        console.error("Image compression failed:", err.message);
-        toast.add(
-          getToastOptions(
-            "Image compression failed, uploading original file.",
-            "Warning",
-            "warn",
-          ),
-        );
-        uploadAndInsert(file, callback);
-      },
-    };
-    new Compressor(file, options);
-  } else {
-    uploadAndInsert(file, callback);
-  }
 }
 
 // Content Change Watcher

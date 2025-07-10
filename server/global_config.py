@@ -77,6 +77,7 @@ class GlobalConfig:
         self.attachment_storage_provider: StorageProviderType = (
             self._load_attachment_storage_provider()
         )
+        # S3 Config (for public buckets only)
         self.s3_endpoint_url: Optional[str] = get_env(
             "FLATNOTES_S3_ENDPOINT_URL", mandatory=False
         )
@@ -93,17 +94,11 @@ class GlobalConfig:
         self.s3_path_prefix: str = get_env(
             "FLATNOTES_S3_PATH_PREFIX", mandatory=False, default=""
         )
-        self.s3_public_url_base: Optional[str] = get_env(
-            "FLATNOTES_S3_PUBLIC_URL_BASE", mandatory=False
-        )
-        self.s3_presigned_url_expiration: int = get_env(
-            "FLATNOTES_S3_PRESIGNED_URL_EXPIRATION",
-            mandatory=False,
-            default=3600,
-            cast_int=True,
+        self.s3_public_url: Optional[str] = get_env(
+            "FLATNOTES_S3_PUBLIC_URL", mandatory=False
         )
 
-        # --- Frontend Image Processing Config ---
+        # Frontend Image Processing Config
         self.frontend_image_compression_enabled: bool = get_env(
             "FLATNOTES_FRONTEND_IMAGE_COMPRESSION_ENABLED",
             mandatory=False,
@@ -134,23 +129,68 @@ class GlobalConfig:
         return FileSystemNotes()
 
     def load_attachment_storage(self):
-        if self.attachment_storage_provider == StorageProviderType.S3:
+        """
+        Loads the primary attachment storage based on configuration.
+        Note: The filesystem storage is always available for fallback and local file serving.
+        """
+        if (
+            self.attachment_storage_provider == StorageProviderType.S3
+            and self.is_s3_configured()
+        ):
             try:
                 from attachments.s3 import S3Attachments
 
-                logger.info("Attachment storage provider: S3/R2")
+                logger.info("Primary attachment provider: S3 (Public Bucket Mode)")
                 return S3Attachments(self)
             except (ValueError, ImportError) as e:
                 logger.error(
-                    f"Failed to initialize S3 provider: {e}. Application will exit."
+                    f"Failed to initialize S3 provider: {e}. "
+                    "Falling back to filesystem as primary provider."
                 )
-                sys.exit(1)
 
-        # Default to filesystem
+        logger.info("Primary attachment provider: Filesystem")
         from attachments.file_system import FileSystemAttachments
 
         logger.info("Attachment storage provider: Filesystem")
         return FileSystemAttachments()
+
+    def is_s3_configured(self) -> bool:
+        """Check if all necessary S3 variables are set for S3 mode."""
+        required_vars = [
+            self.s3_access_key_id,
+            self.s3_secret_access_key,
+            self.s3_bucket_name,
+            self.s3_public_url,
+        ]
+        if not all(required_vars):
+            logger.warning(
+                "S3 provider is selected, but one or more required environment variables "
+                "are missing. Required: FLATNOTES_S3_{ACCESS_KEY_ID, SECRET_ACCESS_KEY, "
+                "BUCKET_NAME, PUBLIC_URL}."
+            )
+            return False
+
+        if not self.s3_endpoint_url and not self.s3_region:
+            logger.warning(
+                "When S3 provider is used, either FLATNOTES_S3_ENDPOINT_URL or "
+                "FLATNOTES_S3_REGION must be set."
+            )
+            return False
+
+        return True
+
+    def _load_attachment_storage_provider(self) -> StorageProviderType:
+        key = "FLATNOTES_ATTACHMENT_STORAGE_PROVIDER"
+        value = get_env(key, mandatory=False, default="filesystem").lower()
+        try:
+            return StorageProviderType(value)
+        except ValueError:
+            logger.error(
+                f"Invalid value '{value}' for {key}. Must be one of: "
+                + ", ".join([p.value for p in StorageProviderType])
+                + ". Defaulting to filesystem."
+            )
+            return StorageProviderType.FILESYSTEM
 
     def _load_auth_type(self):
         key = "FLATNOTES_AUTH_TYPE"
@@ -216,19 +256,6 @@ class GlobalConfig:
             )
             sys.exit(1)
         return value
-
-    def _load_attachment_storage_provider(self) -> StorageProviderType:
-        key = "FLATNOTES_ATTACHMENT_STORAGE_PROVIDER"
-        value = get_env(key, mandatory=False, default="filesystem").lower()
-        try:
-            return StorageProviderType(value)
-        except ValueError:
-            logger.error(
-                f"Invalid value '{value}' for {key}. Must be one of: "
-                + ", ".join([p.value for p in StorageProviderType])
-                + "."
-            )
-            sys.exit(1)
 
     def _load_float_env(
         self, key: str, default: float, min_val: float, max_val: float
