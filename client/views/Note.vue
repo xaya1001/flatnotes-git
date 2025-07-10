@@ -144,6 +144,7 @@ import ToastViewer from "../components/toastui/ToastViewer.vue";
 import { authTypes } from "../constants.js";
 import { useGlobalStore } from "../globalStore.js";
 import { getToastOptions } from "../helpers.js";
+import Compressor from "compressorjs";
 
 const props = defineProps({
   title: String,
@@ -358,12 +359,52 @@ function closeNote() {
 
 // Image Upload
 function addImageBlobHook(file, callback) {
+  if (!file) return;
+
+  const config = globalStore.config;
+
+  if (config && config.frontendImageCompressionEnabled) {
+    const options = {
+      quality: config.frontendImageCompressionQuality,
+      maxWidth: config.frontendImageMaxWidth,
+      mimeType: file.type,
+      success(compressedResult) {
+        toast.add(
+          getToastOptions(
+            `Image compressed: ${Math.round(file.size / 1024)}KB -> ${Math.round(
+              compressedResult.size / 1024,
+            )}KB`,
+            "Info",
+            "info",
+          ),
+        );
+        uploadAndInsert(compressedResult, callback);
+      },
+      error(err) {
+        console.error("Image compression failed:", err.message);
+        toast.add(
+          getToastOptions(
+            "Image compression failed, uploading original file.",
+            "Warning",
+            "warn",
+          ),
+        );
+        uploadAndInsert(file, callback);
+      },
+    };
+    new Compressor(file, options);
+  } else {
+    uploadAndInsert(file, callback);
+  }
+}
+
+function uploadAndInsert(fileToUpload, callback) {
   const altTextInputValue = document.getElementById(
     "toastuiAltTextInput",
   )?.value;
 
   // Upload the image then use the callback to insert the URL into the editor
-  postAttachment(file).then(function (data) {
+  postAttachment(fileToUpload).then(function (data) {
     if (data) {
       // If the user has entered an alt text, use it. Otherwise, use the filename returned by the API.
       const altText = altTextInputValue ? altTextInputValue : data.filename;
@@ -372,18 +413,24 @@ function addImageBlobHook(file, callback) {
   });
 }
 
-function postAttachment(file) {
+function postAttachment(fileToUpload) {
+  if (!fileToUpload) {
+    toast.add(
+      getToastOptions("No file provided for upload.", "Error", "error"),
+    );
+    return Promise.reject("No file provided");
+  }
   // Invalid Character Validation
-  if (reservedFilenameCharacters.test(file.name)) {
-    badFilenameToast("Title");
-    return;
+  if (reservedFilenameCharacters.test(fileToUpload.name)) {
+    badFilenameToast("Filename");
+    return Promise.reject("Invalid filename");
   }
 
   // Uploading Toast
   toast.add(getToastOptions("Uploading attachment..."));
 
   // Upload the attachment
-  return createAttachment(file)
+  return createAttachment(fileToUpload)
     .then((data) => {
       // Success Toast
       toast.add(
@@ -409,8 +456,16 @@ function postAttachment(file) {
       } else if (error.response?.status == 413) {
         entityTooLargeToast("attachment");
       } else {
-        apiErrorHandler(error, toast);
+        console.error("Attachment upload error:", error);
+        toast.add(
+          getToastOptions(
+            error.response?.data?.detail || "Failed to upload attachment.",
+            "Upload Error",
+            "error",
+          ),
+        );
       }
+      return Promise.reject(error);
     });
 }
 
