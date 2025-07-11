@@ -22,7 +22,6 @@ Object.assign(navigator, {
 HTMLElement.prototype.focus = vi.fn();
 vi.useFakeTimers();
 
-// --- START: REVISED MOCK for MutationObserver ---
 let mutationCallback = null;
 const MockMutationObserver = vi.fn((cb) => {
   mutationCallback = cb;
@@ -32,7 +31,6 @@ const MockMutationObserver = vi.fn((cb) => {
   };
 });
 vi.stubGlobal("MutationObserver", MockMutationObserver);
-// --- END: REVISED MOCK ---
 
 describe("InteractiveMermaid.vue", () => {
   let wrapper;
@@ -65,7 +63,6 @@ describe("InteractiveMermaid.vue", () => {
     vi.restoreAllMocks();
   });
 
-  // ... (Rendering and UI Interaction suites remain the same) ...
   describe("Rendering", () => {
     it("renders the Mermaid SVG when mounted", async () => {
       wrapper = mountComponent();
@@ -124,24 +121,34 @@ describe("InteractiveMermaid.vue", () => {
     it("zooms in on button click", async () => {
       const initialScale = wrapper.vm.transform.scale;
       await wrapper.find('button[title="Zoom In"]').trigger("click");
+      await vi.runAllTimersAsync(); // Wait for the animation to finish
       expect(wrapper.vm.transform.scale).toBeGreaterThan(initialScale);
+      expect(wrapper.vm.transform.scale).toBeCloseTo(1.25);
     });
 
     it("zooms out on button click", async () => {
       const initialScale = wrapper.vm.transform.scale;
       await wrapper.find('button[title="Zoom Out"]').trigger("click");
+      await vi.runAllTimersAsync(); // Wait for the animation to finish
       expect(wrapper.vm.transform.scale).toBeLessThan(initialScale);
+      expect(wrapper.vm.transform.scale).toBeCloseTo(1 / 1.25);
     });
 
     it("resets view on button click", async () => {
-      wrapper.vm.transform.scale = 2.0;
+      // First, zoom in to get a non-default state
+      await wrapper.find('button[title="Zoom In"]').trigger("click");
+      await vi.runAllTimersAsync();
+      expect(wrapper.vm.transform.scale).not.toBe(1);
+
+      // Then, trigger the reset
       await wrapper.find('button[title="Reset View"]').trigger("click");
+      await vi.runAllTimersAsync(); // Wait for reset animation
+
       expect(wrapper.vm.transform.scale).toBe(1);
     });
   });
 
   describe("Fullscreen Mode", () => {
-    // --- START: REVISED TEST 1 ---
     it("manages event listeners correctly when mounted and toggling fullscreen", async () => {
       // Spy on the methods BEFORE mounting the component
       const addSpy = vi.spyOn(HTMLElement.prototype, "addEventListener");
@@ -152,7 +159,6 @@ describe("InteractiveMermaid.vue", () => {
 
       // 1. Check onMounted behavior
       // We check that it was called on the specific container element
-      const containerEl = wrapper.find(".mermaid-diagram-container").element;
       expect(addSpy).toHaveBeenCalledWith("mousedown", expect.any(Function));
       // Filter calls to focus only on the container element for precision
       const mousedownCall = addSpy.mock.calls.find(
@@ -181,7 +187,6 @@ describe("InteractiveMermaid.vue", () => {
         expect.any(Function),
       );
     });
-    // --- END: REVISED TEST 1 ---
 
     it("exits fullscreen on Escape key press", async () => {
       wrapper = mountComponent();
@@ -255,7 +260,6 @@ describe("InteractiveMermaid.vue", () => {
       );
     });
 
-    // --- START: REVISED TEST 2 ---
     it("re-renders when the body class changes", async () => {
       document.body.className = "";
       wrapper = mountComponent();
@@ -274,6 +278,5 @@ describe("InteractiveMermaid.vue", () => {
       await flushPromises();
       expect(mermaid.render).toHaveBeenCalledTimes(3);
     });
-    // --- END: REVISED TEST 2 ---
   });
 });
