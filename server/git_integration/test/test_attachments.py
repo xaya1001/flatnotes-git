@@ -27,10 +27,8 @@ class MockUploadFile:
 @pytest.fixture
 def filesystem_attachments_service(tmp_path):
     """Provides an instance of FileSystemAttachments using a temporary directory."""
-    # Temporarily set the FLATNOTES_PATH env var for the service
     os.environ["FLATNOTES_PATH"] = str(tmp_path)
     service = FileSystemAttachments()
-    # Clean up the env var after the test
     yield service
     del os.environ["FLATNOTES_PATH"]
 
@@ -38,14 +36,12 @@ def filesystem_attachments_service(tmp_path):
 @pytest.fixture
 def s3_attachments_service():
     """Provides an instance of S3Attachments with a mocked S3 environment."""
-    # Use moto to mock AWS services in this context
     with mock_aws():
-        # 1. Setup Mock S3 Environment
         s3_client = boto3.client("s3", region_name="us-east-1")
         bucket_name = "test-bucket"
         s3_client.create_bucket(Bucket=bucket_name)
 
-        # 2. Mock the GlobalConfig object that S3Attachments expects
+        # Mock the GlobalConfig object that S3Attachments expects
         mock_config = MagicMock()
         mock_config.s3_bucket_name = bucket_name
         mock_config.s3_access_key_id = "testing"
@@ -53,10 +49,8 @@ def s3_attachments_service():
         mock_config.s3_region = "us-east-1"
         mock_config.s3_endpoint_url = None
         mock_config.s3_path_prefix = "test-prefix"
-        mock_config.s3_public_url_base = None  # Test presigned URLs first
-        mock_config.s3_presigned_url_expiration = 3600
+        mock_config.s3_public_url = f"https://{bucket_name}.s3.amazonaws.com"
 
-        # 3. Create and yield the service instance
         service = S3Attachments(mock_config)
         yield service
 
@@ -74,9 +68,7 @@ def s3_attachments_service():
 class TestAttachmentBackends:
     def test_create_attachment(self, attachment_service_fixture, request):
         """Tests successful creation of an attachment."""
-        # Get the correct service instance from the fixture name
         service = request.getfixturevalue(attachment_service_fixture)
-
         mock_file = MockUploadFile(
             filename="test_image.png",
             content=b"some image data",
@@ -93,23 +85,34 @@ class TestAttachmentBackends:
 
         # Specific backend checks
         if isinstance(service, FileSystemAttachments):
-            # For filesystem, check if the file exists on disk
             expected_path = os.path.join(service.storage_path, result.filename)
             assert os.path.exists(expected_path)
             assert result.url == f"attachments/{result.filename}"
         elif isinstance(service, S3Attachments):
-            # For S3, check if the object exists in the mock bucket
+            assert result.url.startswith(service.public_url)
+            assert result.url.endswith(result.filename)
+            assert service.path_prefix in result.url
+
+            # Check if the object exists in the mock bucket
             object_key = service._get_object_key(result.filename)
             response = service.s3_client.get_object(
                 Bucket=service.bucket_name, Key=object_key
             )
             assert response["ResponseMetadata"]["HTTPStatusCode"] == 200
             assert response["Body"].read() == b"some image data"
-            assert "test_image.png" in object_key
 
     def test_get_attachment(self, attachment_service_fixture, request):
-        """Tests successful retrieval of an attachment."""
+        """
+        Tests retrieval of an attachment.
+        - For filesystem, it should succeed.
+        - For S3, it should raise FileNotFoundError as it's not supported.
+        """
         service = request.getfixturevalue(attachment_service_fixture)
+
+        if isinstance(service, S3Attachments):
+            with pytest.raises(FileNotFoundError):
+                service.get("any-s3-filename.txt")
+            return
 
         mock_file = MockUploadFile(
             filename="retrieval_test.jpg",
@@ -121,19 +124,10 @@ class TestAttachmentBackends:
         # Action
         get_response = service.get(create_result.filename)
 
-        # Assertions
+        # Assertions for filesystem
         assert get_response is not None
-
-        # Specific backend checks
-        if isinstance(service, FileSystemAttachments):
-            assert hasattr(get_response, "path")
-            assert os.path.basename(get_response.path) == create_result.filename
-        elif isinstance(service, S3Attachments):
-            assert hasattr(get_response, "headers")
-            assert "location" in get_response.headers
-            # Check that it's a valid URL containing the object key
-            object_key = service._get_object_key(create_result.filename)
-            assert object_key in get_response.headers["location"]
+        assert hasattr(get_response, "path")
+        assert os.path.basename(get_response.path) == create_result.filename
 
     def test_get_nonexistent_attachment_raises_error(
         self, attachment_service_fixture, request
@@ -154,7 +148,5 @@ class TestAttachmentBackends:
             filename="invalid/path.txt", content=b"test", content_type="text/plain"
         )
 
-        # Simply check for ValueError, don't match the specific message.
-        # This makes the test less brittle.
         with pytest.raises(ValueError):
             service.create(mock_file)

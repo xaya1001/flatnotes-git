@@ -18,10 +18,15 @@ from fastapi.staticfiles import StaticFiles
 
 import api_messages
 from attachments.base import BaseAttachments
+from attachments.file_system import FileSystemAttachments
 from attachments.models import AttachmentCreateResponse
 from auth.base import BaseAuth
 from auth.models import Login, Token
-from global_config import AuthType, GlobalConfig, GlobalConfigResponseModel
+from global_config import (
+    AuthType,
+    GlobalConfig,
+    GlobalConfigResponseModel,
+)
 from helpers import replace_base_href
 from logger import logger
 from notes.base import BaseNotes
@@ -32,7 +37,10 @@ from notes.models import Note, NoteCreate, NoteUpdate, SearchResult
 global_config = GlobalConfig()
 auth: BaseAuth = global_config.load_auth()
 note_storage: BaseNotes = global_config.load_note_storage()
+
 attachment_storage: BaseAttachments = global_config.load_attachment_storage()
+filesystem_storage_instance = FileSystemAttachments()
+
 auth_deps = [Depends(auth.authenticate)] if auth else []
 router = APIRouter()
 
@@ -466,9 +474,9 @@ def get_config():
     include_in_schema=False,
 )
 def get_attachment(filename: str):
-    """Download an attachment."""
+    """Download a locally stored attachment."""
     try:
-        return attachment_storage.get(filename)
+        return filesystem_storage_instance.get(filename)
     except ValueError:
         raise HTTPException(
             status_code=400,
@@ -488,7 +496,24 @@ if global_config.auth_type != AuthType.READ_ONLY:
     )
     def post_attachment(file: UploadFile):
         """Upload an attachment."""
+        # If the primary storage is S3, attempt to use it first.
+        if isinstance(attachment_storage, FileSystemAttachments) is False:
+            try:
+                logger.info(
+                    f"Attempting to upload '{file.filename}' to primary (S3) storage."
+                )
+                return attachment_storage.create(file)
+            except Exception as e:
+                logger.error(
+                    f"Failed to upload '{file.filename}' to S3. Reason: {e}. "
+                    f"FALLING BACK to local filesystem storage."
+                )
+                # On any S3 failure, fall back to the filesystem storage.
+                return filesystem_storage_instance.create(file)
+
+        # If primary storage is filesystem, use it directly.
         try:
+            logger.info(f"Uploading '{file.filename}' to primary (filesystem) storage.")
             return attachment_storage.create(file)
         except ValueError:
             raise HTTPException(
