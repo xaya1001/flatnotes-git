@@ -14,6 +14,8 @@ jobs:
   test:
     name: Build and Test
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
 
     steps:
       - name: Checkout repository
@@ -49,9 +51,12 @@ jobs:
       - name: Build frontend assets
         run: npm run build
 
+      - name: Extract package version
+        id: get_version
+        run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+
       - name: Run Python and JS tests
         env:
-          # Environment variables for the test run
           FLATNOTES_PATH: /tmp/flatnotes-test-data
           FLATNOTES_AUTH_TYPE: password
           FLATNOTES_USERNAME: testuser
@@ -61,3 +66,45 @@ jobs:
         run: |
           mkdir -p $FLATNOTES_PATH
           npm run git-test
+
+  tag-and-release:
+    name: Create and Push Git Tag
+    needs: test
+    if: github.ref == 'refs/heads/git-integration'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Calculate and Push New Tag
+        run: |
+          BASE_VERSION=${{ needs.test.outputs.version }}
+          echo "Base version from package.json: $BASE_VERSION"
+
+          TAG_PREFIX="v${BASE_VERSION}-git."
+
+          LATEST_PATCH_NUM=$(git tag -l "${TAG_PREFIX}*" | sed "s/^${TAG_PREFIX}//" | sort -n | tail -n 1)
+
+          if [ -z "$LATEST_PATCH_NUM" ]; then
+            LATEST_PATCH_NUM=0
+          fi
+          
+          NEXT_PATCH_NUM=$((LATEST_PATCH_NUM + 1))
+          
+          NEW_TAG="${TAG_PREFIX}${NEXT_PATCH_NUM}"
+          
+          echo "Creating new tag: ${NEW_TAG}"
+          
+          git tag -a "${NEW_TAG}" -m "Automatic release based on commit ${{ github.sha }}"
+          
+          git push origin "${NEW_TAG}"
