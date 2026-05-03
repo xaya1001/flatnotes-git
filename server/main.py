@@ -315,7 +315,7 @@ def root(title: str = ""):
 # endregion
 
 
-# region Login
+# region Auth
 if global_config.auth_type not in [AuthType.NONE, AuthType.READ_ONLY]:
 
     @router.post("/api/token", response_model=Token)
@@ -324,6 +324,13 @@ if global_config.auth_type not in [AuthType.NONE, AuthType.READ_ONLY]:
             return auth.login(data)
         except ValueError:
             raise HTTPException(status_code=401, detail=api_messages.login_failed)
+
+
+@router.get("/api/auth-check", dependencies=auth_deps)
+def auth_check() -> str:
+    """A lightweight endpoint that simply returns 'OK' if the user is
+    authenticated."""
+    return "OK"
 
 
 # endregion

@@ -36,7 +36,6 @@ import { useGlobalStore } from "./globalStore.js";
 import { loadTheme } from "./helpers.js";
 import NavBar from "./partials/NavBar.vue";
 import SearchModal from "./partials/SearchModal.vue";
-import { loadStoredToken } from "./tokenStorage.js";
 import LoadingIndicator from "./components/LoadingIndicator.vue";
 import router from "./router.js";
 import ConfirmDialog from "primevue/confirmdialog";
@@ -92,7 +91,6 @@ onMounted(() => {
       loadingIndicator.value.setFailed();
     });
 
-  loadStoredToken();
   loadTheme();
 });
 

@@ -50,7 +50,7 @@ defineProps({
 
 const emit = defineEmits(["toggleSearchModal"]);
 
-const menuItems = computed(() => [ 
+const menuItems = computed(() => [
   {
     label: "Search",
     icon: mdilMagnify,
@@ -92,6 +92,7 @@ const showNewButton = computed(() => {
 
 function logOut() {
   clearStoredToken();
+  localStorage.clear();
   router.push({ name: "login" });
 }
 
@@ -103,7 +104,7 @@ function showLogOutButtonIsVisible() {
   return (
     globalStore.config.value &&
     ![authTypes.none, authTypes.readOnly].includes(
-      globalStore.config.value.authType
+      globalStore.config.value.authType,
     )
   );
 }
