@@ -358,6 +358,28 @@ async def test_reset_to_remote_requires_confirmation(async_client: AsyncClient):
     assert "requires confirm=true" in response.json()["detail"]
 
 
+async def test_discard_all_requires_confirmation(async_client: AsyncClient):
+    response = await async_client.post("/api/git/discard_all", json={"confirm": False})
+
+    assert response.status_code == 400
+    assert "requires confirm=true" in response.json()["detail"]
+
+
+async def test_discard_all_with_confirmation_cleans_workspace(
+    async_client: AsyncClient, repo_with_remote: pygit2.Repository
+):
+    repo_path = Path(repo_with_remote.workdir)
+    (repo_path / "scratch.md").write_text("temporary")
+    (repo_path / "README.md").write_text("changed")
+
+    response = await async_client.post("/api/git/discard_all", json={"confirm": True})
+
+    assert response.status_code == 200
+    assert "discarded" in response.json()["message"]
+    assert not (repo_path / "scratch.md").exists()
+    assert "Initial commit" in (repo_path / "README.md").read_text()
+
+
 async def test_git_file_operation_rejects_path_traversal(async_client: AsyncClient):
     response = await async_client.post(
         "/api/git/stage_file", json={"filepath": "../outside.md"}
@@ -369,6 +391,25 @@ async def test_git_file_operation_rejects_path_traversal(async_client: AsyncClie
 async def test_git_file_operation_rejects_backslash_paths(async_client: AsyncClient):
     response = await async_client.post(
         "/api/git/stage_file", json={"filepath": "..\\outside.md"}
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "filepath",
+    [
+        "",
+        "   ",
+        "/etc/passwd",
+        "bad\u0000name.md",
+    ],
+)
+async def test_git_file_operation_rejects_invalid_paths(
+    async_client: AsyncClient, filepath: str
+):
+    response = await async_client.post(
+        "/api/git/stage_file", json={"filepath": filepath}
     )
 
     assert response.status_code == 422
@@ -392,10 +433,44 @@ async def test_switch_branch_rejects_invalid_branch_component(
     assert response.status_code == 422
 
 
+@pytest.mark.parametrize(
+    "branch_name",
+    [
+        "",
+        "   ",
+        "/feature",
+        "feature/",
+        "feature//topic",
+        "feature/topic.lock",
+        "feature@{upstream}",
+    ],
+)
+async def test_switch_branch_rejects_invalid_branch_boundaries(
+    async_client: AsyncClient, branch_name: str
+):
+    response = await async_client.post(
+        "/api/git/branches/switch", json={"branch_name": branch_name}
+    )
+
+    assert response.status_code == 422
+
+
 async def test_restore_file_rejects_invalid_commit_hash(async_client: AsyncClient):
     response = await async_client.post(
         "/api/git/restore-file",
         json={"commit_hash": "not-a-hash", "filepath": "README.md"},
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("commit_hash", ["abcdef", "a" * 41, "g" * 7])
+async def test_restore_file_rejects_invalid_commit_hash_boundaries(
+    async_client: AsyncClient, commit_hash: str
+):
+    response = await async_client.post(
+        "/api/git/restore-file",
+        json={"commit_hash": commit_hash, "filepath": "README.md"},
     )
 
     assert response.status_code == 422

@@ -76,4 +76,20 @@ describe("statusStore", () => {
     expect(store.summaryError).toBe("Backend exploded");
     expect(store.gitStatus).toEqual({ files: [] });
   });
+
+  it("should surface object detail messages during fetchStatus", async () => {
+    const store = useStatusStore();
+    const mockError = new Error("Request failed");
+    mockError.response = {
+      status: 500,
+      data: { detail: { message: "Remote authentication failed" } },
+    };
+
+    gitApi.getGitStatus.mockRejectedValue(mockError);
+
+    await store.fetchStatus();
+
+    expect(store.summaryError).toBe("Remote authentication failed");
+    expect(store.gitStatus).toEqual({ files: [] });
+  });
 });
