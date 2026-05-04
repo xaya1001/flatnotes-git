@@ -221,6 +221,20 @@ Fork-owned paths:
 
 When syncing upstream, prefer stable releases from `upstream/master`. Preserve upstream core behavior unless it breaks a fork-owned feature. Do not refactor or reformat upstream code for style alone.
 
+### Commit Message Style
+
+Use a conventional type and a concise subject, then add a short body for non-trivial changes. Preferred types: `feat`, `fix`, `refactor`, `test`, `docs`, `ci`, and `chore`.
+
+```text
+refactor: simplify Git workflow locking
+
+- share one lock across manual, scheduled, and webhook Git writes
+- keep repository readers synced after fetch and reset operations
+- cover the concurrency path with focused backend tests
+```
+
+Keep the body to 2-4 bullets. Summarize user-visible behavior, safety changes, and tests. Do not paste command logs or list every touched file.
+
 ## Troubleshooting
 
 - Git panel missing: confirm `FLATNOTES_GIT_ENABLED=true` and restart.

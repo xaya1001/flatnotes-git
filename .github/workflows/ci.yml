@@ -27,7 +27,7 @@ jobs:
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Cache Pipenv virtualenv
         uses: actions/cache@v4
@@ -45,8 +45,8 @@ jobs:
       - name: Set up Node.js with npm caching
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: "20"
+          cache: "npm"
 
       - name: Install npm dependencies
         run: npm ci
@@ -72,15 +72,15 @@ jobs:
           npm run git-test
 
   ################################################
-  # JOB 2: Create and Push Git Tag
+  # JOB 2: Calculate Release Tag
   ################################################
-  tag-and-release:
-    name: Create and Push Git Tag
+  calculate_release_tag:
+    name: Calculate Release Tag
     needs: test
     if: github.event_name == 'push' && github.ref == 'refs/heads/git-integration'
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
     outputs:
       new_tag: ${{ steps.tag_step.outputs.new_tag }}
 
@@ -90,34 +90,33 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Configure Git
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-
-      - name: Calculate and Push New Tag
+      - name: Calculate Release Tag
         id: tag_step
         run: |
           BASE_VERSION=${{ needs.test.outputs.version }}
           echo "Base version from package.json: $BASE_VERSION"
 
           TAG_PREFIX="v${BASE_VERSION}-git."
-          
+
+          EXISTING_TAG=$(git tag --points-at HEAD --list "${TAG_PREFIX}*" | sort -V | tail -n 1)
+
+          if [ -n "$EXISTING_TAG" ]; then
+            echo "Current commit already has release tag: ${EXISTING_TAG}"
+            echo "new_tag=${EXISTING_TAG}" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
           LATEST_PATCH_NUM=$(git tag -l "${TAG_PREFIX}*" | sed "s/^${TAG_PREFIX}//" | sort -n | tail -n 1)
 
           if [ -z "$LATEST_PATCH_NUM" ]; then
             LATEST_PATCH_NUM=0
           fi
-          
+
           NEXT_PATCH_NUM=$((LATEST_PATCH_NUM + 1))
-          
+
           NEW_TAG="${TAG_PREFIX}${NEXT_PATCH_NUM}"
-          
-          echo "Creating and pushing new tag: ${NEW_TAG}"
-          git tag -a "${NEW_TAG}" -m "Automatic release based on commit ${{ github.sha }}"
-          git push origin "${NEW_TAG}"
-          
-          # Output the new tag for the next job
+
+          echo "Calculated new release tag: ${NEW_TAG}"
           echo "new_tag=${NEW_TAG}" >> $GITHUB_OUTPUT
 
   ################################################
@@ -125,8 +124,8 @@ jobs:
   ################################################
   build-and-push-docker:
     name: Build and Push Docker Image
-    needs: tag-and-release
-    # This job will always run if tag-and-release runs
+    needs: calculate_release_tag
+    # This job will always run if calculate_release_tag runs
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -157,7 +156,7 @@ jobs:
         with:
           images: ${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=${{ needs.tag-and-release.outputs.new_tag }}
+            type=raw,value=${{ needs.calculate_release_tag.outputs.new_tag }}
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/git-integration' }}
 
       - name: Build and push Docker image
@@ -168,3 +167,54 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64,linux/arm64
+
+  ################################################
+  # JOB 4: Create GitHub Release
+  ################################################
+  create-github-release:
+    name: Create GitHub Release
+    needs:
+      - calculate_release_tag
+      - build-and-push-docker
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ needs.calculate_release_tag.outputs.new_tag }}
+      IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/flatnotes-git
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create release if missing
+        run: |
+          TAG_COMMIT=$(git rev-list -n 1 "$RELEASE_TAG" 2>/dev/null || true)
+
+          if [ -n "$TAG_COMMIT" ] && [ "$TAG_COMMIT" != "$GITHUB_SHA" ]; then
+            echo "Tag ${RELEASE_TAG} already exists on ${TAG_COMMIT}, expected ${GITHUB_SHA}."
+            exit 1
+          fi
+
+          if [ -z "$TAG_COMMIT" ]; then
+            git config --global user.name "github-actions[bot]"
+            git config --global user.email "github-actions[bot]@users.noreply.github.com"
+            git tag -a "$RELEASE_TAG" -m "Automatic release based on commit ${GITHUB_SHA}"
+            git push origin "$RELEASE_TAG"
+          else
+            echo "Git tag ${RELEASE_TAG} already exists on this commit."
+          fi
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "GitHub Release already exists for ${RELEASE_TAG}."
+            exit 0
+          fi
+
+          gh release create "$RELEASE_TAG" \
+            --title "$RELEASE_TAG" \
+            --notes "Docker image: ${IMAGE_NAME}:${RELEASE_TAG}" \
+            --generate-notes

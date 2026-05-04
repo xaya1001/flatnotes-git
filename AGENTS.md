@@ -32,7 +32,19 @@ The server is the source of truth for repository state; clients display server-p
 
 ## Commit & Pull Request Guidelines
 
-Recent history uses short, imperative or release-oriented subjects, often with issue references. Keep commits focused. PRs should describe the change, list tests run, link issues, and include screenshots for UI changes. Mention new config, migrations, or Git/S3 behavior changes.
+Use a concise conventional subject plus a short body. Do not use only a one-line subject for non-trivial changes. Prefer types such as `feat`, `fix`, `refactor`, `test`, `docs`, `ci`, and `chore`; keep the subject imperative and under roughly 72 characters.
+
+Example:
+
+```text
+feat: automate GitHub release creation
+
+- reuse an existing fork release tag on reruns
+- build Docker images before publishing the Git tag
+- create a GitHub Release with generated notes
+```
+
+Keep commit bodies to 2-4 bullets summarizing what changed and why. Avoid implementation transcripts or exhaustive file lists. Keep commits focused. PRs should describe the change, list tests run, link issues, and include screenshots for UI changes. Mention new config, migrations, or Git/S3 behavior changes.
 
 ## Security & Configuration Tips
 
