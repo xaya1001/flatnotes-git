@@ -1,7 +1,43 @@
 # server/git_integration/git_models.py
+import re
+from pathlib import PurePosixPath
 from typing import Any, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+COMMIT_HASH_RE = re.compile(r"^[0-9a-fA-F]{7,40}$")
+INVALID_BRANCH_CHARS_RE = re.compile(r"[\000-\037\177 ~^:?*\\[]")
+
+
+def validate_repo_filepath(filepath: str) -> str:
+    if not filepath or not filepath.strip():
+        raise ValueError("File path cannot be empty.")
+    if "\x00" in filepath:
+        raise ValueError("File path cannot contain NUL bytes.")
+    if "\\" in filepath:
+        raise ValueError("File path must use POSIX separators.")
+    path = PurePosixPath(filepath)
+    if path.is_absolute() or ".." in path.parts:
+        raise ValueError("File path must stay within the notes repository.")
+    return filepath
+
+
+def validate_branch_name(branch_name: str) -> str:
+    if not branch_name or not branch_name.strip():
+        raise ValueError("Branch name cannot be empty.")
+    branch_parts = branch_name.split("/")
+    if (
+        branch_name.startswith(("/", "."))
+        or branch_name.endswith(("/", ".", ".lock"))
+        or "//" in branch_name
+        or ".." in branch_name
+        or "@{" in branch_name
+        or branch_name == "@"
+        or any(part.startswith(".") or part.endswith(".lock") for part in branch_parts)
+        or INVALID_BRANCH_CHARS_RE.search(branch_name)
+    ):
+        raise ValueError("Branch name is not a valid Git branch name.")
+    return branch_name
 
 
 # --- Common Models ---
@@ -94,6 +130,11 @@ class GitRepositoryInfoResponse(BaseModel):
 class GitFileOperationRequest(BaseModel):
     filepath: str = Field(..., description="The path of the file to operate on.")
 
+    @field_validator("filepath")
+    @classmethod
+    def filepath_must_stay_in_repo(cls, value: str) -> str:
+        return validate_repo_filepath(value)
+
 
 class GitStatusSummaryResponse(BaseModel):
     current_branch: Optional[str]
@@ -118,7 +159,30 @@ class BranchListResponse(BaseModel):
 class SwitchBranchRequest(BaseModel):
     branch_name: str = Field(..., description="The name of the branch to switch to.")
 
+    @field_validator("branch_name")
+    @classmethod
+    def branch_name_must_be_valid(cls, value: str) -> str:
+        return validate_branch_name(value)
+
 
 class GitRestoreFileRequest(BaseModel):
     commit_hash: str = Field(..., description="The hash of the commit to restore from.")
     filepath: str = Field(..., description="The path of the file to restore.")
+
+    @field_validator("commit_hash")
+    @classmethod
+    def commit_hash_must_be_hex(cls, value: str) -> str:
+        if not COMMIT_HASH_RE.match(value):
+            raise ValueError("Commit hash must be a 7-40 character hexadecimal value.")
+        return value
+
+    @field_validator("filepath")
+    @classmethod
+    def filepath_must_stay_in_repo(cls, value: str) -> str:
+        return validate_repo_filepath(value)
+
+
+class GitConfirmRequest(BaseModel):
+    confirm: bool = Field(
+        False, description="Must be true for destructive Git operations."
+    )

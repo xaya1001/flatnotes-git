@@ -2,8 +2,10 @@
 import { useStatusStore } from "../stores/statusStore";
 
 let socket = null;
-let reconnectInterval = 5000; // 5-second reconnect interval
 let reconnectTimer = null;
+const INITIAL_RECONNECT_DELAY = 5000;
+const MAX_RECONNECT_DELAY = 60000;
+let reconnectDelay = INITIAL_RECONNECT_DELAY;
 
 // --- START: Fallback Polling Logic ---
 let pollingIntervalId = null;
@@ -20,13 +22,13 @@ function startPollingFallback() {
     } seconds.`,
   );
   const statusStore = useStatusStore();
+  statusStore.setWebSocketFallbackActive(true);
   // Fetch status immediately on fallback start
   statusStore.fetchStatus();
   pollingIntervalId = setInterval(() => {
     // We only poll if the document is visible to save resources,
     // complementing the existing visibilitychange handler in App.vue
     if (!document.hidden) {
-      console.log("Polling for status update (fallback)...");
       statusStore.fetchStatus();
     }
   }, POLLING_FALLBACK_INTERVAL);
@@ -34,10 +36,11 @@ function startPollingFallback() {
 
 function stopPollingFallback() {
   if (pollingIntervalId) {
-    console.log("WebSocket connected. Stopping polling fallback.");
     clearInterval(pollingIntervalId);
     pollingIntervalId = null;
   }
+  const statusStore = useStatusStore();
+  statusStore.setWebSocketFallbackActive(false);
 }
 // --- END: Fallback Polling Logic ---
 
@@ -60,11 +63,10 @@ function connect() {
   const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const wsUrl = `${wsProtocol}//${window.location.host}${wsPath}`;
 
-  console.log(`Attempting to connect to WebSocket at: ${wsUrl}`); // Added for easier debugging
   socket = new WebSocket(wsUrl);
 
   socket.onopen = () => {
-    console.log("WebSocket connection established.");
+    reconnectDelay = INITIAL_RECONNECT_DELAY;
     // Stop fallback and clear reconnect timer on success
     if (reconnectTimer) {
       clearTimeout(reconnectTimer);
@@ -77,7 +79,6 @@ function connect() {
     try {
       const data = JSON.parse(event.data);
       if (data.type === "status_update") {
-        console.log("WebSocket: Received status update trigger.");
         const statusStore = useStatusStore();
         statusStore.fetchStatus();
       }
@@ -89,7 +90,7 @@ function connect() {
   socket.onclose = () => {
     console.warn(
       `WebSocket disconnected. Attempting to reconnect in ${
-        reconnectInterval / 1000
+        reconnectDelay / 1000
       }s...`,
     );
     socket = null;
@@ -102,7 +103,8 @@ function connect() {
       reconnectTimer = setTimeout(() => {
         reconnectTimer = null;
         connect();
-      }, reconnectInterval);
+      }, reconnectDelay);
+      reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
     }
   };
 
@@ -127,8 +129,8 @@ function disconnect() {
     socket.onclose = null;
     socket.close();
     socket = null;
-    console.log("WebSocket connection intentionally disconnected.");
   }
+  reconnectDelay = INITIAL_RECONNECT_DELAY;
 }
 
 export const webSocket = {

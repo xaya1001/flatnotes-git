@@ -2,14 +2,25 @@
 import eventBus from "../services/eventBus";
 import { useStatusStore } from "../stores/statusStore";
 
-export function initializeGitEventHandlers() {
-  eventBus.on("note:saved", () => {
-    const statusStore = useStatusStore();
-    statusStore.fetchStatus();
-  });
+let initialized = false;
 
-  eventBus.on("note:deleted", () => {
-    const statusStore = useStatusStore();
-    statusStore.fetchStatus();
-  });
+function refreshStatus() {
+  const statusStore = useStatusStore();
+  statusStore.fetchStatus();
+}
+
+export function initializeGitEventHandlers() {
+  if (initialized) return;
+  initialized = true;
+
+  eventBus.on("note:saved", refreshStatus);
+  eventBus.on("note:deleted", refreshStatus);
+}
+
+export function cleanupGitEventHandlers() {
+  if (!initialized) return;
+  initialized = false;
+
+  eventBus.off("note:saved", refreshStatus);
+  eventBus.off("note:deleted", refreshStatus);
 }

@@ -7,7 +7,10 @@ import { useGlobalStore } from "../../globalStore.js";
 import { useGitIntegration } from "../composables/useGitIntegration.js";
 
 import { webSocket } from "../services/webSocket.js";
-import { initializeGitEventHandlers } from "../composables/eventHandler.js";
+import {
+  cleanupGitEventHandlers,
+  initializeGitEventHandlers,
+} from "../composables/eventHandler.js";
 
 vi.mock("../services/webSocket.js", () => ({
   webSocket: {
@@ -17,6 +20,7 @@ vi.mock("../services/webSocket.js", () => ({
 }));
 
 vi.mock("../composables/eventHandler.js", () => ({
+  cleanupGitEventHandlers: vi.fn(),
   initializeGitEventHandlers: vi.fn(),
 }));
 
@@ -72,6 +76,7 @@ describe("useGitIntegration.js", () => {
 
     wrapper.unmount();
 
+    expect(cleanupGitEventHandlers).toHaveBeenCalledOnce();
     expect(removeEventListenerSpy).toHaveBeenCalledWith(
       "visibilitychange",
       expect.any(Function),

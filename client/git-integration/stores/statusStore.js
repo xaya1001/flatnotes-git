@@ -18,6 +18,7 @@ export const useStatusStore = defineStore("git-status", () => {
   const isTrackingUpstream = ref(true);
   const repositoryState = ref("CLEAN");
   const isInitialLoadComplete = ref(false);
+  const isWebSocketFallbackActive = ref(false);
 
   // --- GETTERS ---
   const stagedFiles = computed(() =>
@@ -41,6 +42,9 @@ export const useStatusStore = defineStore("git-status", () => {
         ? "Rebase"
         : "Merge";
       return `Conflict: ${type} in progress. Click to resolve.`;
+    }
+    if (isWebSocketFallbackActive.value) {
+      return "Git status is using fallback polling.";
     }
     let parts = [];
     if (!isTrackingUpstream.value) {
@@ -73,6 +77,12 @@ export const useStatusStore = defineStore("git-status", () => {
     } catch (err) {
       if (err.response?.status === 428) {
         summaryError.value = "Git repository not initialized";
+      } else {
+        const detail = err.response?.data?.detail;
+        summaryError.value =
+          typeof detail === "string"
+            ? detail
+            : detail?.message || err.message || "Failed to load Git status";
       }
       gitStatus.value = { files: [] };
     } finally {
@@ -83,6 +93,10 @@ export const useStatusStore = defineStore("git-status", () => {
 
   function clearCommitMessage() {
     commitMessage.value = "";
+  }
+
+  function setWebSocketFallbackActive(active) {
+    isWebSocketFallbackActive.value = active;
   }
 
   // --- Event Listeners ---
@@ -111,7 +125,9 @@ export const useStatusStore = defineStore("git-status", () => {
     isTrackingUpstream,
     repositoryState,
     isInitialLoadComplete,
+    isWebSocketFallbackActive,
     fetchStatus,
     clearCommitMessage,
+    setWebSocketFallbackActive,
   };
 });

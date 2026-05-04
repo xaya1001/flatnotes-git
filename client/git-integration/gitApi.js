@@ -86,7 +86,7 @@ export async function gitDiscardFile(filepath) {
 }
 export async function gitDiscardAll() {
   try {
-    const response = await api.post("api/git/discard_all");
+    const response = await api.post("api/git/discard_all", { confirm: true });
     return response.data;
   } catch (error) {
     return Promise.reject(error);
@@ -142,7 +142,9 @@ export async function switchBranch(branch_name) {
 }
 export async function gitResetToRemote() {
   try {
-    const response = await api.post("api/git/reset-to-remote");
+    const response = await api.post("api/git/reset-to-remote", {
+      confirm: true,
+    });
     return response.data;
   } catch (error) {
     return Promise.reject(error);

@@ -1,47 +1,21 @@
-# Flatnotes-Git: User and Deployment Guide
+# Flatnotes-Git Guide
 
-This guide explains the Git integration features added to Flatnotes, how to build the project, and how to set it up correctly for both basic and advanced deployments.
+This fork adds Git workflows, Mermaid rendering, S3/R2 attachment storage, frontend image compression, and deployment changes on top of upstream `dullage/flatnotes`.
 
-## Why Git for a Web-Based Notes App?
+## Feature Summary
 
-While Flatnotes provides a great web interface, integrating Git offers powerful advantages, especially for users who also manage their notes across different devices or with local editors like Obsidian.
+- **Workspace:** view staged/unstaged files, stage or unstage changes, commit, discard, pull, push, and run `Commit & Sync`.
+- **History:** browse commits and changed files.
+- **Log:** inspect Git operation output for troubleshooting.
+- **Conflict UI:** guide users through continue/abort flows when pull or sync conflicts.
 
-1. **Version History & Peace of Mind:** Every commit is a snapshot of your notes. Accidentally delete a paragraph or a whole file? You can easily restore it from your Git history.
-2. **Powerful Syncing:** If you already use Git to sync your notes with a remote repository (like on GitHub), this integration allows you to commit and sync changes directly from the web, without needing shell access.
-3. **Centralized Control:** Manage your entire note-taking workflow—editing, versioning, and syncing—from a single, self-hosted web UI.
-4. **Offline & Online Harmony:** Work on your notes offline in a local editor, push the changes, and then `pull` them into Flatnotes from anywhere. Or, write a quick note in the web UI and `sync` it back to your local setup.
+The Git integration assumes a flat notes directory. Notes in subdirectories are not managed as Flatnotes notes; use tags such as `#project/alpha` instead.
 
-## Features Overview
+## Local Development
 
-The Git integration adds a dedicated panel to the Flatnotes UI with three main tabs:
+`npm run dev` starts only the Vite frontend on `127.0.0.1:8080`. API and WebSocket calls are proxied to the backend at `127.0.0.1:8000`, so run both processes.
 
-- **Workspace:** View and manage your current changes. Stage, unstage, commit, and discard changes to files. This is where you'll find the main `Commit & Sync` button.
-- **History:** Browse your repository's commit history. See who changed what and when. You can also view the files in each commit.
-- **Log:** A real-time log of all Git operations performed by the application, useful for troubleshooting.
-
----
-
-## Fork Maintenance Scope
-
-This repository is a fork of upstream `dullage/flatnotes`. The fork-owned code is the Git integration, Mermaid rendering, S3/R2 attachment storage, frontend image compression, CI, and deployment changes. Treat the original Flatnotes core as upstream-owned code. Change it only when a small integration point is required, and keep those changes merge-friendly.
-
-Primary fork-owned paths:
-
-- `client/git-integration/`
-- `server/git_integration/`
-- Mermaid integration in `client/components/toastui/`
-- S3/R2 attachment handling in `server/attachments/s3.py`
-- Small integration points in `client/App.vue`, `client/views/Note.vue`, and `server/main.py`
-
-When syncing upstream, prefer stable releases from `upstream/master`. During conflicts, preserve upstream core behavior unless it breaks a fork-owned feature. Do not refactor or reformat upstream code for style alone.
-
----
-
-## Local Development and Manual Testing
-
-`npm run dev` only starts the Vite frontend. It proxies API and WebSocket traffic to the backend at `http://127.0.0.1:8000`, so the backend must be running separately.
-
-### One-time setup
+### One-Time Setup
 
 ```bash
 pipenv sync --dev
@@ -55,7 +29,7 @@ git -C data add .gitignore
 git -C data commit -m "Initial notes repo"
 ```
 
-### Run the backend
+### Backend
 
 ```bash
 FLATNOTES_PATH="$PWD/data" \
@@ -69,36 +43,34 @@ FLATNOTES_GIT_COMMIT_USER_EMAIL="dev@flatnotes.local" \
 pipenv run python -m uvicorn main:app --app-dir server --host 127.0.0.1 --port 8000 --reload
 ```
 
-### Run the frontend
-
-In another terminal:
+### Frontend
 
 ```bash
 npm run dev
 ```
 
-Open `http://127.0.0.1:8080`. If `npm run dev` starts but Git/API calls fail, check that the backend is listening on port `8000`, not `8080`.
+Open `http://127.0.0.1:8080`.
 
-### Manual Git smoke test
+## Manual Smoke Test
 
 1. Create or edit a note in the web UI.
-2. Open the Git panel and confirm the changed file appears in Workspace.
-3. Enter a commit message and run `Commit & Sync`. With no remote configured, commit should work but push may report no upstream or remote failure.
-4. Run `git -C data log --oneline --decorate -5` to confirm the commit exists.
-5. Modify a file outside Flatnotes, refresh the UI, and confirm status updates.
+2. Open the Git panel and confirm the file appears in Workspace.
+3. Run `Commit & Sync` with a message.
+4. Confirm the commit with `git -C data log --oneline --decorate -5`.
+5. Edit a file directly under `data/`, refresh the UI, and confirm status updates.
 
-For remote testing, add a test remote to `data` and ensure SSH works non-interactively:
+For remote testing, use a disposable repository:
 
 ```bash
 git -C data remote add origin git@github.com:USER/NOTES_TEST_REPO.git
 ssh -T git@github.com
 ```
 
-Use a disposable repository for conflict, reset, discard, and branch-switch testing.
+Use disposable remotes for conflict, reset, discard, and branch-switch testing.
 
-### Automated checks
+## Automated Checks
 
-This fork only requires tests for fork-owned behavior. Upstream Flatnotes core has little or no test coverage, so do not add broad tests for unrelated core code.
+This fork only requires tests for fork-owned behavior. Upstream Flatnotes core has little or no coverage, so do not add broad tests for unrelated core code.
 
 ```bash
 npm run test:js
@@ -106,34 +78,9 @@ npm run test:py
 npm run build
 ```
 
----
+## Docker Deployment
 
-## Git Integration Design Rules
-
-- The server is the source of truth for repository state; clients display server-pushed status.
-- `Pull` requires a clean worktree. Do not allow pull to mix unfinished local edits into a conflict.
-- `Commit & Sync` may stage all local changes because the user intent is to archive and synchronize.
-- Non-fast-forward `Push` failures should tell the user to pull first.
-- Conflicts must be visible and route users to the conflict UI. Do not leave the repository conflicted without UI awareness.
-- Do not add a diff view.
-- Do not switch branches with uncommitted changes.
-- Preserve the hybrid Git implementation: use `pygit2` for local repository state and writes; use `subprocess` only for remote/auth flows or Git operations not covered well by `pygit2`.
-
----
-
-## Deployment Instructions
-
-You can deploy `flatnotes-git` using a simple Docker command or by integrating it with a reverse proxy like Traefik for a more robust setup.
-
-#### Option 1: Quick Start with `docker run`
-
-For those who prefer not to use Docker Compose, you can start the container with a single `docker run` command.
-
-**Before you run:**
-
-1. Create a directory for your notes: `mkdir my-notes`
-2. Replace `your_git_key` in the command below with your actual SSH private key filename (e.g., `id_ed25519`).
-3. **IMPORTANT:** Change the default `FLATNOTES_PASSWORD` and `FLATNOTES_SECRET_KEY` to secure, random values.
+### Minimal `docker run`
 
 ```bash
 docker run -d \
@@ -142,290 +89,108 @@ docker run -d \
   -v ./my-notes:/data \
   -v ${HOME}/.ssh/your_git_key:/git_ssh_key_source:ro \
   -v ${HOME}/.ssh/known_hosts:/known_hosts_source:ro \
-  -e "PUID=1000" \
-  -e "PGID=1000" \
-  -e "FLATNOTES_AUTH_TYPE=password" \
-  -e "FLATNOTES_USERNAME=user" \
-  -e "FLATNOTES_PASSWORD=YourStrongPasswordHere" \
-  -e "FLATNOTES_SECRET_KEY=YourVeryLongRandomSecretString" \
-  -e "FLATNOTES_GIT_ENABLED=true" \
-  -e "FLATNOTES_GIT_AUTO_INIT=true" \
-  -e "FLATNOTES_GIT_COMMIT_USER_NAME=flatnotes-bot" \
-  -e "FLATNOTES_GIT_COMMIT_USER_EMAIL=bot@flatnotes.local" \
+  -e PUID=1000 \
+  -e PGID=1000 \
+  -e FLATNOTES_AUTH_TYPE=password \
+  -e FLATNOTES_USERNAME=user \
+  -e FLATNOTES_PASSWORD=changeMe \
+  -e FLATNOTES_SECRET_KEY=aLongRandomSecret \
+  -e FLATNOTES_GIT_ENABLED=true \
+  -e FLATNOTES_GIT_AUTO_INIT=true \
+  -e FLATNOTES_GIT_COMMIT_USER_NAME=flatnotes-bot \
+  -e FLATNOTES_GIT_COMMIT_USER_EMAIL=bot@flatnotes.local \
   unleash1371/flatnotes-git:latest
 ```
 
-After running this command, your instance will be available at `http://<your-server-ip>:8080`.
-
-### Option 2: Basic Docker Compose Deployment
-
-This is the simplest way to get started. It exposes Flatnotes directly on a port of your host machine.
-
-#### Step 1: Prepare your `.env` file
-
-Create an `.env` file to store your configuration secrets.
-
-```env
-# .env file
-
-# Set the user and group ID to match your host user to avoid permission issues.
-# Run `id -u` and `id -g` on your host to get these values.
-PUID=1000
-PGID=1000
-
-# --- Authentication (choose one) ---
-# Option 1: No authentication (easiest to start)
-FLATNOTES_AUTH_TYPE="none"
-
-# Option 2: Password-based (recommended)
-# FLATNOTES_AUTH_TYPE="password"
-# FLATNOTES_USERNAME="user"
-# FLATNOTES_PASSWORD="changeMe!" # IMPORTANT: Change this!
-# FLATNOTES_SECRET_KEY="aLongRandomSeriesOfCharacters" # IMPORTANT: Change this!
-
-# --- Enable Git Integration ---
-FLATNOTES_GIT_ENABLED="true"
-FLATNOTES_GIT_AUTO_INIT="true" # Recommended for first-time setup
-FLATNOTES_GIT_REMOTE_NAME="origin"
-FLATNOTES_GIT_DEFAULT_BRANCH="main"
-FLATNOTES_GIT_PULL_STRATEGY="rebase"
-
-# --- Optional: Real-time Fetch with Webhooks (see guide below) ---
-# FLATNOTES_GIT_WEBHOOK_SECRET="your-long-random-secret-string-here"
-```
-
-#### Step 2: Create `docker-compose.yml`
-
-Create a `docker-compose.yml` file in the same directory.
+### Docker Compose
 
 ```yaml
-# docker-compose.yml
 services:
   flatnotes:
-    # Use the pre-built image from Docker Hub
     image: unleash1371/flatnotes-git:latest
     container_name: flatnotes-git
     restart: unless-stopped
     ports:
-      # Expose the container's port 8080 to the host's port 8080
       - "8080:8080"
     volumes:
-      # Mount your notes directory here.
-      # IMPORTANT: Replace './my-notes' with the actual path to your notes folder.
       - "./my-notes:/data"
-
-      # --- Mount your Git SSH key for remote access (see Git Setup section) ---
-      # Replace 'your_git_key' with your actual key filename (e.g., id_ed25519)
       - "${HOME}/.ssh/your_git_key:/git_ssh_key_source:ro"
       - "${HOME}/.ssh/known_hosts:/known_hosts_source:ro"
     env_file:
-      - ./.env # Load configuration from the .env file
+      - ./.env
 ```
 
-#### Step 3: Start the Container
+Recommended `.env`:
 
-From the directory containing your `.env` and `docker-compose.yml` files, run:
+```env
+PUID=1000
+PGID=1000
+FLATNOTES_AUTH_TYPE="password"
+FLATNOTES_USERNAME="user"
+FLATNOTES_PASSWORD="changeMe"
+FLATNOTES_SECRET_KEY="aLongRandomSecret"
+
+FLATNOTES_GIT_ENABLED="true"
+FLATNOTES_GIT_AUTO_INIT="true"
+FLATNOTES_GIT_REMOTE_NAME="origin"
+FLATNOTES_GIT_DEFAULT_BRANCH="main"
+FLATNOTES_GIT_PULL_STRATEGY="rebase"
+```
+
+Start with:
 
 ```bash
 docker compose up -d
 ```
 
-Your Flatnotes instance should now be running and accessible at `http://<your-server-ip>:8080`.
+## Remote Git Setup
 
----
-
-### Option 3: Advanced Deployment with Traefik & Authelia
-
-This setup uses [Traefik](https://traefik.io/traefik/) as a reverse proxy for automatic HTTPS and [Authelia](https://www.authelia.com/) for single sign-on (SSO) and 2FA. This is a production-ready configuration.
-
-> **Prerequisite:** This guide assumes you have a working Traefik and Authelia setup.
-
-#### Step 1: Prepare your `.env` file
-
-Use the same `.env` file as in the basic setup. You can set `FLATNOTES_AUTH_TYPE` to `none`, as Authelia will handle the access control.
-
-#### Step 2: Create `docker-compose.yml`
-
-This version does not expose any ports directly. Instead, it uses Traefik labels to manage routing.
-
-```yaml
-# docker-compose.yml
-services:
-  flatnotes:
-    # Use the pre-built image from Docker Hub
-    image: unleash1371/flatnotes-git:latest
-    container_name: flatnotes-git
-    restart: unless-stopped
-    env_file:
-      - ./.env # Load configuration from the .env file
-    volumes:
-      # Mount your notes directory
-      - "./my-notes:/data"
-      # Mount your Git SSH key
-      - "${HOME}/.ssh/your_git_key:/git_ssh_key_source:ro"
-      - "${HOME}/.ssh/known_hosts:/known_hosts_source:ro"
-    networks:
-      # Connect the container to your existing Traefik network
-      - traefik_default
-
-    labels:
-      # --- Traefik Main Configuration ---
-      - "traefik.enable=true"
-      # Define a single service that all routers will use
-      - "traefik.http.services.flatnotes-git.loadbalancer.server.port=8080"
-
-      # --- Router 1: WebSockets (High Priority, NO Authelia) ---
-      # This rule must be very specific to bypass Authelia ONLY for the WebSocket.
-      - "traefik.http.routers.flatnotes-git-ws.rule=Host(`notes.yourdomain.com`) && Path(`/api/git/ws/status`)"
-      - "traefik.http.routers.flatnotes-git-ws.entrypoints=websecure"
-      - "traefik.http.routers.flatnotes-git-ws.service=flatnotes-git"
-      - "traefik.http.routers.flatnotes-git-ws.priority=100" # High priority to match first
-
-      # --- Router 2: GitHub Webhook (High Priority, NO Authelia) ---
-      # This rule allows GitHub to send webhook notifications without being blocked by Authelia.
-      - "traefik.http.routers.flatnotes-git-webhook.rule=Host(`notes.yourdomain.com`) && Path(`/api/git/webhook/github`)"
-      - "traefik.http.routers.flatnotes-git-webhook.entrypoints=websecure"
-      - "traefik.http.routers.flatnotes-git-webhook.service=flatnotes-git"
-      - "traefik.http.routers.flatnotes-git-webhook.priority=100" # High priority
-
-      # --- Router 3: Main Application (Default Priority, WITH Authelia) ---
-      # This is the catch-all rule for all other traffic, protected by Authelia.
-      - "traefik.http.routers.flatnotes-git-app.rule=Host(`notes.yourdomain.com`)"
-      - "traefik.http.routers.flatnotes-git-app.entrypoints=websecure"
-      - "traefik.http.routers.flatnotes-git-app.service=flatnotes-git"
-      # Apply your Authelia middleware here
-      - "traefik.http.routers.flatnotes-git-app.middlewares=authelia@file"
-      - "traefik.http.routers.flatnotes-git-app.priority=1" # Low priority
-
-networks:
-  # Reference your external Traefik network
-  traefik_default:
-    external: true
-```
-
-**Key points of the Traefik configuration:**
-
-- **Priorities are crucial:** The specific, unprotected routes for WebSockets and webhooks have a _high priority_ (`100`) so Traefik matches them first. The main application route has a _low priority_ (`1`) to act as a fallback for all other requests.
-- **Authelia Middleware:** The `authelia@file` middleware is only applied to the main application router, securing your notes while leaving the necessary API endpoints open.
-
-#### Step 3: Start the Container
+The notes directory mounted as `/data` must be a Git repository. For a new folder, enable `FLATNOTES_GIT_AUTO_INIT=true` and restart the container. To connect it to a remote:
 
 ```bash
-docker compose up -d
-```
-
-Your instance will now be accessible via `https://notes.yourdomain.com`, protected by Traefik and Authelia.
-
----
-
-## Git Setup Instructions
-
-These instructions are required for **both** deployment options to enable communication with your remote Git repository (e.g., GitHub).
-
-> **A Critical Note on Directory Structure:**
-> This integration is designed for a **flat note structure**. It does not recognize or manage notes located in sub-directories within your main notes folder.
-> **Recommendation:** Use tags (`#my-tag`, `#projects/alpha`) for organization instead of folders.
-
-### Scenario 1: New User / Untracked Notes Folder
-
-1. **Prepare Notes Directory:** On your server, create a directory for your notes (e.g., `mkdir my-notes`) and ensure it's the one mounted in your `docker-compose.yml`.
-2. **Enable Auto-Init:** In your `.env` file, ensure `FLATNOTES_GIT_AUTO_INIT=true` is set.
-3. **Restart Flatnotes:** Run `docker compose restart`. The application will initialize a Git repository in your notes directory.
-4. **Next Steps:** Your notes are now version-controlled locally. To sync with a remote provider, proceed to Scenario 2.
-
-### Scenario 2: Syncing an Existing Local Git Repo with a Remote
-
-This is for users who have completed Scenario 1 or already have a Git-enabled notes folder.
-
-#### Step 1: Create a Remote Repository
-
-If you haven't already, create a new, empty repository on your Git provider (e.g., GitHub, GitLab).
-
-#### Step 2: Connect Your Local Repository to the Remote
-
-You will need to access your server's command line for this one-time setup.
-
-```bash
-# Navigate to your notes directory on the server
-cd /path/to/your/notes
-
-# Add the remote repository URL
-# Replace the URL with your own repository's SSH URL
-git remote add origin git@github.com:YourUsername/YourNotesRepo.git
-
-# Push your existing commits to the remote
-# The -u flag sets the upstream branch for future pulls/pushes
+cd /path/to/my-notes
+git remote add origin git@github.com:USER/NOTES_REPO.git
 git push -u origin main
 ```
 
-#### Step 3: Configure SSH Access for the Docker Container
+The container entrypoint copies the mounted SSH key to the app user and sets `GIT_SSH_COMMAND`. Before starting the container, make sure the host has a known host entry:
 
-Give the Flatnotes container secure, automated access to this remote repository.
-
-1. **Add Your Git Host to `known_hosts`:** On your **host machine's terminal**, run:
-
-   ```bash
-   # For GitHub:
-   ssh-keyscan github.com >> ~/.ssh/known_hosts
-   ```
-
-   _(Replace `github.com` if you use GitLab, Bitbucket, etc.)_
-
-2. **Verify `docker-compose.yml`:** Ensure the volume mounts for your SSH key and `known_hosts` file are correctly configured as shown in the examples above.
-
-#### Step 4: Restart and Verify
-
-Restart the container with `docker compose down && docker compose up -d`. Flatnotes should now be able to communicate with your remote repository.
-
----
-
-## Optional: Real-time Fetch with Webhooks
-
-To make Flatnotes aware of remote changes instantly (e.g., when you `push` from a local editor), you can set up a webhook. This enables Flatnotes to automatically `git fetch` in the background.
-
-### Step 1: Set a Webhook Secret
-
-Add this to your `.env` file with a long, random string:
-
-```env
-FLATNOTES_GIT_WEBHOOK_SECRET="your-long-random-secret-string-here"
+```bash
+ssh-keyscan github.com >> ~/.ssh/known_hosts
 ```
 
-### Step 2: Create the Webhook in Your Git Provider (GitHub Example)
+## Webhooks
 
-1. Navigate to your repository on GitHub -> **Settings** -> **Webhooks** -> **Add webhook**.
-2. **Payload URL**: `https://notes.yourdomain.com/api/git/webhook/github`
-3. **Content type**: `application/json`
-4. **Secret**: Paste the exact secret from your `.env` file.
-5. **Events**: Select **"Let me select individual events."** and check **only "Pushes"**.
-6. Click **Add webhook**.
+Set a secret with at least 16 characters:
 
-### Step 3: Restart and Test
+```env
+FLATNOTES_GIT_WEBHOOK_SECRET="your-long-random-secret"
+```
 
-Restart your container (`docker compose restart`). Push a change from a local clone and check the Flatnotes UI. The status indicator should automatically update to show that there are incoming changes to pull.
+For GitHub, create a webhook:
 
----
+- Payload URL: `https://notes.example.com/api/git/webhook/github`
+- Content type: `application/json`
+- Events: only `Pushes`
 
-## Bonus: Decoupling Attachments with S3/R2 Storage
+If using Traefik/Authelia, leave `/api/git/webhook/github` and `/api/git/ws/status` outside Authelia. Give those routes higher priority than the main app route.
 
-For advanced users, storing attachments in S3-compatible object storage keeps your Git repository lean and fast.
+## S3/R2 Attachments
 
-### How to Configure
+Set the filesystem provider to S3-compatible public bucket mode:
 
-Add the following variables to your `.env` file, customized for your provider.
+| Variable                                | Description                                                 |
+| --------------------------------------- | ----------------------------------------------------------- |
+| `FLATNOTES_ATTACHMENT_STORAGE_PROVIDER` | Set to `s3`.                                                |
+| `FLATNOTES_S3_ENDPOINT_URL`             | Required for R2/MinIO. For AWS S3, region can be enough.    |
+| `FLATNOTES_S3_ACCESS_KEY_ID`            | Access key ID.                                              |
+| `FLATNOTES_S3_SECRET_ACCESS_KEY`        | Secret access key.                                          |
+| `FLATNOTES_S3_BUCKET_NAME`              | Bucket name.                                                |
+| `FLATNOTES_S3_REGION`                   | AWS region, or `auto` for Cloudflare R2.                    |
+| `FLATNOTES_S3_PUBLIC_URL`               | Public URL base, for example `https://pub-xxxxxxxx.r2.dev`. |
+| `FLATNOTES_S3_PATH_PREFIX`              | Optional object key prefix, for example `flatnotes/`.       |
 
-| Variable                                | Description                                                                                                                                          |
-| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `FLATNOTES_ATTACHMENT_STORAGE_PROVIDER` | Set to `"s3"`.                                                                                                                                       |
-| `FLATNOTES_S3_ENDPOINT_URL`             | **(Required for R2/MinIO)** The full endpoint URL. For Cloudflare R2: `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`. For AWS S3, leave this blank. |
-| `FLATNOTES_S3_ACCESS_KEY_ID`            | **(Required)** Your S3 Access Key ID.                                                                                                                |
-| `FLATNOTES_S3_SECRET_ACCESS_KEY`        | **(Required)** Your S3 Secret Access Key.                                                                                                            |
-| `FLATNOTES_S3_BUCKET_NAME`              | **(Required)** The name of the S3 bucket where files will be stored.                                                                                 |
-| `FLATNOTES_S3_REGION`                   | **(Required)** The AWS region of your bucket (e.g., `us-east-1`). For Cloudflare R2, set this to `auto`.                                             |
-| `FLATNOTES_S3_PUBLIC_URL`               | **(Required)** The public URL base for uploaded files. Example: `https://pub-xxxxxxxx.r2.dev`.                                                       |
-| `FLATNOTES_S3_PATH_PREFIX`              | (Optional) Prefix object keys inside the bucket, for example `flatnotes/`.                                                                           |
-
-Frontend image compression is enabled by default before upload. Tune it with:
+Frontend image compression is enabled by default:
 
 | Variable                                       | Description                                           |
 | ---------------------------------------------- | ----------------------------------------------------- |
@@ -433,4 +198,33 @@ Frontend image compression is enabled by default before upload. Tune it with:
 | `FLATNOTES_FRONTEND_IMAGE_COMPRESSION_QUALITY` | JPEG/WebP quality from `0.1` to `1.0`; default `0.8`. |
 | `FLATNOTES_FRONTEND_IMAGE_MAX_WIDTH`           | Maximum image width before upload; default `1920`.    |
 
-After adding these variables, restart your container. New attachments will now be uploaded to your S3-compatible provider.
+## Git Design Rules
+
+- The server is the source of truth for repository state; clients display server-pushed status.
+- `Pull` requires a clean worktree.
+- `Commit & Sync` may stage all local changes because the user intent is archive and sync.
+- Non-fast-forward `Push` failures should tell users to pull first.
+- Conflicts must be visible and route users to the conflict UI.
+- Do not add a diff view.
+- Do not switch branches with uncommitted changes.
+- Preserve the hybrid implementation: `pygit2` for local state/writes, `subprocess` only for remote/auth flows or Git gaps.
+
+## Fork Maintenance
+
+Fork-owned paths:
+
+- `client/git-integration/`
+- `server/git_integration/`
+- Mermaid integration in `client/components/toastui/`
+- S3/R2 attachment handling in `server/attachments/s3.py`
+- Small integration points in `client/App.vue`, `client/views/Note.vue`, and `server/main.py`
+
+When syncing upstream, prefer stable releases from `upstream/master`. Preserve upstream core behavior unless it breaks a fork-owned feature. Do not refactor or reformat upstream code for style alone.
+
+## Troubleshooting
+
+- Git panel missing: confirm `FLATNOTES_GIT_ENABLED=true` and restart.
+- Repository not initialized: check `FLATNOTES_PATH`; initialize manually or set `FLATNOTES_GIT_AUTO_INIT=true`.
+- Vite API failures: backend must run on `127.0.0.1:8000`.
+- Fetch/push failures: verify remote URL, upstream branch, SSH key, and `known_hosts`.
+- Webhook failures: check secret length, reverse proxy rules, and GitHub delivery logs.

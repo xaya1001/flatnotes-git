@@ -328,7 +328,9 @@ async def test_reset_to_remote_workflow(
     (repo_path / "README.md").write_text("Modified README, should be reverted.")
 
     # 2. ACTION: The user clicks the "Reset to Remote" button.
-    response = await async_client.post("/api/git/reset-to-remote")
+    response = await async_client.post(
+        "/api/git/reset-to-remote", json={"confirm": True}
+    )
 
     # 3. ASSERT: The API call is successful.
     assert response.status_code == 200
@@ -345,3 +347,55 @@ async def test_reset_to_remote_workflow(
     # Verify HEAD points to the original remote commit
     new_head_hash = repo_with_remote.head.target
     assert new_head_hash == remote_head_hash
+
+
+async def test_reset_to_remote_requires_confirmation(async_client: AsyncClient):
+    response = await async_client.post(
+        "/api/git/reset-to-remote", json={"confirm": False}
+    )
+
+    assert response.status_code == 400
+    assert "requires confirm=true" in response.json()["detail"]
+
+
+async def test_git_file_operation_rejects_path_traversal(async_client: AsyncClient):
+    response = await async_client.post(
+        "/api/git/stage_file", json={"filepath": "../outside.md"}
+    )
+
+    assert response.status_code == 422
+
+
+async def test_git_file_operation_rejects_backslash_paths(async_client: AsyncClient):
+    response = await async_client.post(
+        "/api/git/stage_file", json={"filepath": "..\\outside.md"}
+    )
+
+    assert response.status_code == 422
+
+
+async def test_switch_branch_rejects_invalid_branch_name(async_client: AsyncClient):
+    response = await async_client.post(
+        "/api/git/branches/switch", json={"branch_name": "bad branch"}
+    )
+
+    assert response.status_code == 422
+
+
+async def test_switch_branch_rejects_invalid_branch_component(
+    async_client: AsyncClient,
+):
+    response = await async_client.post(
+        "/api/git/branches/switch", json={"branch_name": "feature/.hidden"}
+    )
+
+    assert response.status_code == 422
+
+
+async def test_restore_file_rejects_invalid_commit_hash(async_client: AsyncClient):
+    response = await async_client.post(
+        "/api/git/restore-file",
+        json={"commit_hash": "not-a-hash", "filepath": "README.md"},
+    )
+
+    assert response.status_code == 422

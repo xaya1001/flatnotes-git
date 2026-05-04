@@ -1,7 +1,10 @@
 // client/git-integration/tests/eventHandler.spec.js
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { initializeGitEventHandlers } from "../composables/eventHandler.js";
+import {
+  cleanupGitEventHandlers,
+  initializeGitEventHandlers,
+} from "../composables/eventHandler.js";
 import eventBus from "../services/eventBus.js";
 import { useStatusStore } from "../stores/statusStore.js";
 
@@ -15,6 +18,7 @@ describe("eventHandler.js", () => {
   let statusStoreMock;
 
   beforeEach(() => {
+    cleanupGitEventHandlers();
     // Before each test, create a fresh spy and configure the mock to use it.
     const fetchStatusSpy = vi.fn();
     statusStoreMock = { fetchStatus: fetchStatusSpy };
@@ -56,5 +60,14 @@ describe("eventHandler.js", () => {
 
     // 3. Assert
     expect(statusStoreMock.fetchStatus).not.toHaveBeenCalled();
+  });
+
+  it("should not register duplicate handlers", () => {
+    initializeGitEventHandlers();
+    initializeGitEventHandlers();
+
+    eventBus.emit("note:saved");
+
+    expect(statusStoreMock.fetchStatus).toHaveBeenCalledTimes(1);
   });
 });

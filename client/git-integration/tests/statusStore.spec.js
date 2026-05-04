@@ -63,4 +63,17 @@ describe("statusStore", () => {
     expect(store.gitStatus).toEqual({ files: [] }); // State should be reset
     expect(store.isInitialLoadComplete).toBe(true); // Should still be marked as complete
   });
+
+  it("should surface non-initialization API errors during fetchStatus", async () => {
+    const store = useStatusStore();
+    const mockError = new Error("Request failed");
+    mockError.response = { status: 500, data: { detail: "Backend exploded" } };
+
+    gitApi.getGitStatus.mockRejectedValue(mockError);
+
+    await store.fetchStatus();
+
+    expect(store.summaryError).toBe("Backend exploded");
+    expect(store.gitStatus).toEqual({ files: [] });
+  });
 });

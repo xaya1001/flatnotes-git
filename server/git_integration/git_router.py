@@ -37,6 +37,7 @@ from .git_models import (
     BranchListResponse,
     GitCommandResponse,
     GitCommitRequest,
+    GitConfirmRequest,
     GitFileOperationRequest,
     GitFileStatusItem,
     GitLogResponse,
@@ -252,10 +253,13 @@ async def discard_file(
 @router.post("/discard_all", response_model=GitCommandResponse)
 async def discard_all_changes(
     background_tasks: BackgroundTasks,
+    request: GitConfirmRequest = Body(...),
     service: GitService = Depends(get_git_service),
 ):
     async with locked_git_operation():
         try:
+            if not request.confirm:
+                raise ValueError("Discard all requires confirm=true.")
             service.discard_all()
             message = "All unstaged changes have been discarded."
             add_git_log(LogLevel.WARN, message, "This is a destructive operation.")
@@ -446,11 +450,14 @@ async def conflict_abort(
 @router.post("/reset-to-remote", response_model=GitCommandResponse)
 async def reset_to_remote(
     background_tasks: BackgroundTasks,
+    request: GitConfirmRequest = Body(...),
     service: GitService = Depends(get_git_service),
 ):
     action_name = "Reset to Remote"
     async with locked_git_operation():
         try:
+            if not request.confirm:
+                raise ValueError("Reset to remote requires confirm=true.")
             result = service.reset_to_remote()
             add_git_log(
                 LogLevel.WARN,

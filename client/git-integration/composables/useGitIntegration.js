@@ -3,7 +3,10 @@ import { computed, watchEffect } from "vue";
 import { useGlobalStore } from "../../globalStore";
 import { useStatusStore } from "../stores/statusStore";
 import { webSocket } from "../services/webSocket.js";
-import { initializeGitEventHandlers } from "./eventHandler";
+import {
+  cleanupGitEventHandlers,
+  initializeGitEventHandlers,
+} from "./eventHandler";
 
 export function useGitIntegration() {
   const globalStore = useGlobalStore();
@@ -27,6 +30,7 @@ export function useGitIntegration() {
 
       onCleanup(() => {
         webSocket.disconnect();
+        cleanupGitEventHandlers();
         document.removeEventListener("visibilitychange", onVisibilityChange);
       });
     }
