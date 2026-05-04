@@ -58,6 +58,20 @@ def test_sync_workspace_dirty_commits_and_pulls(
 # --- Integration Tests with Real Fixtures ---
 
 
+def test_fetch_keeps_repository_reader_in_sync(
+    git_service: GitService, second_clone_repo: pygit2.Repository
+):
+    old_repo = git_service.repository.repo
+    make_commit(second_clone_repo, "remote_file.md", "", "Remote commit")
+    second_clone_repo.remotes["origin"].push(["refs/heads/main"])
+
+    git_service.fetch()
+
+    assert git_service.repository.repo is git_service.executor.repo
+    assert git_service.repository.repo is not old_repo
+    assert git_service.repository.get_ahead_behind() == (0, 1)
+
+
 def test_pull_with_merge_strategy_creates_merge_commit(
     git_service: GitService, second_clone_repo: pygit2.Repository, monkeypatch
 ):

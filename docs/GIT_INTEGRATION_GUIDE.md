@@ -21,6 +21,106 @@ The Git integration adds a dedicated panel to the Flatnotes UI with three main t
 
 ---
 
+## Fork Maintenance Scope
+
+This repository is a fork of upstream `dullage/flatnotes`. The fork-owned code is the Git integration, Mermaid rendering, S3/R2 attachment storage, frontend image compression, CI, and deployment changes. Treat the original Flatnotes core as upstream-owned code. Change it only when a small integration point is required, and keep those changes merge-friendly.
+
+Primary fork-owned paths:
+
+- `client/git-integration/`
+- `server/git_integration/`
+- Mermaid integration in `client/components/toastui/`
+- S3/R2 attachment handling in `server/attachments/s3.py`
+- Small integration points in `client/App.vue`, `client/views/Note.vue`, and `server/main.py`
+
+When syncing upstream, prefer stable releases from `upstream/master`. During conflicts, preserve upstream core behavior unless it breaks a fork-owned feature. Do not refactor or reformat upstream code for style alone.
+
+---
+
+## Local Development and Manual Testing
+
+`npm run dev` only starts the Vite frontend. It proxies API and WebSocket traffic to the backend at `http://127.0.0.1:8000`, so the backend must be running separately.
+
+### One-time setup
+
+```bash
+pipenv sync --dev
+npm install
+mkdir -p data
+git -C data init -b main
+git -C data config user.name "Flatnotes Dev"
+git -C data config user.email "dev@flatnotes.local"
+touch data/.gitignore
+git -C data add .gitignore
+git -C data commit -m "Initial notes repo"
+```
+
+### Run the backend
+
+```bash
+FLATNOTES_PATH="$PWD/data" \
+FLATNOTES_AUTH_TYPE=none \
+FLATNOTES_GIT_ENABLED=true \
+FLATNOTES_GIT_AUTO_INIT=true \
+FLATNOTES_GIT_REMOTE_NAME=origin \
+FLATNOTES_GIT_DEFAULT_BRANCH=main \
+FLATNOTES_GIT_COMMIT_USER_NAME="flatnotes-dev" \
+FLATNOTES_GIT_COMMIT_USER_EMAIL="dev@flatnotes.local" \
+pipenv run python -m uvicorn main:app --app-dir server --host 127.0.0.1 --port 8000 --reload
+```
+
+### Run the frontend
+
+In another terminal:
+
+```bash
+npm run dev
+```
+
+Open `http://127.0.0.1:8080`. If `npm run dev` starts but Git/API calls fail, check that the backend is listening on port `8000`, not `8080`.
+
+### Manual Git smoke test
+
+1. Create or edit a note in the web UI.
+2. Open the Git panel and confirm the changed file appears in Workspace.
+3. Enter a commit message and run `Commit & Sync`. With no remote configured, commit should work but push may report no upstream or remote failure.
+4. Run `git -C data log --oneline --decorate -5` to confirm the commit exists.
+5. Modify a file outside Flatnotes, refresh the UI, and confirm status updates.
+
+For remote testing, add a test remote to `data` and ensure SSH works non-interactively:
+
+```bash
+git -C data remote add origin git@github.com:USER/NOTES_TEST_REPO.git
+ssh -T git@github.com
+```
+
+Use a disposable repository for conflict, reset, discard, and branch-switch testing.
+
+### Automated checks
+
+This fork only requires tests for fork-owned behavior. Upstream Flatnotes core has little or no test coverage, so do not add broad tests for unrelated core code.
+
+```bash
+npm run test:js
+npm run test:py
+npm run build
+```
+
+---
+
+## Git Integration Design Rules
+
+- The server is the source of truth for repository state; clients display server-pushed status.
+- `Pull` requires a clean worktree. Do not allow pull to mix unfinished local edits into a conflict.
+- `Commit & Sync` may stage all local changes because the user intent is to archive and synchronize.
+- Non-fast-forward `Push` failures should tell the user to pull first.
+- Conflicts must be visible and route users to the conflict UI. Do not leave the repository conflicted without UI awareness.
+- Do not add a diff view.
+- Do not switch branches with uncommitted changes.
+- Preserve the hybrid Git implementation: use `pygit2` for local repository state and writes; use `subprocess` only for remote/auth flows or Git operations not covered well by `pygit2`.
+
+---
+
 ## Deployment Instructions
 
 You can deploy `flatnotes-git` using a simple Docker command or by integrating it with a reverse proxy like Traefik for a more robust setup.
@@ -322,6 +422,15 @@ Add the following variables to your `.env` file, customized for your provider.
 | `FLATNOTES_S3_SECRET_ACCESS_KEY`        | **(Required)** Your S3 Secret Access Key.                                                                                                            |
 | `FLATNOTES_S3_BUCKET_NAME`              | **(Required)** The name of the S3 bucket where files will be stored.                                                                                 |
 | `FLATNOTES_S3_REGION`                   | **(Required)** The AWS region of your bucket (e.g., `us-east-1`). For Cloudflare R2, set this to `auto`.                                             |
-| `FLATNOTES_S3_PUBLIC_URL_BASE`          | (Optional but recommended for R2) A custom public URL base for your files. Example: `https://pub-xxxxxxxx.r2.dev`.                                   |
+| `FLATNOTES_S3_PUBLIC_URL`               | **(Required)** The public URL base for uploaded files. Example: `https://pub-xxxxxxxx.r2.dev`.                                                       |
+| `FLATNOTES_S3_PATH_PREFIX`              | (Optional) Prefix object keys inside the bucket, for example `flatnotes/`.                                                                           |
+
+Frontend image compression is enabled by default before upload. Tune it with:
+
+| Variable                                       | Description                                           |
+| ---------------------------------------------- | ----------------------------------------------------- |
+| `FLATNOTES_FRONTEND_IMAGE_COMPRESSION_ENABLED` | Set to `false` to disable browser-side compression.   |
+| `FLATNOTES_FRONTEND_IMAGE_COMPRESSION_QUALITY` | JPEG/WebP quality from `0.1` to `1.0`; default `0.8`. |
+| `FLATNOTES_FRONTEND_IMAGE_MAX_WIDTH`           | Maximum image width before upload; default `1920`.    |
 
 After adding these variables, restart your container. New attachments will now be uploaded to your S3-compatible provider.

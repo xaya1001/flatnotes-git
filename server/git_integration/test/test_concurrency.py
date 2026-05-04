@@ -8,9 +8,9 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-# Import the router directly, not the app
 from ..core.git_service import GitService
-from ..git_router import get_git_service, git_operation_lock
+from ..git_lock import git_operation_lock
+from ..git_router import get_git_service
 from ..git_router import router as git_router
 
 
@@ -74,59 +74,28 @@ async def test_read_operation_is_not_blocked_by_write_operation(
 ):
     """
     Verifies that a read operation (/status) can proceed even if a write
-    operation (/sync) is holding the lock. This remains valid because
+    operation (/sync) is waiting on the lock. This remains valid because
     the /status route does not use the lock.
     """
     app = create_test_app(git_service)
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as async_client:
-        real_acquire = git_operation_lock.acquire
-        real_release = git_operation_lock.release
-        lock_acquired_time = 0
-        lock_released_time = 0
+        (Path(git_service.executor.repo.workdir) / "write_op.md").write_text("data")
 
-        async def slow_acquire(*args, **kwargs):
-            nonlocal lock_acquired_time
-            await real_acquire(*args, **kwargs)
-            lock_acquired_time = time.monotonic()
-            await asyncio.sleep(0.2)  # Hold the lock for a while
-
-        def fast_release(*args, **kwargs):
-            nonlocal lock_released_time
-            lock_released_time = time.monotonic()
-            return real_release(*args, **kwargs)
-
-        with patch(
-            "git_integration.git_router.git_operation_lock.acquire",
-            side_effect=slow_acquire,
-        ), patch(
-            "git_integration.git_router.git_operation_lock.release",
-            side_effect=fast_release,
-        ):
-            # Create a change so sync has something to do
-            (Path(git_service.executor.repo.workdir) / "write_op.md").write_text("data")
-
-            # Start the slow write operation in the background
+        git_operation_lock.acquire()
+        try:
             write_task = asyncio.create_task(
                 async_client.post("/api/git/sync", json={"message": "Slow write op"})
             )
-
-            # Give the write task a moment to acquire the lock
             await asyncio.sleep(0.05)
 
-            # While the lock is held, perform a read operation
             read_response = await async_client.get("/api/git/status")
-            read_complete_time = time.monotonic()
+            assert read_response.status_code == 200
+            assert not write_task.done()
+        finally:
+            git_operation_lock.release()
 
-            # Wait for the write operation to finish
-            write_response = await write_task
+        write_response = await write_task
 
-        assert read_response.status_code == 200
         assert write_response.status_code == 200
-
-        # The key assertion: the read operation must complete before the lock is released.
-        assert read_complete_time < lock_released_time
-
-        lock_held_duration = lock_released_time - lock_acquired_time
-        assert lock_held_duration >= 0.2

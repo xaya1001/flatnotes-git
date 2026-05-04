@@ -5,6 +5,7 @@ business logic layer for the Git integration. It orchestrates operations
 using the Repository (for reads) and Executor (for writes) classes to
 fulfill high-level user workflows like 'sync' or 'resolve conflict'.
 """
+
 from typing import Any, Dict, List, Optional
 
 import pygit2
@@ -31,6 +32,11 @@ class GitService:
         """
         self.repository = repository
         self.executor = executor
+        self._sync_repository()
+
+    def _sync_repository(self):
+        """Make read operations use the executor's current repository object."""
+        self.repository.repo = self.executor.repo
 
     # --- Proxied Read Operations ---
 
@@ -52,40 +58,59 @@ class GitService:
 
     def add_all(self):
         self.executor.add_all()
+        self._sync_repository()
 
     def unstage_all(self):
         self.executor.unstage_all()
+        self._sync_repository()
 
     def add_file(self, filepath: str):
         self.executor.add_file(filepath)
+        self._sync_repository()
 
     def unstage_file(self, filepath: str):
         self.executor.unstage_file(filepath)
+        self._sync_repository()
 
     def discard_file(self, filepath: str):
         self.executor.discard_file(filepath)
+        self._sync_repository()
 
     def discard_all(self):
         self.executor.discard_all()
+        self._sync_repository()
 
     def commit(self, message: str) -> Dict[str, Any]:
-        return self.executor.commit(message)
+        result = self.executor.commit(message)
+        self._sync_repository()
+        return result
+
+    def fetch(self, remote_name: Optional[str] = None) -> str:
+        output = self.executor.fetch(remote_name)
+        self._sync_repository()
+        return output
 
     def push(
         self, remote_name: Optional[str] = None, branch_name: Optional[str] = None
     ) -> Dict[str, Any]:
-        return self.executor.push(remote_name, branch_name)
+        result = self.executor.push(remote_name, branch_name)
+        self._sync_repository()
+        return result
 
     def switch_branch(self, branch_name: str):
         self.executor.switch_branch(branch_name)
+        self._sync_repository()
 
     def reset_to_remote(
         self, remote_name: Optional[str] = None, branch_name: Optional[str] = None
     ):
-        return self.executor.reset_to_remote(remote_name, branch_name)
+        result = self.executor.reset_to_remote(remote_name, branch_name)
+        self._sync_repository()
+        return result
 
     def checkout_file_from_commit(self, commit_hash: str, filepath: str):
         self.executor.checkout_file_from_commit(commit_hash, filepath)
+        self._sync_repository()
 
     # --- Complex Workflows ---
 
@@ -109,7 +134,7 @@ class GitService:
             old_head_oid_str = None
 
         logger.info(f"Step 1/2: Fetching from remote '{remote_to_use}'...")
-        fetch_output = self.executor.fetch(remote_to_use)
+        fetch_output = self.fetch(remote_to_use)
 
         current_branch_name = branch_name or self.repository.get_current_branch()
         if not current_branch_name or current_branch_name.startswith("DETACHED"):
@@ -140,6 +165,7 @@ class GitService:
 
         operation_output = self.executor._execute_git_command(operation_command)
         self.executor._reopen_repository()
+        self._sync_repository()
 
         new_head_oid = self.repository.repo.head.target
         commits_received = 0
@@ -213,7 +239,7 @@ Operation output:
             }
 
         try:
-            self.executor.fetch(remote_name)
+            self.fetch(remote_name)
             _, behind = self.repository.get_ahead_behind()
             if behind > 0:
                 logger.info(f"Local branch is {behind} commit(s) behind. Pulling.")
@@ -222,8 +248,9 @@ Operation output:
             else:
                 logger.info("Local branch is up-to-date. Skipping pull.")
                 results["pull"] = {"message": "Already up-to-date. Pull skipped."}
-            results["push"] = self.executor.push(remote_name=remote_name)
+            results["push"] = self.push(remote_name=remote_name)
             self.executor._cleanup_temp_notes()
+            self._sync_repository()
             return results
         except MergeConflictError:
             logger.warning("Merge conflict detected. Temp note preserved for rollback.")
@@ -239,7 +266,9 @@ Operation output:
             if action == "continue":
                 if state == "REBASING_CONTINUE":
                     continue_output = self.executor.rebase_continue()
-                    push_output = self.executor.push()
+                    self.executor._reopen_repository()
+                    self._sync_repository()
+                    push_output = self.push()
                     return {
                         "message": "Rebase finished and pushed.",
                         "details": f"""Rebase: {continue_output}
@@ -247,7 +276,8 @@ Push: {push_output}""",
                     }
                 elif state == "MERGING":
                     commit_result = self.executor.commit(message=None)
-                    push_result = self.executor.push()
+                    self._sync_repository()
+                    push_result = self.push()
                     return {
                         "message": "Merge finalized and pushed.",
                         "commit": commit_result,
@@ -266,6 +296,7 @@ Push: {push_output}""",
                 raise ValueError(f"Invalid resolution action: {action}")
         finally:
             self.executor._cleanup_temp_notes()
+            self._sync_repository()
 
     def _abort_conflict_resolution(self) -> str:
         """Private helper to handle the complex abort logic."""
@@ -286,9 +317,7 @@ Push: {push_output}""",
             logger.info(f"Successfully aborted {operation_name} operation.")
             #  Fully reopen repository to clear internal state *after* abort.
             self.executor._reopen_repository()
-            self.repository.repo = (
-                self.executor.repo
-            )  # Ensure service uses the new repo object
+            self._sync_repository()
         except GitManagerError as e:
             self.executor._cleanup_temp_notes()
             raise GitManagerError(
@@ -310,7 +339,7 @@ Push: {push_output}""",
             # Now that the state is clean, this reset should succeed.
             self.repository.repo.reset(head_commit.parents[0].id, pygit2.GIT_RESET_SOFT)
             self.executor._reopen_repository()  # Reopen again after reset for good measure
-            self.repository.repo = self.executor.repo
+            self._sync_repository()
             return f"The {operation_name} was aborted. The temp sync commit has been undone."
         except KeyError:
             # This is the normal case for a user's own commit.

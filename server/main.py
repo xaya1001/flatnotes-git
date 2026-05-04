@@ -62,6 +62,10 @@ if global_config.flatnotes_git_enabled:
         # Initialize git config from the global config object
         initialize_git_config(global_config)
 
+        from git_integration.git_lock import (
+            git_operation_lock,
+            locked_git_operation,
+        )
         from git_integration.git_logger import (
             AUTO_FETCH_LOG_ID,
             LogLevel,
@@ -136,7 +140,8 @@ async def lifespan(app: FastAPI):
                     try:
                         # Use the singleton instance
                         service: GitService = app.state.git_service
-                        service.executor.fetch()
+                        with git_operation_lock:
+                            service.fetch()
                         # Run the async broadcast function from this sync thread
                         asyncio.run(connection_manager.broadcast_status_update())
                         add_git_log(
@@ -254,7 +259,8 @@ if git_integration_router:
             try:
                 # Use the singleton instance
                 service: GitService = app.state.git_service
-                result = service.executor.fetch()
+                async with locked_git_operation():
+                    result = service.fetch()
                 add_git_log(
                     LogLevel.SUCCESS, "Webhook: Fetch successful", details=result
                 )

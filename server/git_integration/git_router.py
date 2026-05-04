@@ -1,5 +1,4 @@
 # server/git_integration/git_router.py
-import asyncio
 from typing import List, Optional
 
 from fastapi import (
@@ -26,6 +25,7 @@ from .core.git_exceptions import (
     RemoteNotFoundError,
 )
 from .core.git_service import GitService
+from .git_lock import locked_git_operation
 from .git_logger import (
     LogEntry,
     LogLevel,
@@ -45,9 +45,6 @@ from .git_models import (
     SwitchBranchRequest,
 )
 from .websockets import connection_manager
-
-# --- Concurrency Lock ---
-git_operation_lock = asyncio.Lock()
 
 
 # --- Dependency Injection (Singleton Pattern) ---
@@ -135,7 +132,7 @@ async def restore_file_from_commit(
     service: GitService = Depends(get_git_service),
 ):
     action_name = f"Restore file '{request.filepath}'"
-    async with git_operation_lock:
+    async with locked_git_operation():
         try:
             service.checkout_file_from_commit(request.commit_hash, request.filepath)
             message = f"File '{request.filepath}' restored from commit {request.commit_hash[:7]}."
@@ -169,7 +166,7 @@ async def add_all_git_changes(
     background_tasks: BackgroundTasks,
     service: GitService = Depends(get_git_service),
 ):
-    async with git_operation_lock:
+    async with locked_git_operation():
         try:
             service.add_all()
             message = "All changes staged."
@@ -186,7 +183,7 @@ async def unstage_all_git_changes(
     background_tasks: BackgroundTasks,
     service: GitService = Depends(get_git_service),
 ):
-    async with git_operation_lock:
+    async with locked_git_operation():
         try:
             service.unstage_all()
             message = "All staged changes have been unstaged."
@@ -204,7 +201,7 @@ async def stage_file(
     request: GitFileOperationRequest,
     service: GitService = Depends(get_git_service),
 ):
-    async with git_operation_lock:
+    async with locked_git_operation():
         try:
             service.add_file(request.filepath)
             message = f"File '{request.filepath}' staged."
@@ -222,7 +219,7 @@ async def unstage_file(
     request: GitFileOperationRequest,
     service: GitService = Depends(get_git_service),
 ):
-    async with git_operation_lock:
+    async with locked_git_operation():
         try:
             service.unstage_file(request.filepath)
             message = f"File '{request.filepath}' unstaged."
@@ -240,7 +237,7 @@ async def discard_file(
     request: GitFileOperationRequest,
     service: GitService = Depends(get_git_service),
 ):
-    async with git_operation_lock:
+    async with locked_git_operation():
         try:
             service.discard_file(request.filepath)
             message = f"Changes for '{request.filepath}' discarded."
@@ -257,7 +254,7 @@ async def discard_all_changes(
     background_tasks: BackgroundTasks,
     service: GitService = Depends(get_git_service),
 ):
-    async with git_operation_lock:
+    async with locked_git_operation():
         try:
             service.discard_all()
             message = "All unstaged changes have been discarded."
@@ -275,7 +272,7 @@ async def commit_git_changes(
     commit_request: GitCommitRequest = Body(...),
     service: GitService = Depends(get_git_service),
 ):
-    async with git_operation_lock:
+    async with locked_git_operation():
         try:
             commit_result = service.commit(message=commit_request.message)
             message = "Changes committed successfully."
@@ -292,7 +289,7 @@ async def pull_git_changes(
     background_tasks: BackgroundTasks,
     service: GitService = Depends(get_git_service),
 ):
-    async with git_operation_lock:
+    async with locked_git_operation():
         try:
             result = service.pull()
             message = "Pull operation completed."
@@ -309,7 +306,7 @@ async def push_git_changes(
     background_tasks: BackgroundTasks,
     service: GitService = Depends(get_git_service),
 ):
-    async with git_operation_lock:
+    async with locked_git_operation():
         try:
             result = service.push()
             message = "Push operation completed."
@@ -327,7 +324,7 @@ async def commit_and_sync(
     commit_request: Optional[GitCommitRequest] = Body(None),
     service: GitService = Depends(get_git_service),
 ):
-    async with git_operation_lock:
+    async with locked_git_operation():
         try:
             # The frontend now guarantees a non-empty message.
             commit_message = commit_request.message if commit_request else ""
@@ -394,7 +391,7 @@ async def switch_to_branch(
     request: SwitchBranchRequest,
     service: GitService = Depends(get_git_service),
 ):
-    async with git_operation_lock:
+    async with locked_git_operation():
         try:
             service.switch_branch(request.branch_name)
             message = f"Successfully switched to branch '{request.branch_name}'."
@@ -414,7 +411,7 @@ async def conflict_continue(
     service: GitService = Depends(get_git_service),
 ):
     action_name = "Continue Operation"
-    async with git_operation_lock:
+    async with locked_git_operation():
         try:
             result = service.resolve_conflict("continue")
             message = result.get("message", "Operation continued successfully.")
@@ -432,7 +429,7 @@ async def conflict_abort(
     service: GitService = Depends(get_git_service),
 ):
     action_name = "Abort Operation"
-    async with git_operation_lock:
+    async with locked_git_operation():
         try:
             result = service.resolve_conflict("abort")
             message = result.get("message", "Operation aborted.")
@@ -452,7 +449,7 @@ async def reset_to_remote(
     service: GitService = Depends(get_git_service),
 ):
     action_name = "Reset to Remote"
-    async with git_operation_lock:
+    async with locked_git_operation():
         try:
             result = service.reset_to_remote()
             add_git_log(
