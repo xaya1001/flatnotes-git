@@ -39,6 +39,11 @@
   />
 
   <LoadingIndicator ref="loadingIndicator" class="flex h-full flex-col">
+    <NoteOutline
+      :headings="outlineHeadings"
+      :activeId="activeOutlineId"
+      @navigate="navigateToOutlineHeading"
+    />
     <!-- Header -->
     <div class="flex flex-col-reverse md:flex-row md:items-baseline">
       <!-- Title -->
@@ -94,6 +99,7 @@
         v-if="!editMode"
         :initialValue="note.content"
         class="toast-viewer pb-4"
+        @rendered="refreshOutlineFromElement"
       />
       <ToastEditor
         v-if="editMode"
@@ -101,8 +107,9 @@
         :initialValue="getInitialEditorValue()"
         :initialEditType="loadDefaultEditorMode()"
         :addImageBlobHook="addImageBlobHook"
-        @change="startContentChangedTimeout"
+        @change="handleEditorChange"
         @keydown="keydownHandler"
+        @preview-rendered="refreshOutlineFromElement"
       />
     </div>
   </LoadingIndicator>
@@ -116,6 +123,21 @@
 .toast-viewer li.task-list-item a {
   pointer-events: auto;
 }
+
+.toast-viewer h1,
+.toast-viewer h2,
+.toast-viewer h3,
+.toast-viewer h4,
+.toast-viewer h5,
+.toast-viewer h6,
+.toastui-editor-md-preview h1,
+.toastui-editor-md-preview h2,
+.toastui-editor-md-preview h3,
+.toastui-editor-md-preview h4,
+.toastui-editor-md-preview h5,
+.toastui-editor-md-preview h6 {
+  scroll-margin-top: 5rem;
+}
 </style>
 
 <script setup>
@@ -123,7 +145,7 @@ import { mdiNoteOffOutline } from "@mdi/js";
 import { mdilContentSave, mdilDelete } from "@mdi/light-js";
 import Mousetrap from "mousetrap";
 import { useToast } from "primevue/usetoast";
-import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 
 import {
@@ -138,6 +160,8 @@ import { Note } from "../classes.js";
 import ConfirmModal from "../components/ConfirmModal.vue";
 import CustomButton from "../components/CustomButton.vue";
 import LoadingIndicator from "../components/LoadingIndicator.vue";
+import NoteOutline from "../components/note-outline/NoteOutline.vue";
+import { extractHeadings } from "../components/note-outline/headingUtils.js";
 import Toggle from "../components/Toggle.vue";
 import ToastEditor from "../components/toastui/ToastEditor.vue";
 import ToastViewer from "../components/toastui/ToastViewer.vue";
@@ -164,6 +188,10 @@ const isDraftModalVisible = ref(false);
 const isNewNote = computed(() => !props.title);
 const loadingIndicator = ref();
 const note = ref({});
+const outlineHeadings = ref([]);
+const activeOutlineId = ref("");
+let outlineObserver = null;
+let outlineRefreshTimeout = null;
 const reservedFilenameCharacters = /[<>:"/\\|?*]/;
 const router = useRouter();
 const newTitle = ref();
@@ -177,6 +205,7 @@ function init() {
     return;
   }
 
+  resetOutline();
   loadingIndicator.value.setLoading();
   if (props.title) {
     getNote(props.title)
@@ -473,6 +502,11 @@ function addImageBlobHook(file, callback) {
 }
 
 // Content Change Watcher
+function handleEditorChange() {
+  startContentChangedTimeout();
+  scheduleEditorOutlineRefresh();
+}
+
 function startContentChangedTimeout() {
   clearContentChangedTimeout();
   contentChangedTimeout = setTimeout(contentChangedHandler, 1000);
@@ -590,6 +624,81 @@ function isContentChanged() {
   );
 }
 
+function resetOutline() {
+  if (outlineRefreshTimeout) {
+    clearTimeout(outlineRefreshTimeout);
+    outlineRefreshTimeout = null;
+  }
+  if (outlineObserver) {
+    outlineObserver.disconnect();
+    outlineObserver = null;
+  }
+  outlineHeadings.value = [];
+  activeOutlineId.value = "";
+}
+
+function refreshOutlineFromElement(rootElement) {
+  if (!rootElement) {
+    resetOutline();
+    return;
+  }
+
+  if (outlineObserver) {
+    outlineObserver.disconnect();
+    outlineObserver = null;
+  }
+
+  const headings = extractHeadings(rootElement);
+  outlineHeadings.value = headings;
+  activeOutlineId.value = headings[0]?.id || "";
+  observeOutlineHeadings(headings);
+}
+
+function scheduleEditorOutlineRefresh() {
+  if (!editMode.value) return;
+  if (outlineRefreshTimeout) clearTimeout(outlineRefreshTimeout);
+
+  outlineRefreshTimeout = setTimeout(() => {
+    const previewElement = toastEditor.value?.getPreviewElement?.();
+    if (previewElement) {
+      refreshOutlineFromElement(previewElement);
+    }
+  }, 300);
+}
+
+function observeOutlineHeadings(headings) {
+  if (!("IntersectionObserver" in window) || headings.length === 0) return;
+
+  outlineObserver = new IntersectionObserver(
+    (entries) => {
+      const visibleEntries = entries
+        .filter((entry) => entry.isIntersecting)
+        .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+
+      if (visibleEntries.length > 0) {
+        activeOutlineId.value = visibleEntries[0].target.id;
+      }
+    },
+    { root: null, rootMargin: "-20% 0px -70% 0px", threshold: 0 },
+  );
+
+  headings.forEach((heading) => outlineObserver.observe(heading.element));
+}
+
+function navigateToOutlineHeading(heading) {
+  const targetElement = heading.element || document.getElementById(heading.id);
+  if (!targetElement) return;
+
+  targetElement.scrollIntoView({ behavior: "smooth", block: "start" });
+  activeOutlineId.value = heading.id;
+  history.replaceState(
+    null,
+    "",
+    `${window.location.pathname}${window.location.search}#${heading.id}`,
+  );
+}
+
 watch(() => props.title, init);
 onMounted(init);
+onUnmounted(resetOutline);
 </script>
