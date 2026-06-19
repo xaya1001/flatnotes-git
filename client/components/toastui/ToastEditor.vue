@@ -7,6 +7,7 @@ import Editor from "@toast-ui/editor";
 import { onMounted, ref } from "vue";
 
 import baseOptions from "./baseOptions.js";
+import { enhanceCodeBlockCopy } from "./codeBlockCopy.js";
 import { renderMermaidBlocks } from "./mermaidRenderer.js";
 
 const props = defineProps({
@@ -42,6 +43,8 @@ onMounted(() => {
       : {},
   });
 
+  enhancePreview();
+
   const tabContainer = editorElement.value.querySelector(
     ".toastui-editor-md-tab-container",
   );
@@ -52,13 +55,21 @@ onMounted(() => {
         const previewEl = editorElement.value.querySelector(
           ".toastui-editor-md-preview",
         );
-        if (previewEl) {
-          renderMermaidBlocks(previewEl);
-        }
+        enhancePreview(previewEl);
       }
     });
   }
 });
+
+function enhancePreview(previewEl) {
+  const target =
+    previewEl ||
+    editorElement.value?.querySelector(".toastui-editor-md-preview");
+  if (!target) return;
+
+  renderMermaidBlocks(target);
+  enhanceCodeBlockCopy(target);
+}
 
 function getMarkdown() {
   return toastEditor.getMarkdown();

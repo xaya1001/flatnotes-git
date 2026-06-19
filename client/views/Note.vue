@@ -106,6 +106,16 @@
       />
     </div>
   </LoadingIndicator>
+
+  <button
+    type="button"
+    class="fixed bottom-4 right-4 z-30 flex h-10 w-10 items-center justify-center rounded-full border border-theme-border bg-theme-background text-theme-text-muted shadow-lg transition-colors hover:bg-theme-background-elevated hover:text-theme-text print:hidden"
+    title="Back to top"
+    aria-label="Back to top"
+    @click="scrollToTop"
+  >
+    <SvgIcon type="mdi" :path="mdilArrowUp" :size="22" />
+  </button>
 </template>
 
 <style>
@@ -119,8 +129,9 @@
 </style>
 
 <script setup>
+import SvgIcon from "@jamescoyle/vue-icon";
 import { mdiNoteOffOutline } from "@mdi/js";
-import { mdilContentSave, mdilDelete } from "@mdi/light-js";
+import { mdilArrowUp, mdilContentSave, mdilDelete } from "@mdi/light-js";
 import Mousetrap from "mousetrap";
 import { useToast } from "primevue/usetoast";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
@@ -581,6 +592,10 @@ function saveDefaultEditorMode() {
 function loadDefaultEditorMode() {
   const defaultWysiwygMode = localStorage.getItem("defaultEditorMode");
   return defaultWysiwygMode || "markdown";
+}
+
+function scrollToTop() {
+  window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
 function isContentChanged() {
