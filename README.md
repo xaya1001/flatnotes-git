@@ -5,9 +5,10 @@
   <img alt="Docker Pulls" src="https://img.shields.io/docker/pulls/unleash1371/flatnotes-git?style=for-the-badge">
 </p>
 
-> [!WARNING] > **This is a forked version of `flatnotes` with added Git integration features.**
+> [!WARNING]
+> **This is a forked version of `flatnotes`.**
 >
-> This repository extends the original `flatnotes` to allow server-side Git operations (status, commit, push, pull) directly from the web UI. For all new features and configurations related to Git, please see the \***\*[Git Integration Guide](client/git-integration/GIT_INTEGRATION_GUIDE.md)\*\***.
+> Fork-specific features, configuration, and testing notes are documented in [docs/GIT_INTEGRATION_GUIDE.md](docs/GIT_INTEGRATION_GUIDE.md). The upstream `flatnotes` README content below is otherwise kept as-is where possible.
 >
 > For information about core `flatnotes` features, please refer to the [official repository](https://github.com/dullage/flatnotes).
 

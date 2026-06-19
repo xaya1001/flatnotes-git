@@ -51,6 +51,11 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
+      - name: Install Playwright browser dependencies
+        run: |
+          python3 -m pip install playwright
+          python3 -m playwright install --with-deps chromium
+
       - name: Build frontend assets
         run: npm run build
 
@@ -58,7 +63,7 @@ jobs:
         id: get_version
         run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
 
-      - name: Run Python and JS tests
+      - name: Run fork test suite
         env:
           # Environment variables for the test run
           FLATNOTES_PATH: /tmp/flatnotes-test-data

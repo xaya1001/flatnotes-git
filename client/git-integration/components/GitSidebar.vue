@@ -1,19 +1,20 @@
 <!-- client/git-integration/components/GitSidebar.vue -->
 <template>
-  <div class="fixed right-0 top-0 z-40 h-full">
+  <div data-right-tool-sidebar class="fixed right-0 top-0 z-40 h-full">
     <!-- Sidebar Component -->
     <Sidebar
       v-model:visible="panelUiStore.isSidebarVisible"
       @show="handleSidebarShow"
-      @hide="handleSidebarHide"
       position="right"
-      :modal="!panelUiStore.isPinned"
-      :dismissable="!panelUiStore.isPinned"
+      :modal="false"
+      :dismissable="false"
       :showCloseIcon="false"
       :pt="{
+        mask: { class: 'pointer-events-none' },
         root: {
+          'data-right-tool-sidebar': '',
           class:
-            'h-full border-l border-theme-border bg-theme-background-elevated shadow-none flex flex-col w-full sm:w-96 md:w-[480px]',
+            'pointer-events-auto h-full border-l border-theme-border bg-theme-background-elevated shadow-none flex flex-col w-full sm:w-96 md:w-[480px]',
         },
         content: { class: 'p-0 h-full flex-grow min-h-0' },
       }"
@@ -272,12 +273,6 @@
         </template>
       </div>
     </Sidebar>
-
-    <!-- Toggle Indicator -->
-    <GitStatusIndicator
-      ref="statusIndicator"
-      @toggle-sidebar="handleToggleSidebar"
-    />
   </div>
 </template>
 
@@ -304,7 +299,6 @@ import { useLogStore } from "../stores/logStore";
 import eventBus from "../services/eventBus";
 import { GIT_OPERATION } from "../events";
 
-import GitStatusIndicator from "./GitStatusIndicator.vue";
 import ConfirmModal from "../../components/ConfirmModal.vue";
 import WorkspaceTab from "./tabs/WorkspaceTab.vue";
 import GitLogTab from "./tabs/GitLogTab.vue";
@@ -319,11 +313,7 @@ const logStore = useLogStore();
 
 const isInitialLoad = ref(true);
 const isRefreshing = ref(false);
-const statusIndicator = ref(null);
 const globalConfig = computed(() => globalStore.config.value);
-
-// THE SINGLE SOURCE OF TRUTH FOR UI DECISION MAKING
-const focusReturnTarget = ref(null);
 
 const isConflictRelated = computed(() => {
   const state = statusStore.repositoryState;
@@ -350,28 +340,8 @@ function handleSidebarShow() {
   fetchAllSidebarData();
 }
 
-function handleSidebarHide() {
-  if (
-    focusReturnTarget.value &&
-    typeof focusReturnTarget.value.focus === "function"
-  ) {
-    focusReturnTarget.value.focus();
-  }
-  focusReturnTarget.value = null;
-}
-
-function handleToggleSidebar() {
-  if (statusIndicator.value && statusIndicator.value.element) {
-    focusReturnTarget.value = statusIndicator.value.element;
-  }
-  panelUiStore.toggleSidebar();
-}
-
 function handleClose() {
-  if (statusIndicator.value && statusIndicator.value.element) {
-    focusReturnTarget.value = statusIndicator.value.element;
-  }
-  panelUiStore.hideSidebar();
+  panelUiStore.forceHideSidebar();
 }
 
 async function refreshAll() {

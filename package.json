@@ -5,9 +5,10 @@
   "description": "A database-less note taking web app that utilises a flat folder of markdown files for storage.",
   "main": "client/index.html",
   "scripts": {
-    "git-test": "pipenv run pytest && vitest --coverage --root .",
-    "test:py": "pipenv run pytest",
+    "git-test": "npm run test:py && npm run test:js && npm run test:e2e",
+    "test:py": "pipenv run pytest tests/server -vv",
     "test:js": "vitest --coverage --root .",
+    "test:e2e": "python3 tests/e2e/run_e2e.py",
     "prepare": "husky",
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "vite build",

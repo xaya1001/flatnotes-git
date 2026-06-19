@@ -20,10 +20,18 @@ export const usePanelUiStore = defineStore("git-panel-ui", () => {
     isSidebarVisible.value = !isSidebarVisible.value;
   }
 
+  function showSidebar() {
+    isSidebarVisible.value = true;
+  }
+
   function hideSidebar() {
     if (!isPinned.value) {
       isSidebarVisible.value = false;
     }
+  }
+
+  function forceHideSidebar() {
+    isSidebarVisible.value = false;
   }
 
   function togglePin() {
@@ -72,7 +80,9 @@ export const usePanelUiStore = defineStore("git-panel-ui", () => {
     isConfirmModalVisible,
     confirmModalProps,
     toggleSidebar,
+    showSidebar,
     hideSidebar,
+    forceHideSidebar,
     togglePin,
     setWidth,
     showConfirmation,

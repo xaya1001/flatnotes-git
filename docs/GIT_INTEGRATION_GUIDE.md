@@ -73,8 +73,15 @@ Use disposable remotes for conflict, reset, discard, and branch-switch testing.
 This fork only requires tests for fork-owned behavior. Upstream Flatnotes core has little or no coverage, so do not add broad tests for unrelated core code.
 
 ```bash
+npm run git-test
+```
+
+For focused checks while iterating:
+
+```bash
 npm run test:js
 npm run test:py
+npm run test:e2e
 npm run build
 ```
 

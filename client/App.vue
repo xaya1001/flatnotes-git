@@ -15,7 +15,7 @@
         @toggleSearchModal="toggleSearchModal"
       />
       <RouterView :key="route.fullPath" />
-      <GitSidebar v-if="gitIntegrationEnabled" />
+      <RightToolsHost :enabled="rightToolsEnabled" />
     </template>
     <div v-else class="flex flex-grow items-center justify-center">
       <p class="text-theme-text-muted">Loading application...</p>
@@ -39,8 +39,7 @@ import SearchModal from "./partials/SearchModal.vue";
 import LoadingIndicator from "./components/LoadingIndicator.vue";
 import router from "./router.js";
 import ConfirmDialog from "primevue/confirmdialog";
-import GitSidebar from "./git-integration/components/GitSidebar.vue";
-import { useGitIntegration } from "./git-integration/composables/useGitIntegration.js";
+import RightToolsHost from "./right-tool-rail/components/RightToolsHost.vue";
 
 const globalStore = useGlobalStore();
 const isSearchModalVisible = ref(false);
@@ -50,10 +49,9 @@ const route = useRoute();
 const toast = useToast();
 
 const isConfigLoaded = ref(false);
-const gitIntegrationEnabled = computed(
+const rightToolsEnabled = computed(
   () => globalStore.config.value?.flatnotesGitEnabled,
 );
-useGitIntegration();
 
 // '/' to search
 Mousetrap.bind("/", () => {
