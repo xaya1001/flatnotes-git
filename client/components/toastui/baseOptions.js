@@ -1,5 +1,6 @@
 import codeSyntaxHighlight from "@toast-ui/editor-plugin-code-syntax-highlight/dist/toastui-editor-plugin-code-syntax-highlight-all.js";
 import router from "../../router.js";
+import { slugifyHeading } from "../note-outline/headingUtils.js";
 
 const customHTMLRenderer = {
   // Add id attribute to headings
@@ -7,11 +8,7 @@ const customHTMLRenderer = {
     const original = origin();
     if (entering) {
       original.attributes = {
-        id: getChildrenText(node)
-          .toLowerCase()
-          .replace(/[^a-z0-9-\s]*/g, "")
-          .trim()
-          .replace(/\s/g, "-"),
+        id: slugifyHeading(getChildrenText(node)),
       };
     }
     return original;

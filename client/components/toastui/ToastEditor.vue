@@ -18,7 +18,7 @@ const props = defineProps({
   addImageBlobHook: Function,
 });
 
-const emit = defineEmits(["change", "keydown"]);
+const emit = defineEmits(["change", "keydown", "preview-rendered"]);
 
 const editorElement = ref();
 let toastEditor;
@@ -42,6 +42,8 @@ onMounted(() => {
       : {},
   });
 
+  emitPreviewRendered();
+
   const tabContainer = editorElement.value.querySelector(
     ".toastui-editor-md-tab-container",
   );
@@ -54,6 +56,7 @@ onMounted(() => {
         );
         if (previewEl) {
           renderMermaidBlocks(previewEl);
+          emit("preview-rendered", previewEl);
         }
       }
     });
@@ -68,7 +71,20 @@ function isWysiwygMode() {
   return toastEditor.isWysiwygMode();
 }
 
-defineExpose({ getMarkdown, isWysiwygMode });
+function getPreviewElement() {
+  return (
+    editorElement.value?.querySelector(".toastui-editor-md-preview") || null
+  );
+}
+
+function emitPreviewRendered() {
+  const previewEl = getPreviewElement();
+  if (previewEl) {
+    emit("preview-rendered", previewEl);
+  }
+}
+
+defineExpose({ getMarkdown, isWysiwygMode, getPreviewElement });
 </script>
 
 <style>
