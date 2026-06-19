@@ -1,11 +1,11 @@
 <template>
-  <GitSidebar v-if="enabled" />
+  <GitSidebar v-if="gitEnabled" />
   <OutlineSidebar v-if="showOutlineTool" />
   <RightToolRail
     v-if="showRightToolRail"
     :active-panel-width="activeRightPanelWidth"
   >
-    <GitStatusIndicator v-if="enabled" @toggle-sidebar="toggleGitSidebar" />
+    <GitStatusIndicator v-if="gitEnabled" @toggle-sidebar="toggleGitSidebar" />
     <OutlineIndicator
       v-if="showOutlineTool"
       @toggle-sidebar="toggleOutlineSidebar"
@@ -28,25 +28,33 @@ import { useOutlineStore } from "../../note-outline/stores/outlineStore.js";
 import RightToolRail from "./RightToolRail.vue";
 
 const props = defineProps({
-  enabled: {
+  gitEnabled: {
     type: Boolean,
     default: false,
+  },
+  outlineEnabled: {
+    type: Boolean,
+    default: true,
   },
 });
 
 const route = useRoute();
 const gitPanelUiStore = usePanelUiStore();
 const outlineStore = useOutlineStore();
-const outlineEnabled = computed(() => props.enabled);
+const outlineEnabled = computed(() => props.outlineEnabled);
 
 const showOutlineTool = computed(() => {
-  return props.enabled && route.name === "note" && Boolean(route.params.title);
+  return (
+    props.outlineEnabled && route.name === "note" && Boolean(route.params.title)
+  );
 });
 const showRightToolRail = computed(() => {
-  return props.enabled;
+  return props.gitEnabled || showOutlineTool.value;
 });
 const activeRightPanelWidth = computed(() => {
-  if (gitPanelUiStore.isSidebarVisible) return gitPanelUiStore.width;
+  if (props.gitEnabled && gitPanelUiStore.isSidebarVisible) {
+    return gitPanelUiStore.width;
+  }
   if (outlineStore.isSidebarVisible) return outlineStore.width;
   return 0;
 });

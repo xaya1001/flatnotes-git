@@ -41,5 +41,16 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "jsdom",
+    coverage: {
+      exclude: [
+        "client/dist/**",
+        "dist/**",
+        "node_modules/**",
+        "tests/**",
+        "vite.config.js",
+        "postcss.config.js",
+        "tailwind.config.js",
+      ],
+    },
   },
 });

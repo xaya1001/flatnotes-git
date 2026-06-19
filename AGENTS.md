@@ -27,7 +27,7 @@ Prefer modular additions over core rewrites. Keep upstream-file patches small an
 - `npm run dev`: start Vite only on `127.0.0.1:8080`; backend API and WebSocket calls proxy to the separate FastAPI server.
 - `npm run build`: build `client/dist/`.
 - `npm run test:js`: run Vitest coverage.
-- `npm run test:py`: run backend tests.
+- `npm run test:py`: run backend tests with Python coverage and write `coverage/py-coverage.xml`.
 - `npm run test:e2e`: run Playwright e2e smoke coverage against local FastAPI/Vite using `data/`.
 - `npm run git-test`: run backend, frontend, and e2e fork test suites.
 
@@ -40,6 +40,8 @@ Use ES modules and Vue single-file components. Name Vue components in PascalCase
 Upstream flatnotes core has no test coverage; this fork only requires tests for fork-owned behavior. Keep tests under `tests/`: Vitest specs in `tests/client/`, backend pytest coverage in `tests/server/`, and Playwright smoke coverage in `tests/e2e/`. Do not test unrelated upstream core code.
 
 Choose verification by touched surface. Backend Git/S3 changes need focused pytest coverage or `npm run test:py`. Frontend Git/Mermaid/image-compression changes need focused Vitest coverage or `npm run test:js`. Cross-boundary config, API shape, or UI integration changes should run `npm run git-test` and `npm run build` when feasible. Document any skipped check and why.
+
+Codex sandbox caveat: backend Git tests can fail or hang in the sandbox because the environment can block `asyncio.to_thread`, local thread lock waiting, or localhost access used by pytest/e2e. If `npm run test:py`, `pipenv run pytest tests/server -vv`, or `npm run test:e2e` fails with a hang, timeout, or `Operation not permitted`, rerun the same command outside the sandbox before blaming the code. In this environment, use escalated execution for those checks and report both results when they differ. A non-sandbox pass means the original failure was a Codex runtime restriction, not a repository bug.
 
 ## Git Integration Design Rules
 

@@ -56,6 +56,24 @@ def test_get_status_dirty(repository: Repository):
     assert files["README.md"]["work_tree_status"] == "M"
 
 
+def test_get_commit_history_paginates_without_missing_commits(repository: Repository):
+    """Tests paginated commit history ordering without requiring a full walk list."""
+    for index in range(5):
+        make_commit(
+            repository.repo,
+            f"history-{index}.md",
+            f"content {index}",
+            f"history commit {index}",
+        )
+
+    page = repository.get_commit_history(limit=2, page=2)
+
+    assert [commit["message"] for commit in page] == [
+        "history commit 2",
+        "history commit 1",
+    ]
+
+
 def test_get_files_in_commit(repository: Repository):
     """Tests getting file changes for a commit with add, modify, and delete."""
     repo_path = Path(repository.repo.workdir)

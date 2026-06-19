@@ -60,7 +60,7 @@ class S3Attachments(BaseAttachments):
                 io.BytesIO(file_content),
                 self.bucket_name,
                 object_key,
-                ExtraArgs={"ContentType": file.content_type, "ACL": "public-read"},
+                ExtraArgs={"ContentType": file.content_type},
             )
             logger.info(
                 f"Successfully uploaded '{file.filename}' to S3 bucket '{self.bucket_name}' as '{object_key}'"

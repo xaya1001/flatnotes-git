@@ -4,7 +4,9 @@ This module defines the Repository class, which is responsible for all
 read-only operations and state inspections of the Git repository.
 It uses pygit2 for efficient, direct access to the repository data.
 """
+
 from datetime import datetime
+from itertools import islice
 from typing import Any, Dict, List, Optional, Tuple
 
 import pygit2
@@ -192,8 +194,8 @@ class Repository:
             return []
 
         walker = self.repo.walk(self.repo.head.target, SortMode.TOPOLOGICAL)
-        commits = list(walker)
-        paginated_commits = commits[(page - 1) * limit : page * limit]
+        start = (page - 1) * limit
+        paginated_commits = islice(walker, start, start + limit)
         upstream_commit_oid = None
         if not self.repo.head_is_detached:
             if local_branch := self.repo.branches.local.get(self.repo.head.shorthand):

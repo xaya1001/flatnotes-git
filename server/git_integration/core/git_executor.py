@@ -90,11 +90,9 @@ class Executor:
                 f"No .gitignore found. Creating one to ignore '{preferred_rule}'."
             )
             with open(gitignore_path, "w") as f:
-                f.write(
-                    f"""# Flatnotes specific ignores
+                f.write(f"""# Flatnotes specific ignores
 {preferred_rule}
-"""
-                )
+""")
         else:
             rule_exists = False
             full_content = ""
@@ -115,11 +113,9 @@ class Executor:
                 with open(gitignore_path, "a") as f:
                     if not full_content.endswith("\n"):
                         f.write("\n")
-                    f.write(
-                        f"""\n# Added by Flatnotes to ignore its cache
+                    f.write(f"""\n# Added by Flatnotes to ignore its cache
 {preferred_rule}
-"""
-                    )
+""")
 
     def _refresh_repository_state(self):
         """Force-reloads critical pygit2 state caches after an external command."""
@@ -179,11 +175,9 @@ class Executor:
 
         except subprocess.CalledProcessError as e:
             output_lower = (e.stdout + e.stderr).lower()
-            logger.error(
-                f"""Git command `{' '.join(command)}` failed.
+            logger.error(f"""Git command `{' '.join(command)}` failed.
 STDOUT: {e.stdout}
-STDERR: {e.stderr}"""
-            )
+STDERR: {e.stderr}""")
 
             auth_error_patterns = [
                 "could not read username",
@@ -297,13 +291,7 @@ STDERR: {e.stderr}"""
         self.repo.index.write()
 
         if os.path.exists(merge_head_path):
-            os.remove(merge_head_path)
-            merge_msg_path = os.path.join(self.repo.path, "MERGE_MSG")
-            if os.path.exists(merge_msg_path):
-                os.remove(merge_msg_path)
-            merge_mode_path = os.path.join(self.repo.path, "MERGE_MODE")
-            if os.path.exists(merge_mode_path):
-                os.remove(merge_mode_path)
+            self.repo.state_cleanup()
 
         new_commit = self.repo.get(commit_oid)
         files_changed = self._get_diff_metadata(self._get_commit_diff(new_commit))

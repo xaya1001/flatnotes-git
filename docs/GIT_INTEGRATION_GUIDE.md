@@ -197,6 +197,8 @@ Set the filesystem provider to S3-compatible public bucket mode:
 | `FLATNOTES_S3_PUBLIC_URL`               | Public URL base, for example `https://pub-xxxxxxxx.r2.dev`. |
 | `FLATNOTES_S3_PATH_PREFIX`              | Optional object key prefix, for example `flatnotes/`.       |
 
+The bucket or custom domain must provide public read access. flatnotes does not send object ACL headers during upload, which keeps Cloudflare R2 compatible.
+
 Frontend image compression is enabled by default:
 
 | Variable                                       | Description                                           |

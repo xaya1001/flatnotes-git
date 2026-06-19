@@ -149,3 +149,20 @@ class TestAttachmentBackends:
 
         with pytest.raises(ValueError):
             service.create(mock_file)
+
+
+def test_s3_create_does_not_send_object_acl(s3_attachments_service):
+    """R2-compatible uploads must not rely on unsupported x-amz-acl headers."""
+    service = s3_attachments_service
+    mock_file = MockUploadFile(
+        filename="r2-compatible.png",
+        content=b"image bytes",
+        content_type="image/png",
+    )
+
+    service.s3_client.upload_fileobj = MagicMock()
+
+    service.create(mock_file)
+
+    extra_args = service.s3_client.upload_fileobj.call_args.kwargs["ExtraArgs"]
+    assert extra_args == {"ContentType": "image/png"}

@@ -15,7 +15,7 @@
         @toggleSearchModal="toggleSearchModal"
       />
       <RouterView :key="route.fullPath" />
-      <RightToolsHost :enabled="rightToolsEnabled" />
+      <RightToolsHost :git-enabled="gitEnabled" />
     </template>
     <div v-else class="flex flex-grow items-center justify-center">
       <p class="text-theme-text-muted">Loading application...</p>
@@ -49,7 +49,7 @@ const route = useRoute();
 const toast = useToast();
 
 const isConfigLoaded = ref(false);
-const rightToolsEnabled = computed(
+const gitEnabled = computed(
   () => globalStore.config.value?.flatnotesGitEnabled,
 );
 

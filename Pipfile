@@ -9,10 +9,11 @@ flake8 = "*"
 rope = "*"
 isort = "*"
 pytest = "*"
-httpx = ">=0.24,<1"
+httpx = "<1,>=0.24"
 pytest-asyncio = "*"
-moto = {extras = ["s3"], version = "*"}
 boto3 = "*"
+moto = {extras = ["s3"], version = "*"}
+pytest-cov = "*"
 
 [packages]
 whoosh = "==2.7.4"
@@ -23,9 +24,9 @@ python-jose = {extras = ["cryptography"], version = "==3.5.0"}
 pyotp = "==2.9.0"
 qrcode = "==8.2"
 python-multipart = "==0.0.20"
-apscheduler = "==3.11.0"
-boto3 = "==1.38.32"
-pygit2 = "==1.18.0"
+apscheduler = "==3.11.2"
+boto3 = "==1.43.33"
+pygit2 = "==1.19.3"
 
 [requires]
 python_version = "3.11"

@@ -21,7 +21,7 @@ HTMLElement.prototype.focus = vi.fn();
 vi.useFakeTimers();
 
 let mutationCallback = null;
-const MockMutationObserver = vi.fn((cb) => {
+const MockMutationObserver = vi.fn(function (cb) {
   mutationCallback = cb;
   return {
     observe: vi.fn(),
@@ -44,7 +44,11 @@ describe("InteractiveMermaid.vue", () => {
   };
 
   beforeEach(() => {
+    vi.clearAllTimers();
+    vi.clearAllMocks();
     document.body.className = "";
+    document.body.innerHTML = "";
+    window.scrollTo = vi.fn();
     vi.mocked(mermaid.render).mockResolvedValue({
       svg: `<svg class="mermaid-svg">mocked svg</svg>`,
       bindFunctions: vi.fn(),
@@ -57,7 +61,9 @@ describe("InteractiveMermaid.vue", () => {
   afterEach(() => {
     if (wrapper) {
       wrapper.unmount();
+      wrapper = undefined;
     }
+    vi.clearAllTimers();
     vi.restoreAllMocks();
   });
 
@@ -81,11 +87,18 @@ describe("InteractiveMermaid.vue", () => {
     });
 
     it("displays an error message if Mermaid rendering fails", async () => {
+      const consoleErrorSpy = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
       vi.mocked(mermaid.render).mockRejectedValue(new Error("Syntax error"));
       wrapper = mountComponent();
       await flushPromises();
       const errorBox = wrapper.find(".mermaid-error-box");
       expect(errorBox.exists()).toBe(true);
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        "Failed to render Mermaid diagram:",
+        expect.any(Error),
+      );
     });
 
     it("re-renders when the diagramText prop changes", async () => {
@@ -209,6 +222,7 @@ describe("InteractiveMermaid.vue", () => {
 
       await wrapper.find('button[title="Toggle Fullscreen"]').trigger("click");
       await flushPromises();
+      fullscreenButton.focus.mockClear();
 
       await wrapper.find("button.mermaid-modal-close").trigger("click");
       await flushPromises();
@@ -228,6 +242,7 @@ describe("InteractiveMermaid.vue", () => {
 
       await wrapper.find('button[title="Toggle Fullscreen"]').trigger("click");
       await flushPromises();
+      fullscreenButton.focus.mockClear();
 
       const event = new KeyboardEvent("keydown", { key: "Escape" });
       window.dispatchEvent(event);

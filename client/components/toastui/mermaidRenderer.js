@@ -1,8 +1,17 @@
 // client/components/toastui/mermaidRenderer.js
 import { createApp } from "vue";
-import InteractiveMermaid from "./InteractiveMermaid.vue";
 
 const WRAPPER_CLASS = "mermaid-component-wrapper";
+let interactiveMermaidComponentPromise = null;
+
+function loadInteractiveMermaidComponent() {
+  if (!interactiveMermaidComponentPromise) {
+    interactiveMermaidComponentPromise = import(
+      "./InteractiveMermaid.vue"
+    ).then((module) => module.default);
+  }
+  return interactiveMermaidComponentPromise;
+}
 
 /**
  * Cleans up any previously rendered Mermaid component wrappers from the container.
@@ -30,7 +39,7 @@ function cleanupOldWrappers(containerElement) {
  * renders, and then renders new interactive components.
  * @param {HTMLElement} containerElement The parent element to search within.
  */
-export function renderMermaidBlocks(containerElement) {
+export async function renderMermaidBlocks(containerElement) {
   if (!containerElement) return;
 
   // STEP 1: Always perform a full cleanup first.
@@ -40,6 +49,8 @@ export function renderMermaidBlocks(containerElement) {
   const mermaidNodes = containerElement.querySelectorAll("pre.lang-mermaid");
 
   if (mermaidNodes.length === 0) return;
+
+  const renderTargets = [];
 
   for (const node of mermaidNodes) {
     const diagramText = node.textContent;
@@ -52,6 +63,22 @@ export function renderMermaidBlocks(containerElement) {
     mountPoint.className = WRAPPER_CLASS;
     node.parentNode.insertBefore(mountPoint, node);
 
-    createApp(InteractiveMermaid, { diagramText }).mount(mountPoint);
+    renderTargets.push({ mountPoint, diagramText });
+  }
+
+  if (renderTargets.length === 0) return;
+
+  let InteractiveMermaid;
+  try {
+    InteractiveMermaid = await loadInteractiveMermaidComponent();
+  } catch (error) {
+    console.error("Failed to load Mermaid renderer:", error);
+    return;
+  }
+
+  for (const { mountPoint, diagramText } of renderTargets) {
+    if (document.contains(mountPoint)) {
+      createApp(InteractiveMermaid, { diagramText }).mount(mountPoint);
+    }
   }
 }

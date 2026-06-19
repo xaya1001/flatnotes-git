@@ -12,6 +12,7 @@ vi.mock("../../../client/git-integration/stores/statusStore", () => ({
 describe("webSocket service", () => {
   let webSocketInstances;
   let originalWebSocket;
+  let consoleWarnSpy;
 
   class MockWebSocket {
     constructor(url) {
@@ -28,10 +29,12 @@ describe("webSocket service", () => {
     webSocketInstances = [];
     originalWebSocket = global.WebSocket;
     global.WebSocket = MockWebSocket;
+    consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
   });
 
   afterEach(() => {
     global.WebSocket = originalWebSocket;
+    consoleWarnSpy.mockRestore();
     vi.useRealTimers();
   });
 

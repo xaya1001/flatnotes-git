@@ -33,9 +33,9 @@ describe("mermaidRenderer function", () => {
     vi.clearAllMocks();
   });
 
-  it("should find and replace a single mermaid block", () => {
+  it("should find and replace a single mermaid block", async () => {
     container.innerHTML = `<pre class="lang-mermaid"><code>graph TD; A-->B;</code></pre>`;
-    renderMermaidBlocks(container);
+    await renderMermaidBlocks(container);
 
     // Assert that the wrapper div was created
     expect(
@@ -51,29 +51,29 @@ describe("mermaidRenderer function", () => {
     );
   });
 
-  it("should replace multiple mermaid blocks", () => {
+  it("should replace multiple mermaid blocks", async () => {
     container.innerHTML = `
       <pre class="lang-mermaid"><code>graph LR; X-->Y;</code></pre>
       <pre class="lang-mermaid"><code>sequenceDiagram; A->>B: Hello;</code></pre>
     `;
-    renderMermaidBlocks(container);
+    await renderMermaidBlocks(container);
     expect(
       container.querySelectorAll(".mermaid-component-wrapper"),
     ).toHaveLength(2);
   });
 
-  it("should correctly clean up and re-render on subsequent calls", () => {
+  it("should correctly clean up and re-render on subsequent calls", async () => {
     container.innerHTML = `<pre class="lang-mermaid"><code>graph TD; C-->D;</code></pre>`;
 
     // First render
-    renderMermaidBlocks(container);
+    await renderMermaidBlocks(container);
     expect(
       container.querySelectorAll(".mermaid-component-wrapper"),
     ).toHaveLength(1);
 
     // Modify the DOM and re-render
     container.innerHTML += `<pre class="lang-mermaid"><code>graph TD; E-->F;</code></pre>`;
-    renderMermaidBlocks(container);
+    await renderMermaidBlocks(container);
 
     // The atomic nature of renderMermaidBlocks should result in exactly 2 wrappers.
     expect(
@@ -81,21 +81,21 @@ describe("mermaidRenderer function", () => {
     ).toHaveLength(2);
   });
 
-  it("should ignore empty or whitespace-only mermaid blocks", () => {
+  it("should ignore empty or whitespace-only mermaid blocks", async () => {
     container.innerHTML = `<pre class="lang-mermaid"><code>    </code></pre>`;
-    renderMermaidBlocks(container);
+    await renderMermaidBlocks(container);
     expect(
       container.querySelectorAll(".mermaid-component-wrapper"),
     ).toHaveLength(0);
   });
 
-  it("should handle a mix of valid and empty blocks", () => {
+  it("should handle a mix of valid and empty blocks", async () => {
     container.innerHTML = `
       <pre class="lang-mermaid"><code>graph TD; A-->B;</code></pre>
       <pre class="lang-mermaid"><code></code></pre>
       <pre class="lang-mermaid"><code>graph TD; C-->D;</code></pre>
     `;
-    renderMermaidBlocks(container);
+    await renderMermaidBlocks(container);
     expect(
       container.querySelectorAll(".mermaid-component-wrapper"),
     ).toHaveLength(2);

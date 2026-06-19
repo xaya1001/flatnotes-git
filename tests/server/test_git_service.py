@@ -86,6 +86,10 @@ def test_pull_with_merge_strategy_creates_merge_commit(
     new_head = git_service.repository.repo.head.peel()
     assert len(new_head.parents) == 2
     assert git_service.get_status()["repository_state"] == "CLEAN"
+    git_dir = Path(git_service.repository.repo.path)
+    assert not (git_dir / "MERGE_HEAD").exists()
+    assert not (git_dir / "MERGE_MSG").exists()
+    assert not (git_dir / "MERGE_MODE").exists()
 
 
 def test_rebase_conflict_resolution_workflow(
