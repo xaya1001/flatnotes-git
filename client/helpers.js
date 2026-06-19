@@ -1,3 +1,5 @@
+import eventBus from "./git-integration/services/eventBus.js";
+
 export function getToastOptions(description, title, severity) {
   return {
     summary: title,
@@ -11,11 +13,13 @@ export function getToastOptions(description, title, severity) {
 export function setDarkThemeOn(save = true) {
   document.body.classList.add("dark");
   if (save) localStorage.setItem("darkTheme", "true");
+  eventBus.emit("theme-changed");
 }
 
 export function setDarkThemeOff(save = true) {
   document.body.classList.remove("dark");
   if (save) localStorage.setItem("darkTheme", "false");
+  eventBus.emit("theme-changed");
 }
 
 export function toggleTheme() {

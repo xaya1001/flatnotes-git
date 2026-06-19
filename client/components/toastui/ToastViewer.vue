@@ -7,7 +7,9 @@ import Viewer from "@toast-ui/editor/dist/toastui-editor-viewer";
 import { onMounted, ref } from "vue";
 
 import baseOptions from "./baseOptions.js";
+import { enhanceCodeBlockCopy } from "./codeBlockCopy.js";
 import extendedAutolinks from "./extendedAutolinks.js";
+import { renderMermaidBlocks } from "./mermaidRenderer.js";
 
 const props = defineProps({
   initialValue: String,
@@ -22,6 +24,9 @@ onMounted(() => {
     el: viewerElement.value,
     initialValue: props.initialValue,
   });
+
+  renderMermaidBlocks(viewerElement.value);
+  enhanceCodeBlockCopy(viewerElement.value);
 });
 </script>
 

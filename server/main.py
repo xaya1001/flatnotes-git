@@ -1,30 +1,309 @@
+# server/main.py
+import asyncio
+from contextlib import asynccontextmanager
 from typing import List, Literal
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, UploadFile
+from apscheduler.schedulers.background import BackgroundScheduler
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    HTTPException,
+    Request,
+    UploadFile,
+)
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 import api_messages
 from attachments.base import BaseAttachments
+from attachments.file_system import FileSystemAttachments
 from attachments.models import AttachmentCreateResponse
 from auth.base import BaseAuth
 from auth.models import Login, Token
-from global_config import AuthType, GlobalConfig, GlobalConfigResponseModel
+from global_config import (
+    AuthType,
+    GlobalConfig,
+    GlobalConfigResponseModel,
+)
 from helpers import replace_base_href
+from logger import logger
 from notes.base import BaseNotes
 from notes.models import Note, NoteCreate, NoteUpdate, SearchResult
+
+# region --- Global App Initialization ---
 
 global_config = GlobalConfig()
 auth: BaseAuth = global_config.load_auth()
 note_storage: BaseNotes = global_config.load_note_storage()
+
 attachment_storage: BaseAttachments = global_config.load_attachment_storage()
+filesystem_storage_instance = FileSystemAttachments()
+
 auth_deps = [Depends(auth.authenticate)] if auth else []
 router = APIRouter()
+
+# endregion
+
+# region --- Git Integration Setup ---
+
+# This block is wrapped in a try/except to ensure the app can start
+# even if git-related dependencies are missing.
+git_integration_router = None
+if global_config.flatnotes_git_enabled:
+    try:
+        from git_integration import git_config
+        from git_integration.core.git_executor import Executor
+        from git_integration.core.git_repository import Repository
+        from git_integration.core.git_service import GitService
+        from git_integration.git_config import initialize_git_config
+
+        # Initialize git config from the global config object
+        initialize_git_config(global_config)
+
+        from git_integration.git_lock import (
+            git_operation_lock,
+            locked_git_operation,
+        )
+        from git_integration.git_logger import (
+            AUTO_FETCH_LOG_ID,
+            LogLevel,
+            add_git_log,
+        )
+        from git_integration.git_router import router as git_integration_router
+        from git_integration.webhook_handler import verify_github_signature
+        from git_integration.websockets import connection_manager, ws_router
+    except ImportError as e:
+        logger.error(
+            f"FLATNOTES_GIT_ENABLED is true, but a module failed to load: {e}. Git integration will be disabled."
+        )
+        git_integration_router = None  # Ensure it's disabled on error
+
+# endregion
+
+# region --- Application Lifespan (Startup/Shutdown) ---
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Handles application startup and shutdown events."""
+    logger.info("Application startup...")
+
+    app.state.auth = auth
+    app.state.git_service = None
+
+    # Only configure scheduler and webhooks if git integration was successfully loaded
+    if git_integration_router and git_config.GIT_ENABLED:
+        logger.info("Git integration is enabled.")
+
+        # --- Create and store the singleton GitService instance ---
+        try:
+            executor = Executor(
+                repo_path=git_config.GIT_REPO_PATH,
+                default_branch=git_config.GIT_DEFAULT_BRANCH,
+                default_remote=git_config.GIT_REMOTE_NAME,
+                user_name=git_config.GIT_COMMIT_USER_NAME,
+                user_email=git_config.GIT_COMMIT_USER_EMAIL,
+            )
+            repository = Repository(
+                repo_path=git_config.GIT_REPO_PATH,
+                default_branch=git_config.GIT_DEFAULT_BRANCH,
+                default_remote=git_config.GIT_REMOTE_NAME,
+            )
+            app.state.git_service = GitService(repository=repository, executor=executor)
+            logger.info("Singleton GitService instance created and stored.")
+
+            # Determine the active automatic sync method. Webhook takes precedence.
+            if git_config.GIT_WEBHOOK_ACTIVE:
+                logger.info("Sync Mode: Real-time fetch via Webhook is active.")
+
+            elif git_config.GIT_AUTO_FETCH_INTERVAL > 0:
+                interval = git_config.GIT_AUTO_FETCH_INTERVAL
+                logger.info(
+                    f"Sync Mode: Scheduled fetch is active with an interval of {interval} minutes (fallback mode)."
+                )
+
+                scheduler = BackgroundScheduler(daemon=True)
+
+                # This must be a standard 'def' function, not 'async def',
+                # because APScheduler runs it in a separate thread.
+                def scheduled_fetch_job():
+                    """A lightweight job that only performs a git fetch."""
+                    if not app.state.git_service:
+                        logger.warning(
+                            "Scheduled fetch skipped: Git service not available."
+                        )
+                        return
+
+                    logger.debug("Executing scheduled git fetch...")
+                    try:
+                        # Use the singleton instance
+                        service: GitService = app.state.git_service
+                        with git_operation_lock:
+                            service.fetch()
+                        # Run the async broadcast function from this sync thread
+                        asyncio.run(connection_manager.broadcast_status_update())
+                        add_git_log(
+                            LogLevel.SUCCESS,
+                            "Scheduled fetch successful",
+                            details="Remote changes (if any) have been fetched.",
+                            persist=False,
+                            log_id=AUTO_FETCH_LOG_ID,
+                        )
+                    except Exception as e:
+                        logger.error(f"Scheduled git fetch failed: {e}")
+                        add_git_log(
+                            LogLevel.ERROR,
+                            "Scheduled fetch failed",
+                            details=str(e),
+                            persist=True,
+                            log_id=AUTO_FETCH_LOG_ID,
+                        )
+
+                scheduler.add_job(scheduled_fetch_job, "interval", minutes=interval)
+                scheduler.start()
+                app.state.scheduler = scheduler
+                logger.info("Scheduler for auto-fetch started.")
+            else:
+                logger.info(
+                    "Sync Mode: Manual sync only. No automatic fetch configured."
+                )
+
+        except Exception as e:
+            logger.error(f"FATAL: Failed to initialize GitService on startup: {e}")
+
+    yield
+
+    # --- Shutdown logic ---
+    logger.info("Application shutdown...")
+    if hasattr(app.state, "scheduler") and app.state.scheduler.running:
+        logger.info("Shutting down scheduler.")
+        app.state.scheduler.shutdown()
+
+
+# endregion
+
+# region --- FastAPI App and Webhook Setup ---
+
 app = FastAPI(
     docs_url=global_config.path_prefix + "/docs",
     openapi_url=global_config.path_prefix + "/openapi.json",
+    lifespan=lifespan,
 )
+
+# Webhook Endpoint
+if git_integration_router:
+
+    @app.post(
+        f"{global_config.path_prefix}/api/git/webhook/github",
+        status_code=202,
+        include_in_schema=False,
+    )
+    async def github_webhook_receiver(
+        request: Request,
+        background_tasks: BackgroundTasks,
+    ):
+        """
+        Receives webhook events from GitHub.
+        If a secret is configured, it verifies the signature.
+        On a valid 'push' event, it triggers a 'git fetch'.
+        """
+        if not git_config.GIT_WEBHOOK_ACTIVE:
+            logger.warning(
+                "Webhook received but ignored: Webhook feature is not active on the server."
+            )
+            raise HTTPException(
+                status_code=412,
+                detail="Webhook feature is not active on the server.",
+            )
+
+        await verify_github_signature(
+            request, request.headers.get("x-hub-signature-256")
+        )
+
+        event_type = request.headers.get("X-GitHub-Event")
+        if event_type != "push":
+            return {
+                "status": "event_ignored",
+                "reason": f"Event type '{event_type}' is not 'push'.",
+            }
+
+        try:
+            payload = await request.json()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid JSON payload.")
+
+        expected_ref = f"refs/heads/{git_config.GIT_DEFAULT_BRANCH}"
+        if payload.get("ref") != expected_ref:
+            return {
+                "status": "push_ignored",
+                "reason": f"Push was not to the default branch ('{git_config.GIT_DEFAULT_BRANCH}').",
+            }
+
+        pusher_name = payload.get("pusher", {}).get("name", "unknown")
+        logger.info(
+            f"Webhook: Received valid push event from '{pusher_name}'. Triggering fetch."
+        )
+        add_git_log(
+            LogLevel.INFO,
+            "Webhook: Push event received",
+            details={"pusher": pusher_name},
+        )
+
+        async def fetch_and_broadcast_task():
+            """The actual git fetch operation, run in the background."""
+            if not app.state.git_service:
+                logger.error("Webhook task failed: Git service not available.")
+                return
+            try:
+                # Use the singleton instance
+                service: GitService = app.state.git_service
+                async with locked_git_operation():
+                    result = service.fetch()
+                add_git_log(
+                    LogLevel.SUCCESS, "Webhook: Fetch successful", details=result
+                )
+            except Exception as e:
+                logger.error(f"Webhook fetch task failed: {e}")
+                add_git_log(LogLevel.ERROR, "Webhook: Fetch failed", details=str(e))
+            finally:
+                await connection_manager.broadcast_status_update()
+
+        background_tasks.add_task(fetch_and_broadcast_task)
+
+        return {"status": "accepted", "detail": "Fetch operation scheduled."}
+
+
+# endregion
+
+# region --- Router and Static Files Mounting ---
+
+# Conditionally include the Git integration routers
+if git_integration_router:
+    # Include the main HTTP router with its authentication dependencies
+    app.include_router(
+        git_integration_router,
+        prefix=f"{global_config.path_prefix}/api/git",
+        tags=["git"],
+        dependencies=auth_deps,
+    )
+    # Include the WebSocket router under the same prefix.
+    # It has its own, separate authentication dependency.
+    app.include_router(
+        ws_router,
+        prefix=f"{global_config.path_prefix}/api/git",
+        tags=["git"],
+    )
+    logger.info("Git integration API routes included.")
+else:
+    logger.info(
+        "Git integration is disabled or failed to load. API routes NOT included."
+    )
+
 replace_base_href("client/dist/index.html", global_config.path_prefix)
+
+# endregion
 
 
 # region UI
@@ -42,7 +321,7 @@ def root(title: str = ""):
 # endregion
 
 
-# region Login
+# region Auth
 if global_config.auth_type not in [AuthType.NONE, AuthType.READ_ONLY]:
 
     @router.post("/api/token", response_model=Token)
@@ -50,9 +329,14 @@ if global_config.auth_type not in [AuthType.NONE, AuthType.READ_ONLY]:
         try:
             return auth.login(data)
         except ValueError:
-            raise HTTPException(
-                status_code=401, detail=api_messages.login_failed
-            )
+            raise HTTPException(status_code=401, detail=api_messages.login_failed)
+
+
+@router.get("/api/auth-check", dependencies=auth_deps)
+def auth_check() -> str:
+    """A lightweight endpoint that simply returns 'OK' if the user is
+    authenticated."""
+    return "OK"
 
 
 # endregion
@@ -70,9 +354,7 @@ def get_note(title: str):
     try:
         return note_storage.get(title)
     except ValueError:
-        raise HTTPException(
-            status_code=400, detail=api_messages.invalid_note_title
-        )
+        raise HTTPException(status_code=400, detail=api_messages.invalid_note_title)
     except FileNotFoundError:
         raise HTTPException(404, api_messages.note_not_found)
 
@@ -95,9 +377,7 @@ if global_config.auth_type != AuthType.READ_ONLY:
                 detail=api_messages.invalid_note_title,
             )
         except FileExistsError:
-            raise HTTPException(
-                status_code=409, detail=api_messages.note_exists
-            )
+            raise HTTPException(status_code=409, detail=api_messages.note_exists)
 
     # Update Note
     @router.patch(
@@ -114,9 +394,7 @@ if global_config.auth_type != AuthType.READ_ONLY:
                 detail=api_messages.invalid_note_title,
             )
         except FileExistsError:
-            raise HTTPException(
-                status_code=409, detail=api_messages.note_exists
-            )
+            raise HTTPException(status_code=409, detail=api_messages.note_exists)
         except FileNotFoundError:
             raise HTTPException(404, api_messages.note_not_found)
 
@@ -183,6 +461,12 @@ def get_config():
         quick_access_term=global_config.quick_access_term,
         quick_access_sort=global_config.quick_access_sort,
         quick_access_limit=global_config.quick_access_limit,
+        flatnotes_git_enabled=global_config.flatnotes_git_enabled,
+        flatnotes_git_auto_fetch_interval=global_config.flatnotes_git_auto_fetch_interval,
+        flatnotes_git_webhook_active=global_config.flatnotes_git_webhook_active,
+        frontend_image_compression_enabled=global_config.frontend_image_compression_enabled,
+        frontend_image_compression_quality=global_config.frontend_image_compression_quality,
+        frontend_image_max_width=global_config.frontend_image_max_width,
     )
 
 
@@ -203,18 +487,16 @@ def get_config():
     include_in_schema=False,
 )
 def get_attachment(filename: str):
-    """Download an attachment."""
+    """Download a locally stored attachment."""
     try:
-        return attachment_storage.get(filename)
+        return filesystem_storage_instance.get(filename)
     except ValueError:
         raise HTTPException(
             status_code=400,
             detail=api_messages.invalid_attachment_filename,
         )
     except FileNotFoundError:
-        raise HTTPException(
-            status_code=404, detail=api_messages.attachment_not_found
-        )
+        raise HTTPException(status_code=404, detail=api_messages.attachment_not_found)
 
 
 if global_config.auth_type != AuthType.READ_ONLY:
@@ -227,7 +509,24 @@ if global_config.auth_type != AuthType.READ_ONLY:
     )
     def post_attachment(file: UploadFile):
         """Upload an attachment."""
+        # If the primary storage is S3, attempt to use it first.
+        if isinstance(attachment_storage, FileSystemAttachments) is False:
+            try:
+                logger.info(
+                    f"Attempting to upload '{file.filename}' to primary (S3) storage."
+                )
+                return attachment_storage.create(file)
+            except Exception as e:
+                logger.error(
+                    f"Failed to upload '{file.filename}' to S3. Reason: {e}. "
+                    f"FALLING BACK to local filesystem storage."
+                )
+                # On any S3 failure, fall back to the filesystem storage.
+                return filesystem_storage_instance.create(file)
+
+        # If primary storage is filesystem, use it directly.
         try:
+            logger.info(f"Uploading '{file.filename}' to primary (filesystem) storage.")
             return attachment_storage.create(file)
         except ValueError:
             raise HTTPException(
@@ -236,6 +535,8 @@ if global_config.auth_type != AuthType.READ_ONLY:
             )
         except FileExistsError:
             raise HTTPException(409, api_messages.attachment_exists)
+        except IOError as e:
+            raise HTTPException(status_code=500, detail=str(e))
 
 
 # endregion

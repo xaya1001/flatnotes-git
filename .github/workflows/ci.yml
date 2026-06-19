@@ -1,0 +1,225 @@
+# .github/workflows/ci.yml
+
+name: Test and Deployment
+
+on:
+  push:
+    branches:
+      - git-integration
+  pull_request:
+    branches:
+      - git-integration
+
+jobs:
+  ################################################
+  # JOB 1: Build and Test
+  ################################################
+  test:
+    name: Build and Test
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache Pipenv virtualenv
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/virtualenvs
+          key: ${{ runner.os }}-pipenv-${{ hashFiles('**/Pipfile.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pipenv-
+
+      - name: Install Pipenv and Python dependencies
+        run: |
+          pip install pipenv
+          pipenv install --dev
+
+      - name: Set up Node.js with npm caching
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Install Playwright browser dependencies
+        run: |
+          python3 -m pip install playwright
+          python3 -m playwright install --with-deps chromium
+
+      - name: Build frontend assets
+        run: npm run build
+
+      - name: Extract package version
+        id: get_version
+        run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+
+      - name: Run fork test suite
+        env:
+          # Environment variables for the test run
+          FLATNOTES_PATH: /tmp/flatnotes-test-data
+          FLATNOTES_AUTH_TYPE: password
+          FLATNOTES_USERNAME: testuser
+          FLATNOTES_PASSWORD: testpassword
+          FLATNOTES_SECRET_KEY: a-long-and-very-random-secret-key-for-ci
+          FLATNOTES_GIT_ENABLED: true
+        run: |
+          mkdir -p $FLATNOTES_PATH
+          npm run git-test
+
+  ################################################
+  # JOB 2: Calculate Release Tag
+  ################################################
+  calculate_release_tag:
+    name: Calculate Release Tag
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/git-integration'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      new_tag: ${{ steps.tag_step.outputs.new_tag }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Calculate Release Tag
+        id: tag_step
+        run: |
+          BASE_VERSION=${{ needs.test.outputs.version }}
+          echo "Base version from package.json: $BASE_VERSION"
+
+          TAG_PREFIX="v${BASE_VERSION}-git."
+
+          EXISTING_TAG=$(git tag --points-at HEAD --list "${TAG_PREFIX}*" | sort -V | tail -n 1)
+
+          if [ -n "$EXISTING_TAG" ]; then
+            echo "Current commit already has release tag: ${EXISTING_TAG}"
+            echo "new_tag=${EXISTING_TAG}" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          LATEST_PATCH_NUM=$(git tag -l "${TAG_PREFIX}*" | sed "s/^${TAG_PREFIX}//" | sort -n | tail -n 1)
+
+          if [ -z "$LATEST_PATCH_NUM" ]; then
+            LATEST_PATCH_NUM=0
+          fi
+
+          NEXT_PATCH_NUM=$((LATEST_PATCH_NUM + 1))
+
+          NEW_TAG="${TAG_PREFIX}${NEXT_PATCH_NUM}"
+
+          echo "Calculated new release tag: ${NEW_TAG}"
+          echo "new_tag=${NEW_TAG}" >> $GITHUB_OUTPUT
+
+  ################################################
+  # JOB 3: Build and Push Docker Image
+  ################################################
+  build-and-push-docker:
+    name: Build and Push Docker Image
+    needs: calculate_release_tag
+    # This job will always run if calculate_release_tag runs
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    env:
+      IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/flatnotes-git
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU for multi-platform builds
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ needs.calculate_release_tag.outputs.new_tag }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/git-integration' }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64,linux/arm64
+
+  ################################################
+  # JOB 4: Create GitHub Release
+  ################################################
+  create-github-release:
+    name: Create GitHub Release
+    needs:
+      - calculate_release_tag
+      - build-and-push-docker
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ needs.calculate_release_tag.outputs.new_tag }}
+      IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/flatnotes-git
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create release if missing
+        run: |
+          TAG_COMMIT=$(git rev-list -n 1 "$RELEASE_TAG" 2>/dev/null || true)
+
+          if [ -n "$TAG_COMMIT" ] && [ "$TAG_COMMIT" != "$GITHUB_SHA" ]; then
+            echo "Tag ${RELEASE_TAG} already exists on ${TAG_COMMIT}, expected ${GITHUB_SHA}."
+            exit 1
+          fi
+
+          if [ -z "$TAG_COMMIT" ]; then
+            git config --global user.name "github-actions[bot]"
+            git config --global user.email "github-actions[bot]@users.noreply.github.com"
+            git tag -a "$RELEASE_TAG" -m "Automatic release based on commit ${GITHUB_SHA}"
+            git push origin "$RELEASE_TAG"
+          else
+            echo "Git tag ${RELEASE_TAG} already exists on this commit."
+          fi
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "GitHub Release already exists for ${RELEASE_TAG}."
+            exit 0
+          fi
+
+          gh release create "$RELEASE_TAG" \
+            --title "$RELEASE_TAG" \
+            --notes "Docker image: ${IMAGE_NAME}:${RELEASE_TAG}" \
+            --generate-notes
