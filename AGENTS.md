@@ -63,6 +63,10 @@ New or changed `FLATNOTES_*` configuration must update config loading, frontend-
 
 ## Commit & Pull Request Guidelines
 
+<!-- codex-policy: implementation-delivery-authorization-v1 -->
+
+An implementation, fix, or build request is standing authorization for the primary agent to stage task-owned changes, commit after the required gates pass, and non-force push the configured upstream without asking again. Workers never publish. Push is terminal; CI and deployment are asynchronous unless the task explicitly concerns deployment, migration, or rollback.
+
 Use a concise conventional subject plus a short body. Do not use only a one-line subject for non-trivial changes. Prefer types such as `feat`, `fix`, `refactor`, `test`, `docs`, `ci`, and `chore`; keep the subject imperative and under roughly 72 characters.
 
 Example:
