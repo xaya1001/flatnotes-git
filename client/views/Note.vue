@@ -106,6 +106,16 @@
       />
     </div>
   </LoadingIndicator>
+
+  <button
+    type="button"
+    class="fixed bottom-4 right-4 z-30 flex h-10 w-10 items-center justify-center rounded-full border border-theme-border bg-theme-background text-theme-text-muted shadow-lg transition-colors hover:bg-theme-background-elevated hover:text-theme-text print:hidden"
+    title="Back to top"
+    aria-label="Back to top"
+    @click="scrollToTop"
+  >
+    <SvgIcon type="mdi" :path="mdilArrowUp" :size="22" />
+  </button>
 </template>
 
 <style>
@@ -119,8 +129,9 @@
 </style>
 
 <script setup>
+import SvgIcon from "@jamescoyle/vue-icon";
 import { mdiNoteOffOutline } from "@mdi/js";
-import { mdilContentSave, mdilDelete } from "@mdi/light-js";
+import { mdilArrowUp, mdilContentSave, mdilDelete } from "@mdi/light-js";
 import Mousetrap from "mousetrap";
 import { useToast } from "primevue/usetoast";
 import { computed, nextTick, onMounted, ref, watch } from "vue";
@@ -144,13 +155,16 @@ import ToastViewer from "../components/toastui/ToastViewer.vue";
 import { authTypes } from "../constants.js";
 import { useGlobalStore } from "../globalStore.js";
 import { getToastOptions } from "../helpers.js";
+import eventBus from "../git-integration/services/eventBus";
+import Compressor from "compressorjs";
+import { isCurrentTokenStored } from "../tokenStorage.js";
 
 const props = defineProps({
   title: String,
 });
 
 const canModify = computed(
-  () => globalStore.config.authType != authTypes.readOnly,
+  () => globalStore.config.value.authType != authTypes.readOnly,
 );
 let contentChangedTimeout = null;
 const editMode = ref(false);
@@ -241,6 +255,7 @@ function deleteConfirmedHandler() {
   deleteNote(note.value.title)
     .then(() => {
       toast.add(getToastOptions("Note deleted ✓", "Success", "success"));
+      eventBus.emit("note:deleted", { title: note.value.title });
       router.push({ name: "home" });
     })
     .catch((error) => {
@@ -335,6 +350,7 @@ function noteSaveSuccess(close = false) {
   }
   setBeforeUnloadConfirmation(false);
   toast.add(getToastOptions("Note saved successfully ✓", "Success", "success"));
+  eventBus.emit("note:saved", { title: note.value.title });
 }
 
 // Note Closure
@@ -357,13 +373,13 @@ function closeNote() {
 }
 
 // Image Upload
-function addImageBlobHook(file, callback) {
+function uploadAndInsert(fileToUpload, callback) {
   const altTextInputValue = document.getElementById(
     "toastuiAltTextInput",
   )?.value;
 
   // Upload the image then use the callback to insert the URL into the editor
-  postAttachment(file).then(function (data) {
+  postAttachment(fileToUpload).then(function (data) {
     if (data) {
       // If the user has entered an alt text, use it. Otherwise, use the filename returned by the API.
       const altText = altTextInputValue ? altTextInputValue : data.filename;
@@ -372,18 +388,25 @@ function addImageBlobHook(file, callback) {
   });
 }
 
-function postAttachment(file) {
+function postAttachment(fileToUpload) {
+  if (!fileToUpload) {
+    toast.add(
+      getToastOptions("No file provided for upload.", "Error", "error"),
+    );
+    return Promise.reject("No file provided");
+  }
+
   // Invalid Character Validation
-  if (reservedFilenameCharacters.test(file.name)) {
-    badFilenameToast("Title");
-    return;
+  if (reservedFilenameCharacters.test(fileToUpload.name)) {
+    badFilenameToast("Filename");
+    return Promise.reject("Invalid filename");
   }
 
   // Uploading Toast
   toast.add(getToastOptions("Uploading attachment..."));
 
   // Upload the attachment
-  return createAttachment(file)
+  return createAttachment(fileToUpload)
     .then((data) => {
       // Success Toast
       toast.add(
@@ -409,9 +432,55 @@ function postAttachment(file) {
       } else if (error.response?.status == 413) {
         entityTooLargeToast("attachment");
       } else {
-        apiErrorHandler(error, toast);
+        console.error("Attachment upload error:", error);
+        toast.add(
+          getToastOptions(
+            error.response?.data?.detail || "Failed to upload attachment.",
+            "Upload Error",
+            "error",
+          ),
+        );
       }
+      return Promise.reject(error);
     });
+}
+
+function addImageBlobHook(file, callback) {
+  if (!file) return;
+
+  const config = globalStore.config.value;
+
+  if (config && config.frontendImageCompressionEnabled) {
+    const options = {
+      quality: config.frontendImageCompressionQuality,
+      maxWidth: config.frontendImageMaxWidth,
+      mimeType: file.type,
+      success(compressedResult) {
+        toast.add(
+          getToastOptions(
+            `Image compressed: ${Math.round(file.size / 1024)}KB -> ${Math.round(compressedResult.size / 1024)}KB`,
+            "Info",
+            "info",
+          ),
+        );
+        uploadAndInsert(compressedResult, callback);
+      },
+      error(err) {
+        console.error("Image compression failed:", err.message);
+        toast.add(
+          getToastOptions(
+            "Image compression failed, uploading original file.",
+            "Warning",
+            "warn",
+          ),
+        );
+        uploadAndInsert(file, callback);
+      },
+    };
+    new Compressor(file, options);
+  } else {
+    uploadAndInsert(file, callback);
+  }
 }
 
 // Content Change Watcher
@@ -441,17 +510,25 @@ function contentChangedHandler() {
 // Drafts
 function saveDraft() {
   const content = toastEditor.value.getMarkdown();
+  const userHasPersistedToken = isCurrentTokenStored();
   if (content) {
-    localStorage.setItem(note.value.title, content);
+    if (userHasPersistedToken) {
+      localStorage.setItem(note.value.title, content);
+    } else {
+      sessionStorage.setItem(note.value.title, content);
+    }
   }
 }
 
 function clearDraft() {
   localStorage.removeItem(note.value.title);
+  sessionStorage.removeItem(note.value.title);
 }
 
 function loadDraft() {
-  return localStorage.getItem(note.value.title);
+  const localDraft = localStorage.getItem(note.value.title);
+  const sessionDraft = sessionStorage.getItem(note.value.title);
+  return localDraft || sessionDraft;
 }
 
 // Keyboard Shortcuts
@@ -515,6 +592,10 @@ function saveDefaultEditorMode() {
 function loadDefaultEditorMode() {
   const defaultWysiwygMode = localStorage.getItem("defaultEditorMode");
   return defaultWysiwygMode || "markdown";
+}
+
+function scrollToTop() {
+  window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
 function isContentChanged() {

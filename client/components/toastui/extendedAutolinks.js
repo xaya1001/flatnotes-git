@@ -8,9 +8,9 @@ import router from "../../router.js";
  * use their built in functionality. We'd like to have
  * both so this is the source of their parsers.
  */
-const DOMAIN = "(?:[w-]+.)*[A-Za-z0-9-]+.[A-Za-z0-9-]+";
-const PATH = "[^<\\s]*[^<?!.,:*_?~\\s]";
-const EMAIL = "[\\w.+-]+@(?:[\\w-]+\\.)+[\\w-]+";
+const DOMAIN = String.raw`(?:[\w-]+\.)+[A-Za-z0-9-]+`;
+const PATH = String.raw`[^<\s]*[^<?!.,:*_?~\s]`;
+const EMAIL = String.raw`[\w.+-]+@(?:[\w-]+\.)+[\w-]+`;
 function trimUnmatchedTrailingParens(source) {
   const trailingParen = /\)+$/.exec(source);
   if (trailingParen) {
@@ -57,13 +57,16 @@ export function parseEmailLink(source) {
 }
 
 export function parseUrlLink(source) {
-  const reWwwAutolink = new RegExp(`(www|https?://)\.${DOMAIN}${PATH}`, "g");
+  const reWwwAutolink = new RegExp(
+    `((?:www\\.)|(?:https?://))${DOMAIN}(?:${PATH})?`,
+    "g",
+  );
   const result = [];
   let m;
 
   while ((m = reWwwAutolink.exec(source))) {
     const text = trimTrailingEntity(trimUnmatchedTrailingParens(m[0]));
-    const scheme = m[1] === "www" ? "http://" : "";
+    const scheme = m[1] === "www." ? "http://" : "";
     result.push({
       text,
       range: [m.index, m.index + text.length - 1],

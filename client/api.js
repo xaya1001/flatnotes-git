@@ -7,7 +7,7 @@ import { getStoredToken } from "./tokenStorage.js";
 import { getToastOptions } from "./helpers.js";
 import router from "./router.js";
 
-const api = axios.create();
+export const api = axios.create();
 
 api.interceptors.request.use(
   // If the request is not for the token endpoint, add the token to the headers.
@@ -48,8 +48,8 @@ export async function getConfig() {
   try {
     const response = await api.get("api/config");
     return response.data;
-  } catch (error) {
-    return Promise.reject(error);
+  } catch (response) {
+    return Promise.reject(response);
   }
 }
 
@@ -60,6 +60,15 @@ export async function getToken(username, password, totp) {
       password: totp ? password + totp : password,
     });
     return response.data.access_token;
+  } catch (response) {
+    return Promise.reject(response);
+  }
+}
+
+export async function authCheck() {
+  try {
+    const response = await api.get("api/auth-check");
+    return response.data;
   } catch (response) {
     return Promise.reject(response);
   }

@@ -248,3 +248,6 @@ dist
 .vscode/
 data/
 /notes/
+
+.idx/*
+!.idx/dev.nix

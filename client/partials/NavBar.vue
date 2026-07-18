@@ -50,7 +50,7 @@ defineProps({
 
 const emit = defineEmits(["toggleSearchModal"]);
 
-const menuItems = [
+const menuItems = computed(() => [
   {
     label: "Search",
     icon: mdilMagnify,
@@ -76,22 +76,23 @@ const menuItems = [
   },
   {
     separator: true,
-    visible: showLogOutButton,
+    visible: showLogOutButtonIsVisible(),
   },
   {
     label: "Log Out",
     icon: mdilLogout,
     command: logOut,
-    visible: showLogOutButton,
+    visible: showLogOutButtonIsVisible(),
   },
-];
+]);
 
 const showNewButton = computed(() => {
-  return globalStore.config.authType !== authTypes.readOnly;
+  return globalStore.config.value?.authType !== authTypes.readOnly;
 });
 
 function logOut() {
   clearStoredToken();
+  localStorage.clear();
   router.push({ name: "login" });
 }
 
@@ -99,7 +100,12 @@ function toggleMenu(event) {
   menu.value.toggle(event);
 }
 
-function showLogOutButton() {
-  return ![authTypes.none, authTypes.readOnly].includes(globalStore.config.authType);
+function showLogOutButtonIsVisible() {
+  return (
+    globalStore.config.value &&
+    ![authTypes.none, authTypes.readOnly].includes(
+      globalStore.config.value.authType,
+    )
+  );
 }
 </script>
