@@ -36,11 +36,12 @@ ENV APP_PATH=/app
 ENV FLATNOTES_PATH=/data
 
 RUN mkdir -p ${APP_PATH}
-RUN mkdir -p ${FLATNOTES_PATH}
 
 RUN apt update && apt install -y \
     curl \
     gosu \
+    git \
+    openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir pipenv
@@ -52,7 +53,7 @@ RUN pipenv install --deploy --ignore-pipfile --system && \
     pipenv --clear
 
 COPY server ./server
-COPY --from=build --chmod=777 ${BUILD_DIR}/client/dist ./client/dist
+COPY --from=build ${BUILD_DIR}/client/dist ./client/dist
 
 COPY entrypoint.sh healthcheck.sh /
 RUN chmod +x /entrypoint.sh /healthcheck.sh

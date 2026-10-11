@@ -1,0 +1,133 @@
+// client/git-integration/stores/statusStore.js
+import { defineStore } from "pinia";
+import { ref, computed } from "vue";
+import * as gitApi from "../gitApi";
+import eventBus from "../services/eventBus";
+import { GIT_OPERATION, GIT_CONFLICT } from "../events";
+
+export const useStatusStore = defineStore("git-status", () => {
+  // --- STATE ---
+  const gitStatus = ref({ files: [] });
+  const commitMessage = ref("");
+  const isLoading = ref(true);
+  const summaryError = ref(null);
+  const branchName = ref("");
+  const filesChangedCount = ref(0);
+  const commitsAhead = ref(0);
+  const commitsBehind = ref(0);
+  const isTrackingUpstream = ref(true);
+  const repositoryState = ref("CLEAN");
+  const isInitialLoadComplete = ref(false);
+  const isWebSocketFallbackActive = ref(false);
+
+  // --- GETTERS ---
+  const stagedFiles = computed(() =>
+    gitStatus.value.files.filter(
+      (f) => f.index_status !== " " && f.index_status !== "?",
+    ),
+  );
+  const unstagedFiles = computed(() =>
+    gitStatus.value.files.filter((f) => f.work_tree_status !== " "),
+  );
+  const tooltipText = computed(() => {
+    if (!isInitialLoadComplete.value) return "Loading Git status...";
+    if (summaryError.value) {
+      if (summaryError.value.includes("not initialized")) {
+        return "Git repository not initialized. Click to see setup instructions.";
+      }
+      return `Error: ${summaryError.value}.`;
+    }
+    if (repositoryState.value.includes("CONFLICT")) {
+      const type = repositoryState.value.startsWith("REBASING")
+        ? "Rebase"
+        : "Merge";
+      return `Conflict: ${type} in progress. Click to resolve.`;
+    }
+    if (isWebSocketFallbackActive.value) {
+      return "Git status is using fallback polling.";
+    }
+    let parts = [];
+    if (!isTrackingUpstream.value) {
+      parts.push("Branch not tracking remote");
+    }
+    if (commitsBehind.value > 0) parts.push(`${commitsBehind.value} to pull`);
+    if (commitsAhead.value > 0) parts.push(`${commitsAhead.value} to push`);
+    if (filesChangedCount.value > 0)
+      parts.push(`${filesChangedCount.value} changes`);
+
+    if (parts.length === 0) {
+      return `Branch '${branchName.value}' is up to date.`;
+    }
+    return `Branch '${branchName.value}': ${parts.join(", ")}. Click to view.`;
+  });
+
+  // --- ACTIONS ---
+  async function fetchStatus() {
+    isLoading.value = true;
+    try {
+      const data = await gitApi.getGitStatus();
+      gitStatus.value = data;
+      branchName.value = data.current_branch || "N/A";
+      filesChangedCount.value = data.files_changed_count;
+      commitsAhead.value = data.commits_ahead || 0;
+      commitsBehind.value = data.commits_behind || 0;
+      isTrackingUpstream.value = data.is_tracking_upstream;
+      repositoryState.value = data.repository_state;
+      summaryError.value = null;
+    } catch (err) {
+      if (err.response?.status === 428) {
+        summaryError.value = "Git repository not initialized";
+      } else {
+        const detail = err.response?.data?.detail;
+        summaryError.value =
+          typeof detail === "string"
+            ? detail
+            : detail?.message || err.message || "Failed to load Git status";
+      }
+      gitStatus.value = { files: [] };
+    } finally {
+      isLoading.value = false;
+      isInitialLoadComplete.value = true;
+    }
+  }
+
+  function clearCommitMessage() {
+    commitMessage.value = "";
+  }
+
+  function setWebSocketFallbackActive(active) {
+    isWebSocketFallbackActive.value = active;
+  }
+
+  // --- Event Listeners ---
+  // Any successful operation should trigger a status refresh.
+  eventBus.on(GIT_OPERATION.DID_SUCCEED, () => {
+    fetchStatus();
+  });
+
+  // When a conflict is first detected, refresh status to update the UI immediately.
+  eventBus.on(GIT_CONFLICT.DETECTED, () => {
+    fetchStatus();
+  });
+
+  return {
+    gitStatus,
+    commitMessage,
+    isLoading,
+    summaryError,
+    branchName,
+    filesChangedCount,
+    stagedFiles,
+    unstagedFiles,
+    tooltipText,
+    commitsAhead,
+    commitsBehind,
+    isTrackingUpstream,
+    repositoryState,
+    isInitialLoadComplete,
+    isWebSocketFallbackActive,
+    fetchStatus,
+    clearCommitMessage,
+    setWebSocketFallbackActive,
+  };
+});

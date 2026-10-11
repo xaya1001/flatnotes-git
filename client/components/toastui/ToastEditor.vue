@@ -7,6 +7,8 @@ import Editor from "@toast-ui/editor";
 import { onMounted, ref } from "vue";
 
 import baseOptions from "./baseOptions.js";
+import { enhanceCodeBlockCopy } from "./codeBlockCopy.js";
+import { renderMermaidBlocks } from "./mermaidRenderer.js";
 
 const props = defineProps({
   initialValue: String,
@@ -40,7 +42,34 @@ onMounted(() => {
       ? { addImageBlobHook: props.addImageBlobHook }
       : {},
   });
+
+  enhancePreview();
+
+  const tabContainer = editorElement.value.querySelector(
+    ".toastui-editor-md-tab-container",
+  );
+  if (tabContainer) {
+    tabContainer.addEventListener("click", (event) => {
+      // Only rendered the diagrams if the click came from the preview tab.
+      if (event.target.closest('.tab-item[aria-label="Preview"]')) {
+        const previewEl = editorElement.value.querySelector(
+          ".toastui-editor-md-preview",
+        );
+        enhancePreview(previewEl);
+      }
+    });
+  }
 });
+
+function enhancePreview(previewEl) {
+  const target =
+    previewEl ||
+    editorElement.value?.querySelector(".toastui-editor-md-preview");
+  if (!target) return;
+
+  renderMermaidBlocks(target);
+  enhanceCodeBlockCopy(target);
+}
 
 function getMarkdown() {
   return toastEditor.getMarkdown();

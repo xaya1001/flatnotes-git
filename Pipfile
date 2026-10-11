@@ -8,16 +8,25 @@ black = "*"
 flake8 = "*"
 rope = "*"
 isort = "*"
+pytest = "*"
+httpx = "<1,>=0.24"
+pytest-asyncio = "*"
+boto3 = "*"
+moto = {extras = ["s3"], version = "*"}
+pytest-cov = "*"
 
 [packages]
 whoosh = "==2.7.4"
-fastapi = "==0.115.12"
-uvicorn = {extras = ["standard"], version = "==0.34.0"}
-aiofiles = "==24.1.0"
-python-jose = {extras = ["cryptography"], version = "==3.4.0"}
+fastapi = "==0.118.3"
+uvicorn = {extras = ["standard"], version = "==0.37.0"}
+aiofiles = "==25.1.0"
+python-jose = {extras = ["cryptography"], version = "==3.5.0"}
 pyotp = "==2.9.0"
-qrcode = "==8.0"
+qrcode = "==8.2"
 python-multipart = "==0.0.20"
+apscheduler = "==3.11.2"
+boto3 = "==1.43.33"
+pygit2 = "==1.19.3"
 
 [requires]
 python_version = "3.11"

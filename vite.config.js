@@ -31,6 +31,26 @@ export default defineConfig({
         target: devApiUrl,
         changeOrigin: true,
       },
+      "/api/git/ws/status": {
+        target: devApiUrl,
+        changeOrigin: true,
+        ws: true,
+      },
+    },
+  },
+  test: {
+    globals: true,
+    environment: "jsdom",
+    coverage: {
+      exclude: [
+        "client/dist/**",
+        "dist/**",
+        "node_modules/**",
+        "tests/**",
+        "vite.config.js",
+        "postcss.config.js",
+        "tailwind.config.js",
+      ],
     },
   },
 });
