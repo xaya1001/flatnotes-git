@@ -30,6 +30,7 @@ Prefer modular additions over core rewrites. Keep upstream-file patches small an
 - `npm run test:py`: run backend tests with Python coverage and write `coverage/py-coverage.xml`.
 - `npm run test:e2e`: run Playwright e2e smoke coverage against local FastAPI/Vite using `data/`.
 - `npm run git-test`: run backend, frontend, and e2e fork test suites.
+- On oracle-arm, a new worktree installs frontend tooling with the host command `worktree-deps` (hardlinks the canonical `node_modules` when the lockfile matches) instead of `npm install`, and `npm run build`, `npm run test:js`, `npm run test:py`, `npm run test:e2e` and `npm run git-test` run with the `heavy` prefix so heavy work on the shared host takes turns (`Infrastructure/docs/workspace-agents.md` §4).
 
 ## Coding Style & Naming Conventions
 
